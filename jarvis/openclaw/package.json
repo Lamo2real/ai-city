@@ -1,0 +1,16 @@
+{
+  "name": "jarvis-openclaw",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "OpenClaw as a messaging channel into AI City: every message goes to Jarvis, nothing runs on the Mac",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "test": "node --test --test-force-exit test/",
+    "gateway": "openclaw gateway",
+    "audit": "openclaw security audit --deep"
+  },
+  "dependencies": {
+    "openclaw": "2026.10.10"
+  }
+}

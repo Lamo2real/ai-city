@@ -9,7 +9,8 @@
   },
   "workspaces": [
     "jarvis",
-    "city"
+    "city",
+    "jarvis/openclaw"
   ],
   "scripts": {
     "start": "npm start -w jarvis",

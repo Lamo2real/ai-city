@@ -1,0 +1,61 @@
+{
+  // OpenClaw as a messaging channel into AI City. Run with:
+  //   OPENCLAW_CONFIG_PATH=jarvis/openclaw/openclaw.json OPENCLAW_STATE_DIR=~/.jarvis/openclaw \
+  //   OPENCLAW_GATEWAY_TOKEN=<token> npx openclaw gateway
+  // Loopback only, token required, no tunnels, no proxies, no discovery.
+  gateway: {
+    mode: "local",
+    bind: "loopback",
+    port: 18789,
+    auth: { mode: "token", token: "${OPENCLAW_GATEWAY_TOKEN}" },
+    controlUi: { enabled: false },
+  },
+  discovery: { mdns: { mode: "off" } },
+  browser: { enabled: false },
+
+  // The model backend: the owner's logged-in `claude` CLI. No API key, no token copied anywhere.
+  agents: {
+    defaults: {
+      workspace: "./workspace",
+      model: { primary: "anthropic/claude-haiku-5-5" },
+      models: {
+        "anthropic/claude-haiku-5-5": { agentRuntime: { id: "claude-cli" } },
+        "anthropic/*": { agentRuntime: { id: "claude-cli" } },
+      },
+      modelPolicy: { allow: ["anthropic/claude-haiku-5-5"] },
+    },
+  },
+
+  // The agent is a relay. Its only tool is ask_jarvis; everything else is denied.
+  tools: {
+    profile: "minimal",
+    allow: ["ask_jarvis"],
+    deny: [
+      "group:runtime", "group:fs", "group:ui", "group:web", "group:nodes", "group:automation", "group:media", "group:sessions", "group:agents", "group:memory",
+      "exec", "process", "read", "write", "edit", "apply_patch", "browser", "canvas", "cron", "gateway", "image", "nodes", "sessions_spawn", "sessions_send", "openclaw", "plugins",
+    ],
+    sessions: { visibility: "self" },
+    elevated: { enabled: false },
+  },
+
+  // No ClawHub, no third-party skills. Only the plugin in this repo.
+  skills: { allowBundled: [] },
+  plugins: {
+    allow: ["jarvis-relay"],
+    load: { paths: ["./plugins/jarvis-relay"] },
+    entries: {
+      "jarvis-relay": { enabled: true, config: { server: "http://127.0.0.1:7777", sessionId: "owner" } },
+    },
+  },
+
+  // One channel, prepared but not paired. The owner enables it:
+  //   OPENCLAW_CONFIG_PATH=... npx openclaw channels add --channel telegram --token <bot token>
+  // then pairs their own Telegram account (see jarvis/openclaw/README.md).
+  channels: {
+    telegram: {
+      enabled: false,
+      dmPolicy: "pairing",
+      groupPolicy: "disabled",
+    },
+  },
+}
