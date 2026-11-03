@@ -1,7 +1,7 @@
 {
-  // OpenClaw as a messaging channel into AI City. Run with:
-  //   OPENCLAW_CONFIG_PATH=jarvis/openclaw/openclaw.json OPENCLAW_STATE_DIR=~/.jarvis/openclaw \
-  //   OPENCLAW_GATEWAY_TOKEN=<token> npx openclaw gateway
+  // OpenClaw as a messaging channel into AI City. Start it only with jarvis/openclaw/bin/gateway
+  // (or bin/telegram-on for the LaunchAgent): it loads every secret from the Keychain, so no token
+  // is ever typed on a command line or written into this file.
   // Loopback only, token required, no tunnels, no proxies, no discovery.
   gateway: {
     mode: "local",

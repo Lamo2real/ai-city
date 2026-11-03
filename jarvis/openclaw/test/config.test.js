@@ -1,5 +1,6 @@
 // Locks OpenClaw's rights down: this fails if anyone loosens the config, the pin, or lets a secret into a tracked file.
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, relative } from "node:path";
@@ -63,11 +64,23 @@ for (const name of CONFIGS) {
 }
 
 // Telegram bot tokens look like 123456789:AA… ; also catch any long random string a token or key would be.
-const TOKEN_LIKE = [/\b\d{6,12}:[A-Za-z0-9_-]{30,}\b/, /\b[A-Fa-f0-9]{40,}\b/, /\b[A-Za-z0-9_-]{48,}\b/];
+const TOKEN_LIKE = [/\b\d{6,12}:[A-Za-z0-9_-]{30,}\b/, /\b[A-Fa-f0-9]{40,}\b/, /\b[A-Za-z0-9_-]{40,}\b/];
 const tracked = (dir) => readdirSync(dir).flatMap((f) => {
   const p = join(dir, f);
   if (f === "node_modules" || f === ".openclaw") return [];
   return statSync(p).isDirectory() ? tracked(p) : [p];
+});
+
+test("the secrets scan catches a 32-byte base64url token (43 chars), a hex key and a Telegram bot token", () => {
+  // Built at run time, so no token-shaped literal sits in this file (the scan below covers it too).
+  const samples = {
+    base64url: randomBytes(32).toString("base64url"), // 43 chars: what the relay and pairing tokens look like
+    hex: randomBytes(21).toString("hex"), // 42 hex chars
+    telegram: `${"1".repeat(9)}:${"A".repeat(35)}`, // the shape of a BotFather token
+  };
+  assert.equal(samples.base64url.length, 43);
+  for (const [kind, value] of Object.entries(samples)) assert.ok(TOKEN_LIKE.some((re) => re.test(`token: "${value}"`)), `${kind} must be caught`);
+  assert.ok(!TOKEN_LIKE.some((re) => re.test('auth: { mode: "token", token: "${OPENCLAW_GATEWAY_TOKEN}" }')), "an ${ENV} reference is not a secret");
 });
 
 test("no token-like value in any OpenClaw file in the repo", () => {
