@@ -1,0 +1,7 @@
+; Sandbox for `npm run test:hermetic`: tests may use loopback only, never the internet,
+; the real Keychain (security), AppleScript (osascript) or `open`.
+(version 1)
+(allow default)
+(deny network-outbound (remote ip "*:*"))
+(allow network-outbound (remote ip "localhost:*"))
+(deny process-exec (literal "/usr/bin/security") (literal "/usr/bin/osascript") (literal "/usr/bin/open"))
