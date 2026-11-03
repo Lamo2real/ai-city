@@ -37,7 +37,7 @@ The phone talks to your Mac over Tailscale, so it works away from home too. Noth
 - **Talk:** hold the big button, speak, let go. What you say shows while you hold. Jarvis answers in text and out loud. Starting to talk silences Jarvis.
 - **Type:** use the box under the button.
 - **Mute:** the speaker icon at the top. The menu (•••) switches between English and Svenska for what you say, and lets you pair again.
-- **Siri:** after you have opened the app once, say "Hey Siri, Ask Jarvis", then your question. Siri reads the answer. You can also find "Ask Jarvis" in the Shortcuts app.
+- **Siri:** after you have opened the app once, say "Hey Siri, Ask Jarvis", then your question. Siri reads the answer. You can also find "Ask Jarvis" in the Shortcuts app. The phone must be unlocked: if it is locked, Siri first asks for Face ID or your passcode, so nobody within earshot of a locked phone can reach Jarvis.
 - Jarvis can speak first (results, questions) while the app is open.
 
 ## Limits of a free Apple account
@@ -70,6 +70,7 @@ The phone talks to your Mac over Tailscale, so it works away from home too. Noth
 | Xcode: "Failed to register bundle identifier" | Name is taken | Change the bundle identifier (step 4). |
 | Xcode: "No account / no team" | Not signed in | Xcode → Settings → Accounts → add your Apple ID, pick the Personal Team. |
 | Xcode: "maximum number of apps" | Free account allows 3 | Delete another Xcode-installed app from the phone. |
+| Siri asks for Face ID or the passcode | The phone is locked; Jarvis can file real work, so it needs an unlocked phone | Unlock (Face ID) and ask again. This is on purpose. |
 | "Hey Siri, Ask Jarvis" does nothing | Siri hasn't learned it | Open the app once, wait a minute, try again. Check Settings → Siri → Apps → Jarvis is on. |
 
 ## For developers

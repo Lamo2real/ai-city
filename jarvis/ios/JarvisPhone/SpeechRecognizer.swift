@@ -129,6 +129,10 @@ final class SpeechRecognizer {
             if engine.isRunning { engine.stop() }
         }
         engine = nil
+        #if os(iOS)
+        // Give the audio back: other apps stop being ducked even when the reply is muted.
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        #endif
     }
 
     private func teardown() {

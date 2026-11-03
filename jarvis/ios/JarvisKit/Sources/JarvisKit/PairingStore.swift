@@ -20,6 +20,8 @@ public enum PairingStoreError: Error, Equatable, Sendable, LocalizedError {
 /// Never UserDefaults. Nothing here logs.
 public struct KeychainPairingStore: PairingStore {
     public static let defaultService = "se.lamo.jarvis.pairing"
+    /// The token is readable only while the phone is unlocked, and never leaves this device (no backup, no iCloud).
+    public static let accessibility: String = kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String
     private let service: String
     private let account = "bridge"
 
@@ -49,7 +51,7 @@ public struct KeychainPairingStore: PairingStore {
         let data = try JSONEncoder().encode(pairing)
         let update: [String: Any] = [
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            kSecAttrAccessible as String: KeychainPairingStore.accessibility,
         ]
         var status = SecItemUpdate(baseQuery as CFDictionary, update as CFDictionary)
         if status == errSecItemNotFound {

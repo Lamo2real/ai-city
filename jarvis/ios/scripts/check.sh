@@ -46,6 +46,13 @@ for k in NSMicrophoneUsageDescription NSSpeechRecognitionUsageDescription NSCame
 done
 if plutil -p "$APP/Info.plist" | grep -q NSAppTransportSecurity; then echo "Info.plist must not have ATS exceptions"; exit 1; fi
 echo "project settings and Info.plist keys present, no ATS exceptions"
+# A locked phone must never reach Jarvis: Siri asks for Face ID or the passcode, and the token is unreadable while locked.
+grep -q 'static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication' "$APP/AskJarvisIntent.swift" \
+  || { echo "AskJarvisIntent must set authenticationPolicy = .requiresAuthentication"; exit 1; }
+grep -q 'kSecAttrAccessibleWhenUnlockedThisDeviceOnly' "$KIT/Sources/JarvisKit/PairingStore.swift" \
+  && ! grep -q 'kSecAttrAccessibleAfterFirstUnlock\|kSecAttrAccessibleAlways' "$KIT/Sources/JarvisKit/PairingStore.swift" \
+  || { echo "The pairing must be stored WhenUnlockedThisDeviceOnly"; exit 1; }
+echo "Siri needs an unlocked phone; the pairing is readable only while unlocked"
 
 step "5. swift-testing tests and iOS build"
 if xcodebuild -version >/dev/null 2>&1; then

@@ -320,3 +320,19 @@ test("qr.swift gets the payload on stdin, not argv", async () => {
   assert.ok(!JSON.stringify(spawned).includes("SECRETTOKEN"));
   assert.deepEqual(stdin, ["jarvis-pair://v1?host=h&token=SECRETTOKEN"]);
 });
+
+test("requests with no token get 401 but never lock the paired phone out", async () => {
+  const u = unit();
+  const bare = async (headers) => {
+    const out = {};
+    const res = { writeHead(s) { out.status = s; }, end() {}, write() {}, once() {}, on() {} };
+    await u.api.handle({ method: "GET", url: "/api/app/v1/health", headers, on() {} }, res);
+    return out.status;
+  };
+  // The owner's browser on the tailnet, a prefetch, or an empty "Bearer " header.
+  for (let i = 0; i < 20; i++) assert.equal(await bare(i % 2 ? {} : { authorization: "Bearer " }), 401);
+  assert.equal((await u.ask(TOKEN)).status, 200);
+  // Wrong tokens still lock as before.
+  for (let i = 0; i < 5; i++) await u.ask("bad");
+  assert.equal((await u.ask(TOKEN)).status, 429);
+});

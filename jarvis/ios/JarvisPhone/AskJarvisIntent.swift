@@ -6,6 +6,9 @@ struct AskJarvisIntent: AppIntent {
     static let title: LocalizedStringResource = "Ask Jarvis"
     static let description = IntentDescription("Ask Jarvis something and hear the answer.")
     static let openAppWhenRun = false
+    /// Jarvis can file tickets (code, money, infrastructure), so a locked phone must not reach it:
+    /// Siri asks for Face ID or the passcode first. Never weaker than the passcode-protected LAN route.
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
     @Parameter(title: "Request", requestValueDialog: "What do you want to ask Jarvis?")
     var request: String

@@ -137,9 +137,12 @@ export function createAppApi({ keychain, chatStream, events, now = Date.now, log
   async function handle(req, res) {
     const path = new URL(req.url, "http://localhost").pathname;
     if (now() < lockedUntil) return tooMany(res, (lockedUntil - now()) / 1000, "too many wrong tokens");
-    const hash = await authorized(bearer(req));
+    const token = bearer(req);
+    const hash = await authorized(token);
     if (!hash) {
-      registerFailure();
+      // Only a wrong token counts towards the lock. A request with none (the owner's browser,
+      // a prefetch) must not lock the paired phone out.
+      if (token) registerFailure();
       return sendJson(res, 401, { error: "not paired" });
     }
     failures = 0;

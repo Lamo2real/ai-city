@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import Testing
 @testable import JarvisKit
 
@@ -62,5 +63,12 @@ let goodHost = "mac.tail1234.ts.net"
         #expect(try store.load() == p)
         try store.clear()
         #expect(try store.load() == nil)
+    }
+}
+
+@Suite struct KeychainPolicyTests {
+    /// The pairing token must not be readable while the phone is locked, and must never leave the device.
+    @Test func pairingIsOnlyReadableWhenUnlocked() {
+        #expect(KeychainPairingStore.accessibility == (kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String))
     }
 }
