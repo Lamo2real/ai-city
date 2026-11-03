@@ -1,0 +1,23 @@
+{
+  "audit_log": "~/.jarvis/audit.jsonl",
+  "caps": {
+    "ad_daily_budget_cents": 5000,
+    "max_concurrent_agents": 8,
+    "max_workers_per_manager": 4,
+    "daily_spend_usd_per_department": 20,
+    "max_review_rounds": 3
+  },
+  "rules": [
+    { "tool": "^Bash$", "match": "git\\s+push\\b.*(--force|-f\\b)", "decision": "deny", "reason": "Force-push is never allowed." },
+    { "tool": "^Bash$", "match": "git\\s+push\\b.*\\b(main|master)\\b", "decision": "deny", "reason": "Never push to main. Open a PR; the Fable reviewer gates merges." },
+    { "tool": "^Bash$", "match": "gh\\s+repo\\s+delete", "decision": "deny", "reason": "Deleting repositories needs the owner, by hand." },
+    { "tool": "^Bash$", "match": "rm\\s+-[a-zA-Z]*r[a-zA-Z]*f?\\s+(/|~|\\$HOME)/?(\\s|\\\"|$)", "decision": "deny", "reason": "Recursive delete of root or home." },
+    { "tool": "^Bash$", "match": "terraform\\s+destroy", "decision": "ask", "reason": "Terraform destroy needs the owner." },
+    { "tool": "^Bash$", "match": "terraform\\s+apply\\b.*prod", "decision": "ask", "reason": "Production apply needs the owner." },
+    { "tool": "^Bash$", "match": "(curl|wget)[^|]*\\|\\s*(ba|z)?sh", "decision": "deny", "reason": "Piping downloads into a shell." },
+    { "tool": "^mcp__github__merge_pull_request$", "match": ".*", "decision": "ask", "reason": "Merges go through the Fable review gate." },
+    { "tool": "^mcp__github__.*delete", "match": ".*", "decision": "deny", "reason": "Destructive GitHub operation." },
+    { "tool": "^mcp__meta-ads__", "match": "\"status\"\\s*:\\s*\"ACTIVE\"", "decision": "ask", "reason": "Activating ads spends real money; create them paused." },
+    { "tool": ".*", "match": "\"privacy(Status)?\"\\s*:\\s*\"public\"", "decision": "ask", "reason": "Publishing a video publicly can't be undone; upload private or unlisted first." }
+  ]
+}

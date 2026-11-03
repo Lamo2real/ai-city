@@ -1,0 +1,11 @@
+{
+  "speed": 1.15,
+  "filter": "highpass=f=60",
+  "volume": 1.0,
+  "en_voice": "bm_george",
+  "kokoro_dir": "~/.jarvis/tts/kokoro",
+  "sv_model_dir": "~/.jarvis/tts/vits-piper-sv_SE-nst-medium",
+  "fallback_en": "Daniel",
+  "fallback_sv": "Alva",
+  "live_voice": "vesper"
+}

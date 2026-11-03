@@ -1,0 +1,6 @@
+#!/bin/sh
+# jarvis-say "<text>" [--lang en|sv] [--out file.mp3]. Without --out it plays with afplay.
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PY="$HOME/.jarvis/venv/bin/python"
+[ -x "$PY" ] || PY=python3
+exec "$PY" -I "$ROOT/bin/jarvis_say.py" "$@"

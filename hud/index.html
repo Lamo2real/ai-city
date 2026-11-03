@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>JARVIS · Booqy command</title>
+<link rel="icon" href="./icon-192.png"><link rel="apple-touch-icon" href="./apple-touch-icon.png"><link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#070302"><meta name="apple-mobile-web-app-title" content="Jarvis"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#070302; --bg2:#120603;
+    --o:#ff6a1a; --o2:#ff9a3c; --r:#ff2e1a; --dim:#7a3b14; --dim2:#3a1a0a;
+    --txt:#ffd9b8; --mute:#b57a4a; --ok:#ffb347; --bad:#ff3b2e; --panel:rgba(255,106,26,.06);
+    --line:rgba(255,106,26,.35);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:var(--bg);color:var(--txt);font-family:"Share Tech Mono",monospace;overflow:hidden}
+  body{background:
+    radial-gradient(1200px 700px at 32% 48%, rgba(255,90,20,.18), transparent 60%),
+    radial-gradient(900px 500px at 80% 20%, rgba(255,40,20,.10), transparent 60%),
+    linear-gradient(var(--bg2), var(--bg));}
+  .scan{position:fixed;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(0,0,0,.18) 0 2px,transparent 2px 4px);mix-blend-mode:multiply;opacity:.6}
+  .vignette{position:fixed;inset:0;pointer-events:none;box-shadow:inset 0 0 180px #000}
+  /* Only the core by default. Chat or status open beside it, never over it. */
+  #grid{display:grid;height:100%;height:100dvh;padding:calc(14px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left));gap:12px;
+    grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr)}
+  body.view-chat #grid,body.view-status #grid{grid-template-columns:minmax(0,1fr) 420px}
+  .panel{position:relative;background:var(--panel);border:1px solid var(--line);padding:10px 12px;overflow:hidden;
+    clip-path:polygon(0 10px,10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%);}
+  .panel:before{content:"";position:absolute;left:0;top:0;height:2px;width:46px;background:var(--o)}
+  .panel h3{font-family:Orbitron,sans-serif;font-weight:500;font-size:11px;letter-spacing:.22em;color:var(--o2);margin-bottom:8px}
+  .top{grid-area:top;display:flex;align-items:center;justify-content:space-between;padding:0 16px}
+  .top .brand{font-family:Orbitron,sans-serif;font-weight:700;font-size:22px;letter-spacing:.35em;color:var(--o);text-shadow:0 0 18px rgba(255,106,26,.7)}
+  .top .meta{display:flex;gap:22px;font-size:12px;color:var(--mute)}
+  .top .meta b{color:var(--txt)}
+  .top .meta{min-width:0;align-items:center;white-space:nowrap}.top .meta #pstep{display:inline-block;max-width:34vw;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
+  .tag{display:inline-block;padding:1px 6px;border:1px solid var(--line);font-size:10px;letter-spacing:.15em;color:var(--o2)}
+  .tag.live{border-color:var(--ok);color:var(--ok);box-shadow:0 0 8px rgba(255,179,71,.5)}
+  .tag.demo{border-color:var(--bad);color:var(--bad)}
+  .left{grid-area:left;overflow-y:auto}.right{grid-area:right;overflow-y:auto}.core{grid-area:core;position:relative}
+  .bl{grid-area:bl;overflow-y:auto}.bc{grid-area:bc}.br{grid-area:br}
+  ul{list-style:none}
+  .row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px dashed rgba(255,106,26,.15);font-size:12px;gap:8px}
+  .row .n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.st{white-space:nowrap;flex:none}
+  .st{font-size:10px;letter-spacing:.12em;padding:1px 6px;border:1px solid}
+  .st.production{color:var(--ok);border-color:var(--ok)}
+  .st.dev{color:var(--o2);border-color:var(--o2)}
+  .st.building{color:var(--o);border-color:var(--o);animation:blink 1.6s infinite}
+  .st.blocked{color:var(--bad);border-color:var(--bad)}
+  .st.todo{color:var(--mute);border-color:var(--dim)}
+  @keyframes blink{50%{opacity:.35}}
+  .bar{height:6px;background:var(--dim2);margin-top:4px;position:relative}
+  .bar i{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,var(--r),var(--o2));box-shadow:0 0 10px var(--o)}
+  a{color:var(--o2);text-decoration:none}a:hover{text-decoration:underline}
+  /* core */
+  .core>svg{width:100%;height:100%}
+  .ring{transform-origin:50% 50%}
+  .spin1{animation:spin 24s linear infinite}.spin2{animation:spin 16s linear infinite reverse}.spin3{animation:spin 9s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .pulse{animation:pulse 2.4s ease-in-out infinite}
+  @keyframes pulse{50%{opacity:.45}}
+  .corelabel{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;pointer-events:none}
+  .corelabel .big{font-family:Orbitron,sans-serif;font-size:30px;line-height:1;font-weight:700;color:#fff;text-shadow:0 0 22px var(--o),0 0 40px var(--r)}
+  .corelabel .sub{position:absolute;left:50%;top:100%;transform:translate(-50%,64px);white-space:nowrap;font-size:11px;letter-spacing:.3em;color:var(--o2);text-shadow:0 0 8px #000}
+  .hud-stat{position:absolute;font-size:11px;color:var(--mute);line-height:1.5}
+  .hud-stat b{display:block;font-family:Orbitron,sans-serif;font-size:18px;color:var(--txt)}
+  .hs1{left:18px;top:18px}.hs2{right:18px;top:18px;text-align:right}.hs3{left:18px;bottom:72px}.hs4{right:18px;bottom:72px;text-align:right}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--o);box-shadow:0 0 8px var(--o);margin-right:6px}
+  .dot.bad{background:var(--bad);box-shadow:0 0 8px var(--bad)}
+  .ticker{white-space:nowrap;overflow:hidden;font-size:11px;color:var(--mute);border-top:1px solid var(--line);margin-top:6px;padding-top:6px}
+  .ticker span{display:inline-block;padding-left:100%;animation:tick 40s linear infinite}
+  @keyframes tick{to{transform:translateX(-100%)}}
+  .gauges{display:flex;justify-content:space-around;align-items:center;height:calc(100% - 34px);min-height:96px}
+  .gauge{position:relative;width:96px;height:96px}
+  .gauge svg{width:96px;height:96px;transform:rotate(-90deg)}
+  .gauge .v{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:10px;color:var(--mute);letter-spacing:.1em}
+  .gauge .v b{font-family:Orbitron,sans-serif;font-size:16px;color:var(--txt)}
+  .cmd{display:flex;gap:8px;margin-top:6px}
+  .cmd input{flex:1;background:rgba(0,0,0,.4);border:1px solid var(--line);color:var(--txt);font:inherit;padding:6px 8px;outline:none}
+  .cmd button{background:var(--o);color:#1a0800;border:0;font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:.2em;padding:0 12px;cursor:pointer}
+  .hint{font-size:10px;color:var(--mute);margin-top:4px}
+
+  /* talk console */
+  .talk{position:absolute;left:14px;right:14px;bottom:14px;max-height:56%;display:flex;flex-direction:column;
+    background:rgba(10,4,2,.86);border:1px solid var(--line);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+    clip-path:polygon(0 10px,10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%);
+    transform:translateY(calc(100% - 46px));transition:transform .35s ease}
+  .talk.open{transform:none}
+  .talk header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer;border-bottom:1px solid rgba(255,106,26,.2)}
+  .talk header h3{margin:0;font-family:Orbitron,sans-serif;font-weight:500;font-size:11px;letter-spacing:.22em;color:var(--o2)}
+  .talk header .hint2{font-size:10px;color:var(--mute);letter-spacing:.15em}
+  .log{flex:1;overflow:auto;padding:10px 12px;font-size:13px;line-height:1.45;min-height:120px}
+  .msg{margin:6px 0;max-width:88%}
+  .msg.me{margin-left:auto;text-align:right;color:var(--txt)}
+  .msg.me span{display:inline-block;border:1px solid var(--line);padding:6px 9px;background:rgba(255,106,26,.08)}
+  .msg.j{color:#ffb36b;font-style:italic;text-shadow:0 0 8px rgba(255,106,26,.6)}
+  .msg.j b{font-style:normal;text-shadow:none;font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:.2em;color:var(--o);display:block;margin-bottom:2px}
+  .msg.sys{color:var(--mute);font-size:11px;text-align:center;max-width:100%}
+  .bar2{display:flex;gap:8px;padding:10px 12px;border-top:1px solid rgba(255,106,26,.2)}
+  .bar2 input{flex:1;background:rgba(0,0,0,.45);border:1px solid var(--line);color:var(--txt);font:inherit;font-size:14px;padding:9px 10px;outline:none}
+  .bar2 input:focus{border-color:var(--o)}
+  .ibtn{width:40px;height:40px;border:1px solid var(--line);background:rgba(0,0,0,.4);color:var(--o2);cursor:pointer;display:grid;place-items:center}
+  .ibtn.on{background:var(--o);color:#1a0800;box-shadow:0 0 16px var(--o)}
+  .ibtn.rec{background:var(--r);color:#fff;box-shadow:0 0 18px var(--r);animation:blink 1s infinite}
+  .ibtn svg{width:18px;height:18px}
+  .core.speaking .spin3{animation-duration:2.5s}.core.speaking .spin2{animation-duration:6s}
+  .core.listening>svg circle[r="44"]{fill:#ff2e1a}
+  /* voice states: --lvl (0 to 1) follows the live audio */
+  .core{--lvl:0}
+  .core>svg{transform:scale(calc(1 + var(--lvl)*.045));filter:brightness(calc(1 + var(--lvl)*.55));transition:filter .08s linear}
+  .core.listening>svg{filter:brightness(calc(1 + var(--lvl)*.8)) saturate(1.35)}
+  .core.speaking>svg circle[r="44"]{fill:#ffd9b8}
+  .core.thinking .spin1{animation-duration:5s}.core.thinking .spin2{animation-duration:3s}.core.thinking .spin3{animation-duration:1.4s}
+  #wave{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  .vstate{position:absolute;left:50%;top:18px;transform:translateX(-50%);font-size:10px;letter-spacing:.22em;white-space:nowrap;color:var(--mute);padding:2px 8px;border:1px solid transparent;pointer-events:none}
+  .core.standby .vstate{color:var(--o2)}
+  .core.listening .vstate{color:#fff;border-color:var(--r);box-shadow:0 0 14px var(--r)}
+  .core.thinking .vstate{color:var(--o2);border-color:var(--o2)}
+  .core.speaking .vstate{color:#1a0800;background:var(--o2);box-shadow:0 0 14px var(--o)}
+  .wakering{position:absolute;left:50%;top:50%;width:16%;aspect-ratio:1;border:2px solid #fff5e8;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none;animation:wakering .7s ease-out forwards}
+  @keyframes wakering{to{width:90%;opacity:0;border-color:var(--r)}}
+  .ibtn.armed{border-color:var(--o);box-shadow:inset 0 0 8px rgba(255,106,26,.6)}
+  .confirm{margin:8px 0;padding:10px;border:1px solid var(--r);background:rgba(255,46,26,.1);font-size:12px}
+  .confirm b{display:block;font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:.18em;color:var(--bad);margin-bottom:4px}
+  .confirm .facts{color:var(--mute);margin:4px 0 8px}
+  .confirm .bad{color:var(--bad)}
+  .confirm .btns{display:flex;gap:8px;flex-wrap:wrap}
+  .confirm button{min-height:40px;padding:0 14px;border:1px solid var(--line);background:rgba(0,0,0,.4);color:var(--txt);font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:.15em;cursor:pointer}
+  .confirm button.go{background:var(--r);border-color:var(--r);color:#fff}
+  .confirm button:disabled{opacity:.5;cursor:default}
+  @media (display-mode:standalone){html,body{overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}input{-webkit-user-select:text;user-select:text}}
+  @media (prefers-reduced-motion:reduce){.core>svg{transform:none}.wakering{display:none}}
+  .core.panel{grid-area:auto;background:none;border:0;clip-path:none;padding:0;overflow:hidden;min-width:0;min-height:0}
+  .core.panel:before{display:none}
+  .hud-stat,.corelabel{display:none}
+  .core>svg,#wave{position:absolute;left:0;top:36px;width:100%;height:calc(100% - 104px)}
+  .wakering{top:calc(36px + (100% - 104px)/2)}
+  .dock{position:absolute;left:50%;bottom:6px;transform:translateX(-50%);display:flex;align-items:center;gap:12px}
+  .dock .ibtn{width:46px;height:46px}
+  .dock #mic{width:58px;height:58px;border-radius:50%}
+  .dock #mic svg{width:24px;height:24px}
+  .ibtn.active{border-color:var(--o);color:#fff}
+  .vhint{position:absolute;left:50%;top:44px;transform:translateX(-50%);width:max-content;max-width:90%;text-align:center;font-size:11px;color:var(--txt);text-shadow:0 0 6px #000;opacity:0;transition:opacity .3s;pointer-events:none}
+  .vhint.show{opacity:1}
+  .talk{position:relative;left:auto;right:auto;bottom:auto;max-height:none;min-height:0;transform:none;transition:none;display:none}
+  body.view-chat .talk{display:flex}
+  #status{display:none;flex-direction:column;gap:12px;overflow-y:auto;min-height:0;overscroll-behavior:contain}
+  body.view-status #status{display:flex}
+  #status .panel{flex:none;overflow:visible}
+  #status .top{flex-wrap:wrap;gap:6px 16px;padding:10px 16px}
+  #status .top .meta{flex-wrap:wrap;gap:4px 14px;white-space:normal}
+  #status .gauges{height:auto;flex-wrap:wrap;gap:8px}
+  .cmd input,.bar2 input{min-width:0}
+  .bar2{gap:6px}.ibtn{flex:none}
+  @media (max-width:800px){
+    body.view-chat #grid,body.view-status #grid{grid-template-columns:minmax(0,1fr);grid-template-rows:34dvh minmax(0,1fr)}
+    .cmd input,.bar2 input{font-size:16px}
+    .dock .ibtn{width:44px;height:44px}.dock #mic{width:52px;height:52px}
+    body.view-chat .core>svg,body.view-status .core>svg,body.view-chat #wave,body.view-status #wave{top:28px;height:calc(100% - 88px)}
+    body.view-chat .vstate,body.view-status .vstate{top:4px}
+    body.view-chat .wakering,body.view-status .wakering{top:calc(28px + (100% - 88px)/2)}
+  }
+</style>
+</head>
+<body>
+<div class="scan"></div><div class="vignette"></div>
+<div id="grid">
+  <div class="panel top">
+    <div class="brand">JARVIS</div>
+    <div class="meta">
+      <span>ENV <b id="env">dev + production</b></span>
+      <span>PIPELINE <b id="pstep">…</b></span>
+      <span>LOCK <b id="lock">…</b></span>
+      <span>DATA <span id="datatag" class="tag">…</span></span>
+      <span id="clock">00:00:00</span>
+    </div>
+  </div>
+
+  <div class="panel left">
+    <h3>FEATURE LEDGER</h3>
+    <ul id="features"></ul>
+    <div style="margin-top:10px;font-size:11px;color:var(--mute)">PROGRAMME <span id="progpct" style="color:var(--txt)">0%</span></div>
+    <div class="bar"><i id="progbar" style="width:0%"></i></div>
+  </div>
+
+  <div class="panel core">
+    <svg viewBox="0 0 600 600" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <filter id="glow"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        <linearGradient id="g1" x1="0" x2="1"><stop offset="0" stop-color="#ff2e1a"/><stop offset="1" stop-color="#ff9a3c"/></linearGradient>
+      </defs>
+      <!-- circuit traces -->
+      <g stroke="#ff6a1a" stroke-opacity=".35" fill="none" stroke-width="1.2">
+        <path d="M300 300 L300 60 L420 60 L420 20"/><path d="M300 300 L540 300 L540 120 L590 120"/>
+        <path d="M300 300 L300 540 L180 540 L180 590"/><path d="M300 300 L60 300 L60 480 L10 480"/>
+        <path d="M300 300 L470 130 L560 130"/><path d="M300 300 L130 470 L40 470"/>
+        <path d="M300 300 L470 470 L470 560"/><path d="M300 300 L130 130 L130 40"/>
+      </g>
+      <g fill="#ff9a3c" class="pulse" filter="url(#glow)">
+        <circle cx="420" cy="20" r="3"/><circle cx="590" cy="120" r="3"/><circle cx="180" cy="590" r="3"/><circle cx="10" cy="480" r="3"/>
+        <circle cx="560" cy="130" r="3"/><circle cx="40" cy="470" r="3"/><circle cx="470" cy="560" r="3"/><circle cx="130" cy="40" r="3"/>
+      </g>
+      <!-- outer ring: ticks -->
+      <g class="ring spin1" stroke="#ff6a1a" stroke-opacity=".7" fill="none">
+        <circle cx="300" cy="300" r="250" stroke-width="1"/>
+        <circle cx="300" cy="300" r="238" stroke-width="10" stroke-dasharray="3 9" stroke-opacity=".35"/>
+      </g>
+      <g class="ring spin2" fill="none" stroke="url(#g1)">
+        <circle cx="300" cy="300" r="205" stroke-width="2" stroke-dasharray="120 40 20 40 300 40"/>
+        <circle cx="300" cy="300" r="190" stroke-width="14" stroke-opacity=".25" stroke-dasharray="40 14"/>
+      </g>
+      <g class="ring spin3" fill="none" stroke="#ff9a3c" filter="url(#glow)">
+        <circle cx="300" cy="300" r="150" stroke-width="3" stroke-dasharray="60 30 10 30"/>
+        <circle cx="300" cy="300" r="132" stroke-width="1" stroke-dasharray="6 6" stroke-opacity=".7"/>
+      </g>
+      <g class="ring spin1" fill="none" stroke="#ff2e1a" stroke-width="18" stroke-opacity=".5">
+        <circle cx="300" cy="300" r="105" stroke-dasharray="20 10 60 10"/>
+      </g>
+      <circle cx="300" cy="300" r="82" fill="none" stroke="#ffd9b8" stroke-width="1" stroke-opacity=".8"/>
+      <circle cx="300" cy="300" r="70" fill="#ff6a1a" fill-opacity=".12" class="pulse"/>
+      <circle cx="300" cy="300" r="44" fill="#ff9a3c" fill-opacity=".9" filter="url(#glow)"/>
+      <circle cx="300" cy="300" r="26" fill="#fff5e8"/>
+      <!-- crosshair -->
+      <g stroke="#ffd9b8" stroke-opacity=".5" stroke-width="1">
+        <line x1="300" y1="30" x2="300" y2="90"/><line x1="300" y1="510" x2="300" y2="570"/>
+        <line x1="30" y1="300" x2="90" y2="300"/><line x1="510" y1="300" x2="570" y2="300"/>
+      </g>
+    </svg>
+    <canvas id="wave" aria-hidden="true"></canvas>
+    <div class="vstate" id="vstate" role="status">MIC OFF</div>
+    <div class="vhint" id="vhint" role="status"></div>
+    <div class="dock" id="dock">
+      <button class="ibtn" id="chatbtn" title="Chat" aria-label="Chat" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v11H9l-5 4z"/></svg></button>
+      <button class="ibtn" id="statusbtn" title="Status" aria-label="Status" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M21 20H3"/></svg></button>
+    </div>
+    <div class="corelabel"><div class="big" id="coreval">-</div><div class="sub" id="coresub">AWAITING YOU</div></div>
+    <div class="hud-stat hs1">PRODUCTION<b id="prodn">0</b>features live</div>
+    <div class="hud-stat hs2">ON DEV<b id="devn">0</b>awaiting test</div>
+    <div class="hud-stat hs3">BUILDING<b id="buildn">0</b>in progress</div>
+    <div class="hud-stat hs4">BLOCKED<b id="blockn">0</b>need action</div>
+
+    <div class="talk" id="talk">
+      <header id="talkhead"><h3>TALK TO JARVIS</h3><span class="hint2">CLOSE</span></header>
+      <div class="log" id="log"></div>
+      <div class="bar2">
+        <button class="ibtn" id="mic" title="Microphone" aria-label="Microphone">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+        <input id="say" placeholder="Ask or instruct, e.g. status, or open the PR to main for gift cards" autocomplete="off">
+        <button class="ibtn" id="send" title="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l16-8-6 16-2-7z"/></svg></button>
+        <button class="ibtn on" id="voice" title="Voice replies on/off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel right">
+    <h3>PULL REQUESTS · YOUR MOVE</h3>
+    <ul id="prs"></ul>
+    <h3 style="margin-top:12px">CI · LATEST</h3>
+    <ul id="ci"></ul>
+  </div>
+
+  <div class="panel bl">
+    <h3>HUMAN ACTIONS</h3>
+    <ul id="actions"></ul>
+  </div>
+
+  <div class="panel bc">
+    <div class="gauges">
+      <div class="gauge"><svg viewBox="0 0 96 96"><circle cx="48" cy="48" r="40" stroke="#3a1a0a" stroke-width="7" fill="none"/><circle id="gu" cx="48" cy="48" r="40" stroke="#ff9a3c" stroke-width="7" fill="none" stroke-dasharray="251" stroke-dashoffset="251" style="filter:drop-shadow(0 0 6px #ff6a1a)"/></svg><div class="v">UPTIME<b id="gut">-</b></div></div>
+      <div class="gauge"><svg viewBox="0 0 96 96"><circle cx="48" cy="48" r="40" stroke="#3a1a0a" stroke-width="7" fill="none"/><circle id="gc" cx="48" cy="48" r="40" stroke="#ff6a1a" stroke-width="7" fill="none" stroke-dasharray="251" stroke-dashoffset="251" style="filter:drop-shadow(0 0 6px #ff6a1a)"/></svg><div class="v">CI PASS<b id="gct">-</b></div></div>
+      <div class="gauge"><svg viewBox="0 0 96 96"><circle cx="48" cy="48" r="40" stroke="#3a1a0a" stroke-width="7" fill="none"/><circle id="ga" cx="48" cy="48" r="40" stroke="#ff2e1a" stroke-width="7" fill="none" stroke-dasharray="251" stroke-dashoffset="251" style="filter:drop-shadow(0 0 6px #ff2e1a)"/></svg><div class="v">ALARMS<b id="gat">-</b></div></div>
+    </div>
+    <div class="ticker"><span id="ticker">…</span></div>
+  </div>
+
+  <div class="panel br">
+    <h3>COMMAND</h3>
+    <div class="cmd"><input id="cmdin" placeholder="e.g. pause production merges"><button id="cmdbtn">SEND</button></div>
+    <div class="hint" id="cmdhint">Copies a ready-to-paste "/jarvis …" line. Send it in the booqy project chat.</div>
+    <div style="margin-top:8px;font-size:11px;color:var(--mute)">LAST UPDATE <b id="updated" style="color:var(--txt)">-</b></div>
+  </div>
+</div>
+
+<script>
+const DEMO = {
+  generatedAt: new Date().toISOString(), demo: true,
+  pipeline: { step: "Run 0 addendum (K, L)", feature: "L · phone agent ADR", round: 1, lock: "free" },
+  features: [
+    {id:"A",name:"Meta ads",status:"todo"},{id:"B",name:"Site builder",status:"todo"},{id:"C",name:"Guest CRM",status:"todo"},
+    {id:"D",name:"Google Business",status:"todo"},{id:"E",name:"Gift cards",status:"todo"},{id:"F",name:"Waitlist",status:"todo"},
+    {id:"G",name:"Social posting",status:"todo"},{id:"H",name:"Personalliggare",status:"todo"},{id:"I",name:"Fortnox/Visma",status:"todo"},
+    {id:"J",name:"Margin per dish",status:"todo"},{id:"K",name:"Events & tickets",status:"building"},{id:"L",name:"AI phone agent",status:"building"}],
+  prs: [{repo:"infrastructure",number:37,title:"Run 0 addendum: ADRs K + L",state:"ci_running",url:"#"}],
+  ci: [{repo:"infrastructure",status:"pass"},{repo:"application",status:"pass"},{repo:"admin-front-end",status:"pass"},{repo:"booqy-console",status:"pass"},{repo:"customer-front-end",status:"pass"},{repo:"booqy-website",status:"pass"}],
+  actions: ["Meta Business Verification + App Review","Google Business Profile API access","Voice + SIP provider accounts","Accountant: gift card VAT","Legal: personalliggare, Art. 50 wording"],
+  uptime: 99.98, ciPass: 100, alarms: 0,
+  log: ["Run 0 merged to dev and deployed","PROMPTS.md updated with Orchestrator + Jarvis","Orchestrator started Run 0 addendum"]
+};
+const STATE_URL = (window.JARVIS_STATE_URL || "./state.json");
+const $ = id => document.getElementById(id);
+const esc = s => String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const safeUrl = u => /^https:\/\//.test(String(u)) ? u : "#";
+const stClass = s => { const t=String(s).toLowerCase(); return ({production:"production",dev:"dev",awaiting:"dev",merged:"dev",building:"building",reviewing:"building",fixing:"building",verified:"building",blocked:"blocked"})[t.split(/[\s,]+/)[0]] || (/dev/.test(t)?"dev":"todo"); };
+const stLabel = s => /^on dev/i.test(s) ? "on dev" : s;
+const ciClass = s => ({pass:"production",fail:"blocked",running:"building"})[s] || "todo";
+
+function render(d){ window.__lastState=d;
+  $("datatag").textContent = d.demo ? "DEMO" : "LIVE"; $("datatag").className = "tag " + (d.demo?"demo":"live");
+  $("pstep").textContent = d.pipeline?.step || "idle"; $("lock").textContent = d.pipeline?.lock || "free";
+  $("updated").textContent = new Date(d.generatedAt).toLocaleString("sv-SE");
+  const f = d.features||[]; const cnt = k => f.filter(x=>stClass(x.status)===k).length;
+  $("prodn").textContent=cnt("production"); $("devn").textContent=cnt("dev"); $("buildn").textContent=cnt("building"); $("blockn").textContent=cnt("blocked");
+  const pct = f.length? Math.round(100*(cnt("production")+cnt("dev")*0.7+cnt("building")*0.3)/f.length):0;
+  $("progpct").textContent=pct+"%"; $("progbar").style.width=pct+"%";
+  $("features").innerHTML = f.map(x=>`<li class="row"><span class="n">${esc(x.id)} · ${esc(x.name)}</span><span class="st ${stClass(x.status)}" title="${esc(x.status)}">${esc(stLabel(x.status))}</span></li>`).join("");
+  const prs=(d.prs||[]); const mine=prs.filter(p=>/awaiting|review/.test(p.state));
+  $("coreval").textContent = mine.length; $("coresub").textContent = mine.length? "PR"+(mine.length>1?"S":"")+" AWAITING YOUR APPROVAL" : "NOTHING AWAITS YOU";
+  $("prs").innerHTML = prs.length? prs.map(p=>`<li class="row"><span class="n"><a href="${esc(safeUrl(p.url))}" target="_blank" rel="noopener">${esc(p.repo)}#${esc(p.number)}</a> <span title="${esc(p.title)}">${esc(p.title)}</span></span><span class="st ${/awaiting|review/.test(p.state)?"dev":"building"}">${esc(String(p.state).replace(/_/g," "))}</span></li>`).join("") : `<li class="row"><span class="n">no open PRs</span></li>`;
+  $("ci").innerHTML=(d.ci||[]).map(c=>`<li class="row"><span class="n"><span class="dot ${c.status==="fail"?"bad":""}"></span>${esc(c.repo)}</span><span class="st ${ciClass(c.status)}">${esc(c.status)}</span></li>`).join("");
+  $("actions").innerHTML=(d.actions||[]).map(a=>`<li class="row"><span class="n" title="${esc(a)}">${esc(a)}</span><span class="st todo">OPEN</span></li>`).join("")||`<li class="row">none</li>`;
+  const g=(id,t,v,max)=>{ const none=v===null||v===undefined; $(id).style.strokeDashoffset = none?251:251-251*Math.min(1,v/max); $(t).textContent = none?"N/A":v; };
+  g("gu","gut",d.uptime,100); g("gc","gct",d.ciPass,100); g("ga","gat",d.alarms,10);
+  $("ticker").textContent=(d.log||[]).join("   ◆   ");
+}
+async function load(){
+  try{ const r=await fetch(STATE_URL,{cache:"no-store"}); if(r.status===401){ location.reload(); return; } if(!r.ok) throw 0; render(await r.json()); }
+  catch(e){ render(DEMO); }
+}
+load(); setInterval(load,60000);
+setInterval(()=>{ $("clock").textContent=new Date().toLocaleTimeString("sv-SE"); },1000);
+
+/* ---------- Jarvis talk ---------- */
+const CHAT_URL = (window.JARVIS_CHAT_URL || "./api/chat");
+const talk=$("talk"), log=$("log"), say=$("say"), core=document.querySelector(".core");
+const store = { get(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }, set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} } };
+let sessionId = store.get("jarvis-session") || Math.random().toString(36).slice(2); store.set("jarvis-session",sessionId);
+let voiceOn = true, online = null;
+function add(cls, text){ const d=document.createElement("div"); d.className="msg "+cls; if(cls==="sys"&&view!=="chat"&&text!=="…") showHint(text);
+  if(cls==="j"){ d.innerHTML="<b>JARVIS</b>"+esc(text).replace(/\n/g,"<br>"); } else if(cls==="me"){ d.innerHTML="<span>"+esc(text)+"</span>"; } else d.textContent=text;
+  log.appendChild(d); log.scrollTop=log.scrollHeight; }
+/* Everything but the core lives in a view you open yourself. */
+const grid=$("grid"), statusSide=document.createElement("aside"); statusSide.id="status"; grid.append(statusSide);
+for(const c of [".top",".left",".right",".bl",".bc",".br"]) statusSide.append(document.querySelector(".panel"+c));
+grid.append(talk);
+$("dock").insertBefore($("mic"),$("statusbtn")); $("dock").insertBefore($("voice"),$("statusbtn"));
+let view="";
+function setView(v,focus=false){ view=v; document.body.classList.toggle("view-chat",v==="chat"); document.body.classList.toggle("view-status",v==="status");
+  for(const [id,name] of [["chatbtn","chat"],["statusbtn","status"]]){ $(id).classList.toggle("active",v===name); $(id).setAttribute("aria-pressed",String(v===name)); }
+  if(v==="chat"){ log.scrollTop=log.scrollHeight; if(focus) say.focus(); } }
+$("chatbtn").onclick=()=>setView(view==="chat"?"":"chat",true);
+$("statusbtn").onclick=()=>setView(view==="status"?"":"status");
+$("talkhead").onclick=()=>setView("");
+let hintTimer=null;
+function showHint(text){ $("vhint").textContent=text; $("vhint").classList.add("show"); clearTimeout(hintTimer); hintTimer=setTimeout(()=>$("vhint").classList.remove("show"),6000); }
+
+/* one visible state: off | standby | listening | thinking | speaking */
+const STATE_TEXT={off:"MIC OFF",standby:"SAY JARVIS",listening:"LISTENING",thinking:"THINKING",speaking:"SPEAKING"};
+let vstate="off";
+function setState(s){ vstate=s; for(const k of Object.keys(STATE_TEXT)) core.classList.toggle(k,k===s); $("vstate").textContent=STATE_TEXT[s];
+  $("mic").classList.toggle("rec",s==="listening"); $("mic").classList.toggle("armed",!!mic.stream&&s!=="listening"); $("mic").title=s==="off"?"Turn the microphone on":s==="listening"?"Turn the microphone off":"Talk now"; startWave(); }
+const idleState=()=>mic.stream? (mic.mode==="listening"?"listening":"standby") : "off";
+
+/* ---------- output: Jarvis's voice, through an analyser so the core follows it ---------- */
+let out=null, outSource=null;
+function outCtx(){ if(!out){ const c=new (window.AudioContext||window.webkitAudioContext)(); const an=c.createAnalyser(); an.fftSize=256; an.smoothingTimeConstant=.72; an.connect(c.destination); out={c,an,data:new Uint8Array(an.frequencyBinCount)}; } return out; }
+const fallbackAudio=new Audio();
+function stopCurrentSpeech(){ try{ outSource?.stop(); }catch(e){} outSource=null; fallbackAudio.pause(); fallbackAudio.onended?.(); speechSynthesis.cancel(); if(speechPaused){ speechPaused=false; out?.c.resume().catch(()=>{}); speechSynthesis.resume(); } }
+/* Interrupting freezes the audio in place at once. A false alarm carries on from the same word. */
+let speechPaused=false;
+function pauseSpeech(){ if(speechPaused) return; speechPaused=true; out?.c.suspend().catch(()=>{}); if(!fallbackAudio.paused) { fallbackAudio.pause(); fallbackAudio.dataset.resume="1"; } speechSynthesis.pause(); }
+function resumeSpeech(){ if(!speechPaused) return; speechPaused=false; out?.c.resume().catch(()=>{}); if(fallbackAudio.dataset.resume){ delete fallbackAudio.dataset.resume; fallbackAudio.play().catch(()=>{}); } speechSynthesis.resume(); }
+function stopSpeech(){ speechQ.length=0; stopCurrentSpeech(); settleSpeech(); }
+$("voice").onclick=()=>{ voiceOn=!voiceOn; $("voice").classList.toggle("on",voiceOn); outCtx().c.resume().catch(()=>{}); if(!voiceOn) stopSpeech(); };
+function speakBrowser(text, done){
+  try{ const u=new SpeechSynthesisUtterance(text); const vs=speechSynthesis.getVoices();
+       u.voice = vs.find(v=>/en-GB/i.test(v.lang)&&/Daniel|Arthur|Male/i.test(v.name)) || vs.find(v=>/en-GB/i.test(v.lang)) || null;
+       u.rate=1.02; u.pitch=.9; u.onend=done; u.onerror=done; speechSynthesis.speak(u); }catch(e){ done(); }
+}
+/* Replies arrive sentence by sentence; they play in order, and a waiting progress line gives way to real words. */
+let lastSpoken="", cutOffAt=""; const speechQ=[]; let speechPlaying=false, speechHold=false, speechWaiters=[];
+function settleSpeech(){ if(!speechPlaying&&!speechQ.length){ speechWaiters.splice(0).forEach(r=>r()); } }
+const speechDone=()=>new Promise(r=>{ speechWaiters.push(r); settleSpeech(); });
+function enqueueSpeech(text,b64,type,filler=false){ if(!voiceOn) return; speechQ.push({text,b64,type,filler}); pumpSpeech(); }
+async function pumpSpeech(){
+  if(speechPlaying||speechHold) return;
+  while(speechQ.length>1&&speechQ[0].filler) speechQ.shift();
+  const next=speechQ.shift();
+  if(!next){ settleSpeech(); return; }
+  speechPlaying=true; setState("speaking"); if(!next.filler) lastSpoken=next.text;
+  await playSpeech(next);
+  speechPlaying=false;
+  if(!speechQ.length&&!speechHold&&vstate==="speaking") setState(activeTurn?"thinking":idleState());
+  pumpSpeech();
+}
+function playSpeech({text,b64,type}){
+  return new Promise(async done=>{
+    if(!b64) return speakBrowser(text,done);
+    try{ const o=outCtx(); await Promise.race([o.c.resume(),new Promise(r=>setTimeout(r,300))]); if(o.c.state!=="running") throw 0;
+      const raw=Uint8Array.from(atob(b64),c=>c.charCodeAt(0)); const buf=await o.c.decodeAudioData(raw.buffer);
+      const src=o.c.createBufferSource(); src.buffer=buf; src.connect(o.an); src.onended=()=>{ if(outSource===src) outSource=null; done(); }; outSource=src; src.start();
+    }catch(e){ fallbackAudio.onended=()=>{ fallbackAudio.onended=null; done(); }; fallbackAudio.onerror=done; fallbackAudio.src="data:"+(type||"audio/mpeg")+";base64,"+b64;
+      fallbackAudio.play().catch(()=>{ add("sys","Sound is blocked. Click anywhere in the window to allow it."); done(); }); }
+  });
+}
+async function speak(text,b64,type){ if(live){ liveSay(text); return; } if(!voiceOn) return; enqueueSpeech(text,b64,type); await speechDone(); }
+function preview(q){
+  const d = window.__lastState || DEMO; const f=d.features||[]; const c=k=>f.filter(x=>stClass(x.status)===k).length;
+  if(/status|brief|läge|hur går/i.test(q)) return `Preview mode, sir. ${c("production")} features in production, ${c("dev")} on dev awaiting you, ${c("building")} in progress, ${c("blocked")} blocked. Pipeline: ${d.pipeline?.step||"idle"}. ${(d.actions||[]).length} human actions open.`;
+  return "I can't reach the Jarvis server, sir, so nothing was passed on. Check that it is running on the Mac.";
+}
+
+/* ---------- merge to main: the server decides; this only shows what it asks ---------- */
+let confirmCard=null, confirmData=null, confirmTimer=null, confirmAct=null;
+function clearConfirm(){ confirmCard?.remove(); confirmCard=null; confirmData=null; confirmAct=null; clearInterval(confirmTimer); }
+function syncConfirm(c){
+  if(!c){ clearConfirm(); return; }
+  if(confirmData?.id===c.id) return;
+  clearConfirm(); confirmData=c; setView("chat");
+  const card=document.createElement("div"); card.className="confirm"; card.setAttribute("role","alertdialog");
+  const head=document.createElement("b"); head.textContent="MERGE TO MAIN · PRODUCTION";
+  const name=document.createElement("div"); const link=document.createElement("a"); link.textContent=c.repo.split("/").pop()+"#"+c.number; link.target="_blank"; link.rel="noopener";
+  if(/^https:\/\/github\.com\//.test(c.url||"")) link.href=c.url;
+  name.append(link," ",c.title||"");
+  const facts=document.createElement("div"); facts.className="facts"; const risky=c.mergeable!=="MERGEABLE"||/failed|running|no checks/.test(c.ci||"");
+  const left=document.createElement("span"); facts.textContent=`Checks: ${c.ci}. Mergeable: ${String(c.mergeable).toLowerCase()}. Skips the Orchestrator's final review. `; if(risky) facts.classList.add("bad"); facts.append(left);
+  const btns=document.createElement("div"); btns.className="btns";
+  const go=document.createElement("button"); go.className="go"; go.textContent="MERGE"; const no=document.createElement("button"); no.textContent="CANCEL";
+  const act=async action=>{ go.disabled=no.disabled=true; setState("thinking");
+    try{ const r=await fetch("./api/confirm",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId,id:c.id,action,voice:voiceOn&&!live})}); const j=await r.json().catch(()=>({}));
+      clearConfirm(); if(r.ok){ add("j",j.reply); await speak(j.reply,j.audio,j.audioType); load(); } else add("sys",j.error||"Nothing was merged."); }
+    catch(e){ clearConfirm(); add("sys","Could not reach the server. Nothing was confirmed."); }
+    setState(live?"listening":idleState()); };
+  confirmAct=act; go.onclick=()=>act("merge"); no.onclick=()=>act("cancel"); btns.append(go,no);
+  const hint=document.createElement("div"); hint.className="facts"; hint.style.margin="8px 0 0";
+  const end=Date.now()+c.expiresInMs; const tick=()=>{ const s=Math.ceil((end-Date.now())/1000); if(s<=0){ clearConfirm(); add("sys","The merge confirmation expired. Nothing was merged."); return; } hint.textContent=`Or say exactly "I confirm". Expires in ${s} s.`; };
+  card.append(head,name,facts,btns,hint); log.appendChild(card); log.scrollTop=log.scrollHeight; confirmCard=card; tick(); confirmTimer=setInterval(tick,1000);
+}
+
+/* One turn at a time. A new message or talking over Jarvis cancels the one in progress. */
+let activeTurn=null, turnSeq=0;
+function cancelTurn(){ activeTurn?.abort(); activeTurn=null; stopSpeech(); }
+async function ask(q){
+  if(q&&live){ add("me",q); say.value=""; liveSay(`The owner typed: "${q}". Respond to it now, using the backend if it needs it.`); return; }
+  if(!q) return; cancelTurn(); const turn=++turnSeq, ctrl=new AbortController(); activeTurn=ctrl;
+  add("me",q); say.value=""; setListenWindow(0); setState("thinking");
+  // Claude wrote more than the owner heard; it should answer from what was actually said.
+  const wording=cutOffAt&&!confirmData?`[You were interrupted. The owner stopped you while you were saying: "${cutOffAt}" They did not hear anything after that.]\n${q}`:q; cutOffAt=""; lastSpoken="";
+  const dots=document.createElement("div"); dots.className="msg sys"; dots.textContent="…"; log.appendChild(dots);
+  let bubble=null, shown="", failure=null, confirm=null, final=null;
+  const showReply=text=>{ dots.remove(); if(!bubble){ add("j",""); bubble=log.lastChild; } bubble.innerHTML="<b>JARVIS</b>"+esc(text).replace(/\n/g,"<br>"); log.scrollTop=log.scrollHeight; };
+  const onEvent=e=>{ if(turn!==turnSeq) return;
+    if(e.type==="filler") enqueueSpeech(e.text,e.audio,e.audioType,true);
+    else if(e.type==="sentence"){ shown=(shown+" "+e.text).trim(); showReply(shown); enqueueSpeech(e.text,e.audio,e.audioType); }
+    else if(e.type==="done"){ final=e.reply; confirm=e.confirm; }
+    else if(e.type==="error") failure=e.error; };
+  try{
+    const r=await fetch("./api/chat/stream",{method:"POST",headers:{"Content-Type":"application/json"},credentials:"include",signal:ctrl.signal,body:JSON.stringify({message:wording,sessionId,voice:voiceOn})});
+    online=true;
+    if(!r.ok){ const j=await r.json().catch(()=>({})); failure=j.error||("Server error "+r.status); }
+    else{ const reader=r.body.getReader(), dec=new TextDecoder(); let held="";
+      for(;;){ const {value,done}=await reader.read(); if(done) break; held+=dec.decode(value,{stream:true});
+        const lines=held.split("\n"); held=lines.pop(); for(const l of lines) if(l.trim()) onEvent(JSON.parse(l)); } }
+  }catch(e){ if(turn!==turnSeq||e.name==="AbortError") return; online=false; final=preview(q); enqueueSpeech(final); }
+  if(turn!==turnSeq) return;
+  activeTurn=null; dots.remove();
+  if(failure){ add("sys",failure); stopSpeech(); setState(idleState()); return; }
+  if(final) showReply(final); syncConfirm(confirm); if(online) load();
+  await speechDone(); if(turn!==turnSeq) return;
+  // A short window to answer without the wake phrase.
+  mic.cooldownUntil=performance.now()+250;
+  if(!utt){ setState(mic.stream?"standby":"off"); if(mic.stream) setListenWindow(CONVERSATION_MS); }
+}
+/* ---------- GPT-Live: the conversation itself, once woken. It hears and speaks directly and can
+   listen while talking. "Jarvis" is still detected on this Mac, so nothing reaches OpenAI until then. ---------- */
+let live=null, liveOk=false;
+const LIVE_MAX_APPEND=1500;
+function liveSend(event){ if(live?.events?.readyState==="open") live.events.send(JSON.stringify({event_id:"ev_"+Math.random().toString(36).slice(2),...event})); }
+function liveSay(text,delegation_id=null){ liveSend({type:"session.commentary.append",delegation_id,content:String(text).slice(0,LIVE_MAX_APPEND)}); }
+function liveTouch(){ if(!live) return; clearTimeout(live.idle); live.idle=setTimeout(()=>endLive("Conversation closed after a quiet spell. Say Jarvis to start again."),CONVERSATION_MS); }
+function liveCleanup(){ const l=live; if(!l) return; live=null; clearTimeout(l.idle); clearTimeout(l.me.timer); clearTimeout(l.jarvis.timer); try{ l.events?.close(); }catch(e){} try{ l.peer?.close(); }catch(e){} l.audio.srcObject=null; l.source?.disconnect(); core.style.setProperty("--lvl","0"); setState(mic.stream?"standby":"off"); }
+function endLive(hint){ const l=live; if(!l) return; chime(740,440); if(hint) showHint(hint); liveSend({type:"session.close"}); l.closing=true; setTimeout(()=>{ if(live===l) liveCleanup(); },1500); }
+/* Transcripts come as fragments with no end marker, so a short gap ends a turn. */
+function liveTranscript(side,delta){ const t=live[side]; t.text+=delta; clearTimeout(t.timer); liveTouch(); const l=live; t.timer=setTimeout(()=>{ if(live===l) liveTurnEnded(side); },900); }
+function liveTurnEnded(side){ const t=live[side], text=t.text.trim(); t.text=""; if(!text) return;
+  live.history.push((side==="me"?"Owner: ":"Jarvis: ")+text); if(live.history.length>40) live.history.shift();
+  add(side==="me"?"me":"j",text); if(side!=="me") return;
+  // The owner's own words, from the transcript, never from the model.
+  if(confirmData&&/^\W*i confirm\W*$/i.test(text)) return confirmAct?.("merge");
+  if(GOODBYE.test(text)) endLive("Conversation closed. Say Jarvis to start again."); }
+async function liveDelegate(id){ const l=live; l.pending++;
+  // The event carries no task text, and its transcript can arrive just after it.
+  await new Promise(r=>setTimeout(r,700)); if(live!==l) return;
+  const latest=[...l.history, ...(l.me.text.trim()?["Owner: "+l.me.text.trim()]:[])].join("\n").slice(-6000);
+  const message=`[Voice conversation so far. Another voice model speaks to the owner and passes on your result, so do the work for the owner's latest request and return the outcome in plain sentences.]\n${latest}`;
+  try{ const r=await fetch(CHAT_URL,{method:"POST",headers:{"Content-Type":"application/json"},credentials:"include",body:JSON.stringify({message,sessionId,voice:false})}); const j=await r.json().catch(()=>({}));
+    if(live!==l) return; l.pending--; syncConfirm(j.confirm); liveSay(r.ok?j.reply:"The backend could not finish that. Tell the owner it failed and nothing was done.",id); if(online!==false) load(); }
+  catch(e){ if(live===l){ l.pending--; liveSay("The backend could not be reached. Tell the owner it failed and nothing was done.",id); } } }
+function liveEvent(e){ if(!live) return; switch(e.type){
+  case "session.started": live.ready=true; liveTouch(); setState("listening"); if(live.first) liveSay(live.first); live.first=null; break;
+  case "session.input_transcript.delta": liveTranscript("me",e.delta||""); break;
+  case "session.output_transcript.delta": liveTranscript("jarvis",e.delta||""); break;
+  case "session.delegation.created": liveDelegate(e.delegation?.id); break;
+  case "session.closed": liveCleanup(); break;
+  case "error": if(!e.error?.client_event_id) showHint("The voice service reported a problem."); break; } }
+async function startLive(firstLine){
+  if(live) return true;
+  const audio=new Audio(); audio.autoplay=true;
+  const l=live={ready:false,first:firstLine||null,pending:0,history:[],me:{text:""},jarvis:{text:""},audio,lastOut:0};
+  setState("thinking");
+  try{ const peer=l.peer=new RTCPeerConnection();
+    peer.addEventListener("track",ev=>{ const stream=new MediaStream([ev.track]); audio.srcObject=stream; audio.play().catch(()=>showHint("Sound is blocked. Click anywhere in the window to allow it."));
+      try{ const c=outCtx().c, an=c.createAnalyser(); an.fftSize=256; an.smoothingTimeConstant=.72; l.source=c.createMediaStreamSource(stream); l.source.connect(an); l.tap={an,data:new Uint8Array(an.frequencyBinCount)}; }catch(e){} });
+    peer.addEventListener("connectionstatechange",()=>{ if(["failed","closed"].includes(peer.connectionState)&&live===l){ const asked=l.closing; liveCleanup(); if(!asked) showHint("The voice connection dropped. Say Jarvis to reconnect."); } });
+    for(const track of mic.stream.getAudioTracks()) peer.addTrack(track,mic.stream);
+    const events=l.events=peer.createDataChannel("oai-events");
+    events.addEventListener("message",({data})=>{ try{ liveEvent(JSON.parse(data)); }catch(e){} });
+    await peer.setLocalDescription(await peer.createOffer());
+    if(peer.iceGatheringState!=="complete") await new Promise((resolve,reject)=>{ const t=setTimeout(()=>reject(new Error("ice")),10000); const check=()=>{ if(peer.iceGatheringState==="complete"){ clearTimeout(t); resolve(); } }; peer.addEventListener("icegatheringstatechange",check); check(); });
+    const r=await fetch("./api/live/session",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sdp:peer.localDescription.sdp})});
+    const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||"session");
+    if(live!==l) return true;
+    await peer.setRemoteDescription({type:"answer",sdp:j.sdp}); return true;
+  }catch(e){ if(live===l){ liveCleanup(); showHint("The natural voice is not available right now. Using the local voice."); } return false; }
+}
+/* Wakes the conversation: GPT-Live if it is set up, otherwise the local voice. */
+async function openConversation(said,woke){
+  if(liveOk&&mic.stream){ const first=said?`The owner just said: "${said}". Respond to it now, generating <|SpawnThinking|> if it needs the backend.`:woke?"The owner just called your name. Answer briefly, as a person would.":null;
+    if(await startLive(first)) return; }
+  if(said) ask(said); else setListenWindow(CONVERSATION_MS);
+}
+const unlock=()=>{ outCtx().c.resume().catch(()=>{}); };
+for(const ev of ["pointerdown","touchend","click"]) document.addEventListener(ev,unlock,{passive:true}); // iOS only unlocks sound on some of these.
+$("send").onclick=()=>ask(say.value.trim());
+say.addEventListener("keydown",e=>{ if(e.key==="Enter") ask(say.value.trim()); });
+
+/* ---------- input: microphone on this Mac, recognised locally by the server ---------- */
+const RATE=16000, CHUNK=512, CHUNK_S=CHUNK/RATE, CONVERSATION_MS=5*60*1000;
+const mic={stream:null,ctx:null,an:null,proc:null,mode:"standby",timer:null,cooldownUntil:0,data:null};
+function setListenWindow(ms){ clearTimeout(mic.timer); if(!mic.stream) return;
+  if(ms>0){ mic.mode="listening"; mic.timer=setTimeout(()=>{ mic.mode="standby"; if(vstate==="listening"&&!utt) setState("standby"); },ms); if(vstate!=="thinking"&&vstate!=="speaking") setState("listening"); }
+  else { mic.mode="standby"; if(vstate==="listening") setState("standby"); } }
+function toWav(chunks){ const pad=RATE/2, n=chunks.reduce((a,c)=>a+c.length,0)+pad*2, b=new ArrayBuffer(44+n*2), v=new DataView(b);
+  const w=(o,t)=>{ for(let i=0;i<t.length;i++) v.setUint8(o+i,t.charCodeAt(i)); };
+  w(0,"RIFF"); v.setUint32(4,36+n*2,true); w(8,"WAVEfmt "); v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true); v.setUint32(24,RATE,true); v.setUint32(28,RATE*2,true); v.setUint16(32,2,true); v.setUint16(34,16,true); w(36,"data"); v.setUint32(40,n*2,true);
+  let o=44+pad*2; for(const c of chunks) for(let i=0;i<c.length;i++,o+=2) v.setInt16(o,Math.max(-1,Math.min(1,c[i]))*32767,true);
+  let s=""; const u=new Uint8Array(b); for(let i=0;i<u.length;i+=32768) s+=String.fromCharCode.apply(null,u.subarray(i,i+32768)); return btoa(s); }
+/* Speech detection. An utterance can run for ten minutes: it is sent in pieces at natural
+   pauses, so the transcript grows live and the answer starts as soon as you stop. */
+const MAX_UTTERANCE_S=600, PIECE_S=25, PIECE_MAX_S=28;
+const secs=n=>Math.round(n/CHUNK_S);
+const PRE_CHUNKS=secs(.5), PRE_BARGE=secs(.2), START_CHUNKS=secs(.19), BARGE_CHUNKS=secs(.13), BARGE_CHECK_S=.8, BARGE_MIN_VOICE_S=.3; // A word and a short pause is speech; a click or a bump is not.
+const vad={floor:.004,loud:0,quiet:0,on:false,clip:[],pre:[]};
+let utt=null;
+const endPause=s=>s<15?1.1:s<60?1.8:2.5; // The longer you have talked, the longer a pause may be without ending your turn.
+const clipSeconds=c=>c.length*CHUNK_S;
+function outputLevel(){ if(!out||vstate!=="speaking") return 0; const d=new Float32Array(512); out.an.getFloatTimeDomainData(d); let s=0; for(let i=0;i<d.length;i++) s+=d[i]*d[i]; return Math.sqrt(s/d.length); }
+function clock(s){ s=Math.floor(s); return Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); }
+function beginUtterance(active,pre=vad.pre){ utt={active,parts:[],raw:[],chain:Promise.resolve(),seconds:pre.length*CHUNK_S,bubble:null,woke:false,barge:null}; vad.on=true; vad.clip=[...pre]; vad.quiet=0; vad.pre=[]; vad.loud=0; if(active) setListenWindow(CONVERSATION_MS); }
+function hearChunk(chunk){
+  if(live) return; // GPT-Live has the microphone during a conversation.
+  const copy=Float32Array.from(chunk); let sum=0; for(let i=0;i<copy.length;i++) sum+=copy[i]*copy[i]; const rms=Math.sqrt(sum/copy.length);
+  const busy=vstate==="speaking"||vstate==="thinking";
+  if(!vad.on){
+    vad.pre.push(copy); if(vad.pre.length>PRE_CHUNKS) vad.pre.shift();
+    if(busy||performance.now()<mic.cooldownUntil){
+      // Talking over Jarvis: well above the room and above what the speakers leak into the mic.
+      const thr=Math.max(.025,vad.floor*4,outputLevel()*.6); vad.loud=rms>thr?vad.loud+1:0;
+      if(vad.loud>=BARGE_CHUNKS&&busy){ speechHold=true; pauseSpeech(); const said=lastSpoken; setState("listening"); beginUtterance(true,vad.pre.slice(-PRE_BARGE)); utt.barge={voiced:BARGE_CHUNKS*CHUNK_S,said}; }
+      return;
+    }
+    vad.floor=vad.floor*.992+rms*.008; const thr=Math.max(.012,vad.floor*2.6);
+    vad.loud=rms>thr?vad.loud+1:0; if(vad.loud>=START_CHUNKS) beginUtterance(mic.mode==="listening");
+    return;
+  }
+  const thr=Math.max(.012,vad.floor*2.6);
+  vad.clip.push(copy); vad.quiet=rms<thr?vad.quiet+1:0; utt.seconds+=CHUNK_S;
+  if(utt.barge&&!utt.barge.settled){
+    // With his voice frozen, only real speech keeps going. A cough or an echo does not.
+    if(rms>=thr) utt.barge.voiced+=CHUNK_S;
+    if(vad.clip.length*CHUNK_S>=BARGE_CHECK_S){
+      if(utt.barge.voiced<BARGE_MIN_VOICE_S){ falseAlarm(); return; }
+      utt.barge.settled=true; cutOffAt=utt.barge.said||"";
+    }
+  }
+  if(utt.active) $("vstate").textContent="LISTENING "+clock(utt.seconds);
+  if(utt.seconds>=MAX_UTTERANCE_S||vad.quiet*CHUNK_S>=endPause(utt.seconds)){ endUtterance(); return; }
+  const piece=clipSeconds(vad.clip);
+  if(piece>=PIECE_MAX_S||(piece>=PIECE_S&&vad.quiet*CHUNK_S>=.25)) sendPiece();
+}
+function falseAlarm(){ utt=null; vad.on=false; vad.clip=[]; vad.pre=[]; vad.loud=0; speechHold=false; setState(speechPlaying?"speaking":activeTurn?"thinking":idleState()); resumeSpeech(); pumpSpeech(); }
+function sendPiece(){ const u=utt, clip=vad.clip; vad.clip=[]; if(!clip.length) return; u.chain=u.chain.then(()=>recognise(clip)).then(j=>{ if(j) hearPiece(u,j); }); }
+async function recognise(clip){
+  try{ const r=await fetch("./api/listen",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({audio:toWav(clip)})}); const j=await r.json().catch(()=>({}));
+    if(!r.ok){ add("sys",j.error||"Speech recognition failed."); return null; } return j; }
+  catch(e){ add("sys","Could not reach the Jarvis server."); return null; }
+}
+function hearPiece(u,{text,wake,command}){
+  const t=(text||"").trim(); if(!t) return;
+  u.raw.push(t);
+  if(wake&&!u.woke){ u.woke=true; wakeFlash(); if(!u.active){ u.active=true; if(utt===u) setState("listening"); } }
+  if(!u.active) return;
+  const words=wake?command:t; if(words) u.parts.push(words);
+  if(utt===u&&u.parts.length){ if(!u.bubble){ const d=document.createElement("div"); d.className="msg me"; d.innerHTML="<span></span>"; log.appendChild(d); u.bubble=d; } u.bubble.firstChild.textContent=u.parts.join(" ")+" …"; log.scrollTop=log.scrollHeight; }
+}
+function endUtterance(){
+  const u=utt, total=u.seconds; vad.on=false; vad.pre=[]; vad.loud=0;
+  if(total>=.6) sendPiece(); else vad.clip=[];
+  utt=null;
+  if(u.active&&vstate==="listening"&&(total>=.6)) setState("thinking");
+  u.chain.then(()=>{
+    u.bubble?.remove();
+    const said=u.parts.join(" "), raw=u.raw.join(" ");
+    if(confirmData&&/^i confirm[.!,]*$/i.test(raw)){ speechHold=false; return ask(raw); }
+    if(u.active&&GOODBYE.test(said)){ speechHold=false; return closeConversation(); }
+    if(u.active&&said){ speechHold=false; return activeTurn||!liveOk?ask(said):openConversation(said,u.woke); }
+    // Nothing to act on: a noise, room talk, or only the wake phrase.
+    speechHold=false; cutOffAt=""; resumeSpeech();
+    if(u.woke&&!activeTurn) return openConversation("",true);
+    if(vstate==="thinking"&&!activeTurn) setState(idleState());
+    pumpSpeech();
+  });
+}
+function chime(from,to){ if(!voiceOn) return; try{ const c=outCtx().c, o=c.createOscillator(), g=c.createGain(), t=c.currentTime; o.frequency.setValueAtTime(from,t); o.frequency.exponentialRampToValueAtTime(to,t+.14); g.gain.setValueAtTime(.0001,t); g.gain.exponentialRampToValueAtTime(.12,t+.02); g.gain.exponentialRampToValueAtTime(.0001,t+.22); o.connect(g).connect(c.destination); o.start(t); o.stop(t+.24); }catch(e){} }
+function wakeFlash(){ chime(660,990); const f=document.createElement("div"); f.className="wakering"; core.appendChild(f); setTimeout(()=>f.remove(),800); }
+const GOODBYE=/^\W*(?:(?:thanks|thank you)\W+)?(?:that'?s all|that is all|good ?bye|bye(?: bye)?|good ?night|stop listening|det var allt|hej då)(?: for now)?(?:\W+jarvis)?(?:\W+(?:thanks|thank you|tack))?\W*$/i;
+function closeConversation(){ if(live) return endLive("Conversation closed. Say Jarvis to start again."); cancelTurn(); setListenWindow(0); setState(mic.stream?"standby":"off"); chime(740,440); showHint("Conversation closed. Say Jarvis to start again."); }
+const step0=rate=>rate===RATE?512:1024; // Small buffers: interrupting must be felt at once.
+async function micOn(){
+  const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}});
+  const AC=window.AudioContext||window.webkitAudioContext; let ctx, src;
+  try{ ctx=new AC({sampleRate:RATE}); src=ctx.createMediaStreamSource(stream); }
+  catch(e){ ctx?.close(); ctx=new AC(); src=ctx.createMediaStreamSource(stream); } // Some browsers refuse a rate other than the device's.
+  ctx.resume().catch(()=>{}); // Pending until the browser allows it; must not block.
+  const an=ctx.createAnalyser(); an.fftSize=256; an.smoothingTimeConstant=.6; src.connect(an);
+  const proc=ctx.createScriptProcessor(step0(ctx.sampleRate),1,1), step=ctx.sampleRate/RATE; let held=[];
+  proc.onaudioprocess=e=>{ const d=e.inputBuffer.getChannelData(0);
+    for(let i=0;i<d.length;i+=step){ const end=Math.min(d.length,Math.floor(i+step)); let sum=0, n=0; for(let k=Math.floor(i);k<end;k++,n++) sum+=d[k]; held.push(n?sum/n:0); }
+    while(held.length>=CHUNK){ hearChunk(held.slice(0,CHUNK)); held=held.slice(CHUNK); } };
+  src.connect(proc); proc.connect(ctx.destination);
+  Object.assign(mic,{stream,ctx,an,proc,data:new Uint8Array(an.frequencyBinCount)}); store.set("jarvis-mic","on");
+}
+function micOff(){ if(live){ liveSend({type:"session.close"}); liveCleanup(); } clearTimeout(mic.timer); mic.stream?.getTracks().forEach(t=>t.stop()); mic.proc&&(mic.proc.onaudioprocess=null); mic.ctx?.close(); Object.assign(mic,{stream:null,ctx:null,an:null,proc:null,data:null,mode:"standby"}); store.set("jarvis-mic","off"); vad.on=false; vad.clip=[]; utt=null; speechHold=false; setState("off"); pumpSpeech(); }
+$("mic").onclick=async()=>{ unlock();
+  if(live){ micOff(); return; }
+  if(vstate==="listening"){ micOff(); return; }
+  if((vstate==="thinking"||vstate==="speaking")&&mic.stream){ cancelTurn(); setListenWindow(CONVERSATION_MS); setState("listening"); return; } // Tap to interrupt.
+  if(!mic.stream){ if(!navigator.mediaDevices?.getUserMedia){ add("sys","The microphone needs HTTPS. Use your Tailscale address, or the dictation key on the keyboard."); return; }
+    try{ await micOn(); }catch(e){ add("sys","Microphone not available. Allow it for this page in the browser and in your device settings."); return; } }
+  openConversation("",false); };
+/* ---------- the core follows whoever is speaking ---------- */
+const wave=$("wave"), wctx=wave.getContext("2d"), still=matchMedia("(prefers-reduced-motion:reduce)");
+let waving=false, smooth=0;
+function startWave(){ if(!waving){ waving=true; requestAnimationFrame(drawWave); } }
+function drawWave(now){
+  const dpr=devicePixelRatio||1, W=wave.clientWidth, H=wave.clientHeight;
+  if(wave.width!==Math.round(W*dpr)||wave.height!==Math.round(H*dpr)){ wave.width=Math.round(W*dpr); wave.height=Math.round(H*dpr); }
+  wctx.setTransform(dpr,0,0,dpr,0,0); wctx.clearRect(0,0,W,H);
+  let src=vstate==="speaking"&&out? out : (vstate==="listening"||vstate==="standby")&&mic.an? {an:mic.an,data:mic.data} : null;
+  if(live?.ready){ let out=0; if(live.tap){ const d=new Float32Array(512); live.tap.an.getFloatTimeDomainData(d); for(let i=0;i<d.length;i++) out=Math.max(out,Math.abs(d[i])); }
+    if(out>.02) live.lastOut=now; const talking=now-live.lastOut<350, next=talking?"speaking":live.pending?"thinking":"listening"; if(next!==vstate) setState(next);
+    if(talking&&live.tap) src=live.tap; else if(next==="listening"&&mic.an) src={an:mic.an,data:mic.data}; else src=null; }
+  let lvl=0, bins=null;
+  if(src){ src.an.getByteFrequencyData(src.data); bins=src.data; let s=0; const n=Math.floor(bins.length*.6); for(let i=0;i<n;i++) s+=bins[i]; lvl=Math.min(1,s/n/110); }
+  smooth+=(lvl-smooth)*.3; core.style.setProperty("--lvl",(vstate==="standby"?smooth*.25:smooth).toFixed(3));
+  const cx=W/2, cy=H/2, R=Math.min(W,H)*.235, N=72;
+  const color=vstate==="speaking"?"#ffe7c8":vstate==="listening"?"#ff4a2a":"#ff9a3c";
+  if(vstate==="thinking"&&!still.matches){ wctx.strokeStyle="#ffb347"; wctx.lineWidth=3; wctx.lineCap="round"; wctx.shadowColor="#ff6a1a"; wctx.shadowBlur=14;
+    for(let k=0;k<3;k++){ const a=now/420+k*2.094; wctx.beginPath(); wctx.arc(cx,cy,R,a,a+.7); wctx.stroke(); } }
+  else if(bins&&vstate!=="off"){ const gain=vstate==="standby"?.18:1, reach=Math.min(W,H)*.2; wctx.strokeStyle=color; wctx.lineWidth=Math.max(2,R*.022); wctx.lineCap="round"; wctx.shadowColor=color; wctx.shadowBlur=vstate==="standby"?0:12;
+    wctx.globalAlpha=vstate==="standby"?.45:.95; const usable=Math.floor(bins.length*.55);
+    wctx.beginPath(); for(let i=0;i<N;i++){ const m=i<N/2?i:N-i-1, v=bins[Math.floor(m/(N/2)*usable)]/255, a=i/N*Math.PI*2-Math.PI/2, len=2+v*v*reach*gain, c=Math.cos(a), s=Math.sin(a);
+      wctx.moveTo(cx+c*R,cy+s*R); wctx.lineTo(cx+c*(R+len),cy+s*(R+len)); } wctx.stroke(); wctx.globalAlpha=1; }
+  wctx.shadowBlur=0;
+  if(vstate==="off"&&smooth<.005){ waving=false; core.style.setProperty("--lvl","0"); wctx.clearRect(0,0,W,H); return; }
+  requestAnimationFrame(drawWave);
+}
+
+fetch("./api/warm",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId})}).catch(()=>{});
+(async()=>{ try{ liveOk=(await (await fetch("./api/live/status")).json()).available===true; }catch(e){} setState("off"); add("sys","Jarvis online. Say Jarvis, press the microphone, or open the chat to type.");
+  try{ const p=await navigator.permissions.query({name:"microphone"});
+    if(p.state==="granted"&&store.get("jarvis-mic")!=="off"){ await micOn(); setState("standby"); }
+    else if(p.state!=="denied"&&store.get("jarvis-mic")!=="off") add("sys","Press the microphone once to allow it. After that, saying Jarvis works whenever this window is open."); }catch(e){} })();
+
+$("cmdbtn").onclick=async()=>{ const t=$("cmdin").value.trim(); if(!t) return; const line="/jarvis "+t;
+  try{ await navigator.clipboard.writeText(line); $("cmdhint").textContent="Copied: "+line; }catch(e){ $("cmdhint").textContent="Paste this in the booqy chat: "+line; } };
+$("cmdin").addEventListener("keydown",e=>{ if(e.key==="Enter") $("cmdbtn").click(); });
+</script>
+</body>
+</html>
