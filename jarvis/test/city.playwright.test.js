@@ -1,4 +1,5 @@
-// Smoke test in a real browser: the City tab loads, HQ is there, clicking an agent opens its panel.
+// Smoke test in a real browser: the City tab loads, HQ is there, clicking an agent opens its panel,
+// and when live data is missing the HUD says so instead of showing anything made up.
 // Skipped when Google Chrome is not installed.
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync } from "node:fs";
@@ -8,6 +9,7 @@ import { after, before, test } from "node:test";
 import { createCity, loadPolicy } from "city";
 import { createCityChat } from "../server/city-chat.js";
 import { createServer } from "../server/server.js";
+import { citySnapshot } from "./fixtures/city.js";
 
 // Drives the Google Chrome installed on this Mac (no browser download needed).
 let chromium = null;
@@ -34,11 +36,14 @@ test("the City tab shows HQ and an agent's panel opens on click", { skip }, asyn
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
-  await page.goto(`http://localhost:${port}/?demo=1`);
+  // A busy city from the test fixture, served as if the backend had sent it.
+  await page.route("**/api/city", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(citySnapshot()) }));
+  await page.goto(`http://localhost:${port}/`);
   await page.click("#citybtn");
   await page.waitForSelector("#city[data-city-ready='1']", { timeout: 15000 });
   await page.waitForSelector("#citylist button[data-building='HQ']");
-  assert.equal(await page.getAttribute("#citydemolabel", "hidden"), null, "the demo banner is shown");
+  assert.equal(await page.$("#citydemo"), null, "no demo button");
+  assert.equal(await page.getAttribute("#cityerror", "hidden"), "", "no error while the backend answers");
   assert.ok((await page.textContent("#citytop")).includes("AGENTS"));
   assert.ok((await page.$$("#citydepts .dept")).length >= 4, "departments listed on the right");
   await page.locator("#citylist button[data-agent='ios-dev']").dispatchEvent("click"); // the keyboard list sits off-screen
@@ -54,5 +59,29 @@ test("the City tab shows HQ and an agent's panel opens on click", { skip }, asyn
   assert.deepEqual(errors, []);
   const fps = Number(await page.getAttribute("#city", "data-fps"));
   assert.ok(Number.isFinite(fps), "the frame loop runs");
+  await page.close();
+});
+
+test("when the city backend can't be reached, the City view says so and shows no agents", { skip }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await page.route("**/api/city", (r) => r.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "the city backend is not running" }) }));
+  await page.goto(`http://localhost:${port}/`);
+  await page.click("#citybtn");
+  await page.waitForSelector("#cityerror:not([hidden])", { timeout: 15000 });
+  assert.match(await page.textContent("#cityerror"), /Can't reach Jarvis \(the city backend is not running\)/);
+  assert.equal((await page.$$("#citylist button[data-agent]")).length, 0, "no made-up agents");
+  await page.close();
+});
+
+test("when /state.json fails, Status shows an offline state, never fake data", { skip }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await page.route("**/state.json", (r) => r.abort());
+  await page.goto(`http://localhost:${port}/`);
+  await page.click("#statusbtn");
+  await page.waitForSelector("#offline:not([hidden])");
+  assert.equal(await page.textContent("#datatag"), "OFFLINE");
+  assert.match(await page.textContent("#offline"), /Can't reach Jarvis/);
+  assert.equal(await page.textContent("#features"), "unavailable");
+  assert.doesNotMatch(await page.content(), /demo/i, "nothing demo on the page");
   await page.close();
 });

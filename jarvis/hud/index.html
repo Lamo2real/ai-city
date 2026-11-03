@@ -37,7 +37,8 @@
   .top .meta{min-width:0;align-items:center;white-space:nowrap}.top .meta #pstep{display:inline-block;max-width:34vw;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
   .tag{display:inline-block;padding:1px 6px;border:1px solid var(--line);font-size:10px;letter-spacing:.15em;color:var(--o2)}
   .tag.live{border-color:var(--ok);color:var(--ok);box-shadow:0 0 8px rgba(255,179,71,.5)}
-  .tag.demo{border-color:var(--bad);color:var(--bad)}
+  .tag.offline{border-color:var(--bad);color:var(--bad)}
+  .offline-note{font-size:12px;color:var(--bad);border:1px solid var(--bad);padding:6px 8px;margin-bottom:8px}
   .left{grid-area:left;overflow-y:auto}.right{grid-area:right;overflow-y:auto}.core{grid-area:core;position:relative}
   .bl{grid-area:bl;overflow-y:auto}.bc{grid-area:bc}.br{grid-area:br}
   ul{list-style:none}
@@ -168,9 +169,7 @@
   #citypanel h4{font-size:10px;letter-spacing:.2em;color:var(--o2);margin:10px 0 4px}
   #citypanel ul{list-style:none;margin:0;padding:0}#citypanel li{padding:2px 0;color:var(--txt)}
   #citypanel .instruct{margin-top:10px;display:flex;flex-direction:column;gap:4px}
-  #citydemo{position:absolute;left:10px;top:10px;width:auto;height:28px;padding:0 10px;font-size:10px;letter-spacing:.2em}
-  body.view-city.panel-open #citydemo{top:auto;bottom:74px;left:320px}
-  #citydemolabel{position:absolute;left:50%;top:52px;transform:translateX(-50%);color:#1a0800;background:#ffd21e;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:.3em;padding:3px 12px}
+  #cityerror{position:absolute;left:50%;top:60px;transform:translateX(-50%);max-width:calc(100% - 20px);color:#fff;background:var(--bad);font-size:12px;letter-spacing:.05em;padding:6px 12px;text-align:center}
   .srlist{position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden}
   .srlist:focus-within{position:absolute;left:10px;bottom:120px;width:auto;height:auto;background:rgba(7,3,2,.9);padding:8px;z-index:3}
   @media (max-width:1200px){#cityfeed,#cityinbox{width:240px}#citydepts{width:120px}}
@@ -222,6 +221,7 @@
   </div>
 
   <div class="panel left">
+    <div class="offline-note" id="offline" role="alert" hidden></div>
     <h3>FEATURE LEDGER</h3>
     <ul id="features"></ul>
     <div style="margin-top:10px;font-size:11px;color:var(--mute)">PROGRAMME <span id="progpct" style="color:var(--txt)">0%</span></div>
@@ -288,8 +288,7 @@
     <section id="city" tabindex="-1" aria-label="City view">
       <canvas aria-label="Isometric city of the agents"></canvas>
       <div class="cityui" id="citytop" role="status"></div>
-      <button class="ibtn cityui" id="citydemo" aria-pressed="false" title="Show a busy demo city with fake data">DEMO</button>
-      <div id="citydemolabel" hidden>DEMO DATA · NOTHING HERE IS REAL</div>
+      <div id="cityerror" role="alert" hidden></div>
       <nav class="cityui" id="citydepts" aria-label="Departments"></nav>
       <div class="cityui" id="cityfeed" aria-live="polite"></div>
       <div class="cityui" id="cityinbox" aria-live="polite"></div>
@@ -339,20 +338,6 @@
 </div>
 
 <script>
-const DEMO = {
-  generatedAt: new Date().toISOString(), demo: true,
-  pipeline: { step: "Run 0 addendum (K, L)", feature: "L · phone agent ADR", round: 1, lock: "free" },
-  features: [
-    {id:"A",name:"Meta ads",status:"todo"},{id:"B",name:"Site builder",status:"todo"},{id:"C",name:"Guest CRM",status:"todo"},
-    {id:"D",name:"Google Business",status:"todo"},{id:"E",name:"Gift cards",status:"todo"},{id:"F",name:"Waitlist",status:"todo"},
-    {id:"G",name:"Social posting",status:"todo"},{id:"H",name:"Personalliggare",status:"todo"},{id:"I",name:"Fortnox/Visma",status:"todo"},
-    {id:"J",name:"Margin per dish",status:"todo"},{id:"K",name:"Events & tickets",status:"building"},{id:"L",name:"AI phone agent",status:"building"}],
-  prs: [{repo:"infrastructure",number:37,title:"Run 0 addendum: ADRs K + L",state:"ci_running",url:"#"}],
-  ci: [{repo:"infrastructure",status:"pass"},{repo:"application",status:"pass"},{repo:"admin-front-end",status:"pass"},{repo:"booqy-console",status:"pass"},{repo:"customer-front-end",status:"pass"},{repo:"booqy-website",status:"pass"}],
-  actions: ["Meta Business Verification + App Review","Google Business Profile API access","Voice + SIP provider accounts","Accountant: gift card VAT","Legal: personalliggare, Art. 50 wording"],
-  uptime: 99.98, ciPass: 100, alarms: 0,
-  log: ["Run 0 merged to dev and deployed","PROMPTS.md updated with Orchestrator + Jarvis","Orchestrator started Run 0 addendum"]
-};
 const STATE_URL = (window.JARVIS_STATE_URL || "./state.json");
 const $ = id => document.getElementById(id);
 const esc = s => String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -362,7 +347,7 @@ const stLabel = s => /^on dev/i.test(s) ? "on dev" : s;
 const ciClass = s => ({pass:"production",fail:"blocked",running:"building"})[s] || "todo";
 
 function render(d){ window.__lastState=d;
-  $("datatag").textContent = d.demo ? "DEMO" : "LIVE"; $("datatag").className = "tag " + (d.demo?"demo":"live");
+  $("offline").hidden = true; $("datatag").textContent = "LIVE"; $("datatag").className = "tag live";
   $("pstep").textContent = d.pipeline?.step || "idle"; $("lock").textContent = d.pipeline?.lock || "free";
   $("updated").textContent = new Date(d.generatedAt).toLocaleString("sv-SE");
   const f = d.features||[]; const cnt = k => f.filter(x=>stClass(x.status)===k).length;
@@ -381,7 +366,14 @@ function render(d){ window.__lastState=d;
 }
 async function load(){
   try{ const r=await fetch(STATE_URL,{cache:"no-store"}); if(r.status===401){ location.reload(); return; } if(!r.ok) throw 0; render(await r.json()); }
-  catch(e){ render(DEMO); }
+  catch(e){ showOffline(); }
+}
+/* No data is never shown as data: the panels say so and keep nothing made up. */
+function showOffline(){
+  $("datatag").textContent = "OFFLINE"; $("datatag").className = "tag offline";
+  $("offline").textContent = "Can't reach Jarvis, so there is no status to show. Check that the Jarvis server is running on the Mac." + (window.__lastState ? " The figures below are from " + new Date(window.__lastState.generatedAt).toLocaleString("sv-SE") + "." : "");
+  $("offline").hidden = false;
+  if(!window.__lastState){ for(const id of ["features","prs","ci","actions"]) $(id).innerHTML = `<li class="row"><span class="n">unavailable</span></li>`; $("ticker").textContent = "unavailable"; $("pstep").textContent = "unavailable"; $("lock").textContent = "unavailable"; }
 }
 load(); setInterval(load,60000);
 setInterval(()=>{ $("clock").textContent=new Date().toLocaleTimeString("sv-SE"); },1000);
@@ -465,11 +457,6 @@ function playSpeech({text,b64,type}){
   });
 }
 async function speak(text,b64,type){ if(live){ liveSay(text); return; } if(!voiceOn) return; speakTurn=true; enqueueSpeech(text,b64,type); await speechDone(); }
-function preview(q){
-  const d = window.__lastState || DEMO; const f=d.features||[]; const c=k=>f.filter(x=>stClass(x.status)===k).length;
-  if(/status|brief|läge|hur går/i.test(q)) return `Preview mode, sir. ${c("production")} features in production, ${c("dev")} on dev awaiting you, ${c("building")} in progress, ${c("blocked")} blocked. Pipeline: ${d.pipeline?.step||"idle"}. ${(d.actions||[]).length} human actions open.`;
-  return "I can't reach the Jarvis server, sir, so nothing was passed on. Check that it is running on the Mac.";
-}
 
 /* ---------- merge to main: the server decides; this only shows what it asks ---------- */
 let confirmCard=null, confirmData=null, confirmTimer=null, confirmAct=null;
@@ -522,7 +509,7 @@ async function ask(q,spoken=false){
     else{ const reader=r.body.getReader(), dec=new TextDecoder(); let held="";
       for(;;){ const {value,done}=await reader.read(); if(done) break; held+=dec.decode(value,{stream:true});
         const lines=held.split("\n"); held=lines.pop(); for(const l of lines) if(l.trim()) onEvent(JSON.parse(l)); } }
-  }catch(e){ if(turn!==turnSeq||e.name==="AbortError") return; online=false; final=preview(q); enqueueSpeech(final); }
+  }catch(e){ if(turn!==turnSeq||e.name==="AbortError") return; online=false; failure="Can't reach the Jarvis server, so nothing was sent. Check that it is running on the Mac."; }
   if(turn!==turnSeq) return;
   activeTurn=null; dots.remove();
   if(failure){ add("sys",failure); stopSpeech(); setState(idleState()); return; }

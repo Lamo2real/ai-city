@@ -1,7 +1,8 @@
 // Events in, scene state out: the City View's reducer and panel mappings, with no DOM and no three.js.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agentPanel, agentStatus, applySnapshot, demoEvent, demoSnapshot, departmentPanel, initialState, layout, propFor, reduce, topBar } from "../hud/city-state.js";
+import { agentPanel, agentStatus, applySnapshot, departmentPanel, initialState, layout, propFor, reduce, topBar } from "../hud/city-state.js";
+import { cityEvent, citySnapshot } from "./fixtures/city.js";
 
 const T0 = 1_000_000;
 const agent = (id, kind, department, parent = "orchestrator", model = "claude-sonnet-5-5", extra = {}) => ({ id, role: id, kind, department, parent, model, tools: [], lifecycle: "persistent", state: "active", created_at: "", last_active_at: "", total_cost_usd: 0.5, ...extra });
@@ -88,11 +89,18 @@ test("panels show real data and dashes for what is unknown", () => {
   assert.equal(propFor(agent("m", "manager", "Video")), null);
 });
 
-test("the demo city is busy and its events loop without breaking the reducer", () => {
-  let s = applySnapshot(initialState(T0), demoSnapshot(T0), T0);
+test("a busy city and a loop of its events go through the reducer without breaking it", () => {
+  let s = applySnapshot(initialState(T0), citySnapshot(T0), T0);
   assert.ok(topBar(s).agentsTotal >= 8);
   assert.equal(layout(s).buildings.length, 4);
-  for (let i = 0; i < 40; i++) s = reduce(s, demoEvent(i, T0 + i), T0 + i);
+  for (let i = 0; i < 40; i++) s = reduce(s, cityEvent(i, T0 + i), T0 + i);
   assert.ok(s.feed.length > 10 && s.feed.length <= 40);
-  assert.ok(Object.keys(s.departments).includes("Video"), "a demo hire builds a new department");
+  assert.ok(Object.keys(s.departments).includes("Video"), "a hire builds a new department");
+});
+
+test("the city state carries no demo flag and the module exports no demo data", async () => {
+  const mod = await import("../hud/city-state.js");
+  assert.ok(!("demo" in initialState(T0)));
+  assert.ok(!("demo" in applySnapshot(initialState(T0), { agents: [] }, T0)));
+  assert.deepEqual(Object.keys(mod).filter((k) => /demo|sample|fake/i.test(k)), []);
 });
