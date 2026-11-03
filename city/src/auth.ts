@@ -25,12 +25,19 @@ export async function readKeychain(service: string): Promise<string | undefined>
   }
 }
 
-// The environment the SDK's Claude process gets: no API key, and the OAuth token
-// from the Keychain if the CLI is not already logged in through its own store.
+// The environment the SDK's Claude process gets: no API key, none of a surrounding
+// Claude Code session's variables (an agent started from inside one would otherwise
+// inherit its context), and the OAuth token from the Keychain if the CLI is not
+// already logged in through its own store.
+const KEEP = new Set(["CLAUDE_CODE_OAUTH_TOKEN"]);
 export async function sdkEnv(env: NodeJS.ProcessEnv = process.env, keychain: (s: string) => Promise<string | undefined> = readKeychain): Promise<Record<string, string>> {
   assertNoApiKey(env);
   const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(env)) if (v !== undefined && k !== "ANTHROPIC_API_KEY") out[k] = v;
+  for (const [k, v] of Object.entries(env)) {
+    if (v === undefined || k === "ANTHROPIC_API_KEY") continue;
+    if ((k === "CLAUDECODE" || k.startsWith("CLAUDE_CODE_") || k.startsWith("CLAUDE_AGENT_SDK_")) && !KEEP.has(k)) continue;
+    out[k] = v;
+  }
   if (!out.CLAUDE_CODE_OAUTH_TOKEN) {
     const token = await keychain(OAUTH_KEYCHAIN_ITEM);
     if (token) out.CLAUDE_CODE_OAUTH_TOKEN = token;

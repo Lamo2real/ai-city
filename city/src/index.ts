@@ -1,3 +1,10 @@
 export { assertNoApiKey, sdkEnv } from "./auth.ts";
 export { decide, loadPolicy } from "./policy.ts";
 export type { Decision, Policy } from "./policy.ts";
+export { createRunner, UsageLimit, isUsageLimit, capModel } from "./sdk.ts";
+export type { JarvisTool, Runner, TurnRequest, TurnResult } from "./sdk.ts";
+export { createCity } from "./runtime.ts";
+export type { City, CityEvent, CityOptions, AgentSpec } from "./runtime.ts";
+export { loadCorePrompt } from "./agents.ts";
+export type { AgentPrompt } from "./agents.ts";
+export type { Ticket, Question } from "./ledger.ts";

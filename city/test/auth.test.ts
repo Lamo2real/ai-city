@@ -14,8 +14,9 @@ test("the SDK env has no API key and takes the OAuth token from the Keychain whe
   assert.equal(env.ANTHROPIC_API_KEY, undefined);
   assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, "tok");
   assert.deepEqual(asked, ["jarvis.claude-oauth"]);
-  const kept = await sdkEnv({ CLAUDE_CODE_OAUTH_TOKEN: "mine" }, async () => { throw new Error("not asked"); });
+  const kept = await sdkEnv({ CLAUDE_CODE_OAUTH_TOKEN: "mine", CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "outer", CLAUDE_AGENT_SDK_VERSION: "x" }, async () => { throw new Error("not asked"); });
   assert.equal(kept.CLAUDE_CODE_OAUTH_TOKEN, "mine");
+  assert.deepEqual(Object.keys(kept), ["CLAUDE_CODE_OAUTH_TOKEN"], "a surrounding Claude Code session's variables never reach an agent");
   const none = await sdkEnv({ PATH: "/bin" }, async () => undefined);
   assert.equal(none.CLAUDE_CODE_OAUTH_TOKEN, undefined, "the logged-in CLI is enough");
 });
