@@ -24,6 +24,10 @@ Every secret lives in the Keychain and nowhere else. `openclaw.json` only names 
 | `jarvis.openclaw-telegram` | Your bot token from @BotFather (you type it at a prompt) |
 | `jarvis.openclaw-telegram-owner` | Your numeric Telegram user ID, the only allowed sender (you type it at a prompt) |
 
+**How it runs:** OpenClaw doesn't read `openclaw.json` directly. At every start, `bin/gateway` writes `openclaw.runtime.json` next to it: the same config with your numeric ID filled into the owner-only tool-policy key. That file is git-ignored, mode 600, and holds no tokens. OpenClaw reads that runtime copy.
+- **To change a setting:** edit `openclaw.json`, never the runtime copy, then restart the channel (`bin/telegram-off`, then `bin/telegram-on`).
+- **Changes made through OpenClaw itself** (its CLI or doctor) go into the runtime copy, and they're lost at the next start.
+
 ## Set up Telegram (once, about 10 minutes)
 
 1. **Create the bot.** In Telegram, open **@BotFather**, send `/newbot`, pick a name and a username, and copy the token it gives you. Don't send the token to anyone or paste it into any chat, including Jarvis.
@@ -54,7 +58,7 @@ Every secret lives in the Keychain and nowhere else. `openclaw.json` only names 
 7. **Try it:** send your bot "what's 9+9". The reply is Jarvis's, from the same conversation as the HUD. Anyone else who messages the bot is ignored: their messages never reach Jarvis.
 
 **Stop it:**
-- `jarvis/openclaw/bin/telegram-off` stops the channel and keeps it off after a reboot.
+- `jarvis/openclaw/bin/telegram-off` stops the channel, keeps it off after a reboot, and deletes the runtime copy `openclaw.runtime.json` (and its `.last-good`).
 - To also remove the secrets, run `security delete-generic-password -s <item>` for each of the four items.
 - To change the bot token, revoke it in @BotFather (`/revoke`), then store the new one with step 2: delete the old item first, or add `-U` to update it.
 

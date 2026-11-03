@@ -112,3 +112,9 @@ test("bin/gateway names every secret by its Keychain item and never writes a tok
   assert.match(sh, /unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN/);
   assert.ok(!/channels add/.test(sh));
 });
+
+test("bin/telegram-off removes the runtime copy (it holds the owner's Telegram ID)", () => {
+  const sh = readFileSync(join(HERE, "bin/telegram-off"), "utf8");
+  assert.match(sh, /rm -f "\$\{0:A:h:h\}\/openclaw\.runtime\.json" "\$\{0:A:h:h\}\/openclaw\.runtime\.json\.last-good"/);
+  assert.match(sh, /launchctl bootout "gui\/\$\(id -u\)\/se\.lamo\.jarvis-openclaw"/);
+});

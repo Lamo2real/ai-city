@@ -4,4 +4,6 @@
 set -euo pipefail
 launchctl bootout "gui/$(id -u)/se.lamo.jarvis-openclaw" 2>/dev/null || true
 rm -f "$HOME/Library/LaunchAgents/se.lamo.jarvis-openclaw.plist"
+# The runtime copy bin/gateway writes at each start (it holds your Telegram ID): remove it with the channel.
+rm -f "${0:A:h:h}/openclaw.runtime.json" "${0:A:h:h}/openclaw.runtime.json.last-good"
 echo "Telegram channel is off."
