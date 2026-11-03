@@ -1,21 +1,21 @@
-# Jarvis OS — build plan
+# AI City — build plan
 
 One phase per Claude Code session (or per PR). Paste the **Prompt** into Claude Code at the repo root. Don't start the next phase until every **Done when** check passes.
 
 ---
 
 ## Phase 0 — Setup (you, ~30 min)
-Follow `README.md` → Setup. Done when `claude mcp list` shows all servers connected and `python3 .claude/hooks/policy_gate.py --selftest` passes.
+Follow `README.md` → Setup. Done when `claude mcp list` shows all servers connected, `python3 .claude/hooks/policy_gate.py --selftest` passes and `npm test` is green.
 
 ## Phase 1 — Runtime core (text only)
 **Prompt**
-> Read CLAUDE.md, BUILD_PLAN.md and the agent-factory skill. Build Phase 1: a Python daemon in `runtime/` using claude-agent-sdk that loads the four core agents from `agents/core/`, implements the in-process `jarvis` MCP server (hire_agent, retire_agent, list_registry, send_ticket, ask_user, request_review, report), the SQLite ledger and registry, and wires `policy_gate.decide()` into can_use_tool. Add a CLI `jarvis "<prompt>"` that prints Jarvis's replies and questions and accepts answers. Write the tests listed in the agent-factory skill. Use ponytail; run ponytail-review before opening the PR.
+> Read CLAUDE.md, BUILD_PLAN.md and the agent-factory skill. Build Phase 1: the runtime in `city/` (TypeScript, @anthropic-ai/claude-agent-sdk) that loads the four core agents from `agents/core/`, implements the in-process `jarvis` MCP server (hire_agent, retire_agent, list_registry, send_ticket, ask_user, request_review, report), the SQLite ledger and registry, and wires `policy_gate.decide()` into can_use_tool. Add a CLI `jarvis "<prompt>"` that prints Jarvis's replies and questions and accepts answers. Write the tests listed in the agent-factory skill. Use ponytail; run ponytail-review before opening the PR.
 
 **Done when:** `jarvis "what's 9+9"` answers via the fast path with no hire. `jarvis "write a hello-world Python CLI in a new repo"` hires an IT manager and a worker, opens a PR and reports through the Secretary. Killing the daemon mid-task and restarting resumes it. All tests pass.
 
 ## Phase 2 — Voice
 **Prompt**
-> Read the jarvis-voice-streaming skill. Build `voice/` with Pipecat exactly as described, connected to the Phase 1 daemon and the HUD over WebSocket. Log per-turn timings. Use impeccable for the HUD changes.
+> Read the jarvis-voice-streaming skill. Build `jarvis/voice/` with Pipecat exactly as described, connected to the Phase 1 daemon and the HUD over WebSocket. Log per-turn timings. Use impeccable for the HUD changes.
 
 **Done when:** every check in the voice skill passes and the logged p50 latency is within target.
 
@@ -29,7 +29,7 @@ Follow `README.md` → Setup. Done when `claude mcp list` shows all servers conn
 **Prompt**
 > Add a worker skill for iOS (Swift, SwiftUI, Xcode). The worker builds with `xcodebuild` and tests on the simulator on this Mac. The Orchestrator must ask "native Swift or cross-platform?" before hiring for any app request.
 
-**Done when:** "build me a simple iOS habit-tracker app" → platform question → App Manager + iOS Developer hired → questions arrive tagged with their path → `@ios-dev …` reaches the developer with the manager cc'd → app builds and its tests pass → Fable PASS → summary delivered.
+**Done when:** "build me a simple iOS habit-tracker app" → platform question → App Manager + iOS Developer + QA Tester hired → questions arrive tagged with their path → `@ios-dev …` reaches the developer with the manager cc'd → app builds and its tests pass → Fable PASS → summary delivered.
 
 ## Phase 5 — Cloud / Terraform
 **Prompt**
@@ -59,4 +59,4 @@ Follow `README.md` → Setup. Done when `claude mcp list` shows all servers conn
 **Prompt**
 > Turn on hiring for new departments. Enforce every cap in config/policy.json. Add per-ticket tracing (cost, time, agent tree) visible in the HUD, and a small eval set of known tasks per department run by `jarvis eval`.
 
-**Done when:** a 9th concurrent agent is refused cleanly, `jarvis eval` passes, and the HUD shows cost per department for today.
+**Done when:** the agent over `max_concurrent_agents` is refused cleanly, `jarvis eval` passes, and the HUD shows cost per department for today.

@@ -1,0 +1,21 @@
+#!/bin/sh
+# Runs a command with AI City's secrets from the macOS Keychain in its environment.
+# Usage: bin/jarvis-env node server/server.js
+# Items: jarvis.claude-oauth (CLAUDE_CODE_OAUTH_TOKEN), jarvis.github (GITHUB_PAT), jarvis.cartesia (CARTESIA_API_KEY).
+# Nothing is printed or written: the values only reach the child process.
+if [ -n "$ANTHROPIC_API_KEY" ] && [ "$JARVIS_ALLOW_API_KEY" != "1" ]; then
+  echo "jarvis-env: ANTHROPIC_API_KEY is set. AI City runs on the Claude subscription, never on API billing. Unset it (or JARVIS_ALLOW_API_KEY=1)." >&2
+  exit 1
+fi
+[ $# -gt 0 ] || { echo "usage: jarvis-env <command> [args...]" >&2; exit 2; }
+load() { # $1 env var, $2 keychain item; keeps a value already in the environment
+  eval "current=\${$1:-}"
+  [ -n "$current" ] && return
+  value="$(security find-generic-password -s "$2" -w 2>/dev/null)" || return 0
+  [ -n "$value" ] && export "$1=$value"
+}
+load CLAUDE_CODE_OAUTH_TOKEN jarvis.claude-oauth
+load GITHUB_PAT jarvis.github
+load CARTESIA_API_KEY jarvis.cartesia
+unset ANTHROPIC_API_KEY
+exec "$@"
