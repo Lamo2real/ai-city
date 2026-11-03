@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createChat, scrubSecrets } from "./chat.js";
-import { createCityChat } from "./city-chat.js";
+import { createCityChat, withJarvisBin } from "./city-chat.js";
 import { createTranscriber, isWav, parseWake } from "./listen.js";
 import { createLiveSession, liveAvailable } from "./live.js";
 import { createMergeGate, isConfirmPhrase } from "./merge.js";
@@ -505,7 +505,7 @@ async function cityChat(dataDir) {
   const { assertNoApiKey, createCity, createRunner, loadPolicy, sdkEnv } = await import("city");
   assertNoApiKey();
   const policy = loadPolicy();
-  const runner = createRunner({ policy, env: await sdkEnv() });
+  const runner = createRunner({ policy, env: await sdkEnv(withJarvisBin(process.env)) });
   const city = createCity({ runner, policy, log });
   const chat = createCityChat({ city, runner, dataDir, logger: log });
   city.resume().catch((err) => log(`resume failed: ${err.message}`));

@@ -63,7 +63,7 @@ Everything runs on the owner's Claude subscription through the logged-in `claude
 | Browser | `playwright` | Research, travel search, sites without an API. |
 | Calendar, Mail, Notes, Reminders, SMS/calls, draw.io, terminal | your `personal-assistant` MCP | Jarvis's fast path. |
 | AWS | AWS CLI with SSO profiles (`aws sso login`) | Add an AWS MCP server later if you want one. |
-| Spotify | `osascript` | No server needed: `tell application "Spotify" to playpause`. |
+| Spotify | Spotify Web API via `jarvis/bin/jarvis-spotify` (PKCE, tokens in Keychain) | Set up once: [docs/spotify-setup.md](docs/spotify-setup.md). Falls back to `osascript` for basic controls. |
 | Video | `ffmpeg` + YouTube Data API | Add an upload MCP or a small script in Phase 7. |
 | Voice | Cartesia API, Kokoro-MLX, Piper | Python libraries, not MCP. |
 
