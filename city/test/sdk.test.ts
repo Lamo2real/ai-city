@@ -15,7 +15,7 @@ function fakeQuery(messages: unknown[], captured: Captured[]) {
   }) as any;
 }
 
-const result = (extra: Record<string, unknown>) => ({ type: "result", subtype: "success", result: "eighteen", session_id: "sess-1", total_cost_usd: 0.002, errors: [], ...extra });
+const result = (extra: Record<string, unknown>) => ({ type: "result", subtype: "success", result: "eighteen", session_id: "sess-1", total_cost_usd: 0.002, usage: { input_tokens: 120, output_tokens: 30 }, errors: [], ...extra });
 
 test("a turn streams text, reports tool use, and returns the final text, session and cost", async () => {
   const captured: Captured[] = [];
@@ -29,7 +29,7 @@ test("a turn streams text, reports tool use, and returns the final text, session
   const text: string[] = [];
   const tools: string[] = [];
   const r = await runner({ agentId: "jarvis", systemPrompt: "You are Jarvis", model: "claude-haiku-5-5", effort: "low", allowedTools: ["mcp__jarvis__send_ticket"], tools: [{ name: "send_ticket", description: "d", schema: { ticket: z.record(z.string(), z.unknown()) }, handler: async () => ({ ok: true }) }], prompt: "what's 9+9", resume: "old", onText: (t) => text.push(t), onTool: (n) => tools.push(n) });
-  assert.deepEqual(r, { text: "eighteen", sessionId: "sess-1", costUsd: 0.002 });
+  assert.deepEqual(r, { text: "eighteen", sessionId: "sess-1", costUsd: 0.002, tokens: 150 });
   assert.deepEqual(text, ["Math it is — ", "eighteen."]);
   assert.deepEqual(tools, ["mcp__jarvis__send_ticket"]);
   const { options } = captured[0];

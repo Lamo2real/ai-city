@@ -9,14 +9,24 @@ import { z } from "zod";
 import { AGENTS_DIR, loadCorePrompt, parsePrompt, renderTemplate, type AgentPrompt } from "./agents.ts";
 import { checksText, runChecks, type Check, type Exec } from "./checks.ts";
 import { now, openLedger, type AgentRow, type Question, type QuestionRow, type Ticket } from "./ledger.ts";
-import { loadPolicy, type Policy } from "./policy.ts";
+import { auditPath, loadPolicy, type Policy } from "./policy.ts";
 import { validate } from "./schemas.ts";
 import type { JarvisTool, Runner, TurnResult } from "./sdk.ts";
 
 export type CityEvent =
+  // For Jarvis: what the owner must hear.
   | { type: "question"; id: string; question: Question; ticket_id: string }
   | { type: "result"; ticket_id: string; status: Ticket["status"]; summary: string; artifacts: string[] }
-  | { type: "log"; text: string };
+  | { type: "log"; text: string }
+  // For the City View: everything that moves.
+  | { type: "agent.hired"; agent: AgentRow; revived: boolean }
+  | { type: "agent.retired"; id: string }
+  | { type: "ticket.status"; ticket: Ticket; previous: Ticket["status"] | null }
+  | { type: "question.asked"; id: string; question: Question; ticket_id: string }
+  | { type: "question.answered"; id: string; answer: string; answered_by: string; ticket_id: string }
+  | { type: "review.started"; ticket_id: string; round: number; by: string }
+  | { type: "review.result"; ticket_id: string; round: number; verdict: "PASS" | "FAIL"; summary: string; checks: Check[]; fix_ticket?: string; escalated?: boolean }
+  | { type: "cost.update"; agent: string; ticket_id: string | null; usd: number; tokens: number; today: { usd: number; tokens: number; turns: number } };
 
 export interface CityOptions {
   runner: Runner;
@@ -76,6 +86,14 @@ export function createCity(opts: CityOptions) {
     }
   }
 
+  // Every status change is one event for the City View.
+  function setStatus(id: string, status: Ticket["status"], patch: Partial<Ticket> = {}): Ticket {
+    const previous = ledger.getTicket(id)?.status ?? null;
+    const t = ledger.updateTicket(id, { ...patch, status });
+    if (previous !== status) emit({ type: "ticket.status", ticket: t, previous });
+    return t;
+  }
+
   function agent(id: string): AgentRow {
     const a = ledger.getAgent(id);
     if (!a) throw new Error(`no agent ${id}`);
@@ -129,17 +147,23 @@ export function createCity(opts: CityOptions) {
       allowedTools: [...new Set([...p.tools, ...a.tools])], tools: toolsFor(agentId), prompt: text, resume: a.session_id, cwd: cwdFor(ticket), onText,
     });
     ledger.updateAgent(agentId, { session_id: result.sessionId, last_active_at: now() });
-    ledger.addCost(agentId, ticket?.id ?? null, result.costUsd);
+    ledger.addCost(agentId, ticket?.id ?? null, result.costUsd, result.tokens ?? 0);
+    emit({ type: "cost.update", agent: agentId, ticket_id: ticket?.id ?? null, usd: result.costUsd, tokens: result.tokens ?? 0, today: ledger.usageToday() });
     return result;
   }
 
   function dispatch(ticket: Ticket, note = ""): void {
-    const t = ledger.updateTicket(ticket.id, { status: "in_progress" });
+    const t = setStatus(ticket.id, "in_progress");
     const label = t.kind === "direct_instruction" ? `[direct instruction from ${t.from}${t.cc?.length ? `, cc ${t.cc.join(", ")}` : ""}]` : `[ticket from ${t.from}]`;
-    deliver(t.to, `${note}${label} ${JSON.stringify(t)}`, t).catch((err: Error) => {
-      log(`${t.to}: turn failed: ${err.message}`);
-      finish(t.id, "failed", `${t.to} could not finish: ${err.message}`, []);
-    });
+    deliver(t.to, `${note}${label} ${JSON.stringify(t)}`, t)
+      .then(() => {
+        // A direct instruction is done once it has been heard; nobody reports on it.
+        if (t.kind === "direct_instruction" && ledger.getTicket(t.id)?.status === "in_progress") { setStatus(t.id, "done"); retireIfDone(t.to); }
+      })
+      .catch((err: Error) => {
+        log(`${t.to}: turn failed: ${err.message}`);
+        finish(t.id, "failed", `${t.to} could not finish: ${err.message}`, []);
+      });
   }
 
   // When an agent's queue runs dry, a ticket of its that is neither reported, delegated nor
@@ -165,7 +189,7 @@ export function createCity(opts: CityOptions) {
     const current = ledger.getTicket(ticketId);
     if (!current) throw new Error(`no ticket ${ticketId}`);
     if (TERMINAL.has(current.status) && current.status === status) return; // a repeat; a correction (failed → done) goes through
-    const t = ledger.updateTicket(ticketId, { status, result: { ...current.result, summary: summary.slice(0, 800), artifacts } });
+    const t = setStatus(ticketId, status, { result: { ...current.result, summary: summary.slice(0, 800), artifacts } });
     if (TERMINAL.has(status)) retireIfDone(t.to);
     const report = `[report from ${t.to} on ticket ${t.id}] status: ${status}. ${summary}${artifacts.length ? ` Artifacts: ${artifacts.join(", ")}` : ""}`;
     if (!OWNER_SIDE.has(t.from)) {
@@ -182,6 +206,7 @@ export function createCity(opts: CityOptions) {
     if (!a || a.kind === "core" || a.lifecycle !== "temporary" || a.state !== "active") return;
     if (ledger.inbox(agentId).length) return;
     ledger.updateAgent(agentId, { state: "retired" });
+    emit({ type: "agent.retired", id: agentId });
     log(`${agentId}: retired (temporary, work done)`);
     for (const child of ledger.children(agentId)) retireIfDone(child.id);
     retireIfDone(a.parent);
@@ -193,12 +218,14 @@ export function createCity(opts: CityOptions) {
     const ticket = validate<Ticket>("ticket", draft);
     agent(ticket.to);
     if (!ledger.putTicket(ticket)) return ledger.getTicket(ticket.id)!;
+    emit({ type: "ticket.status", ticket, previous: null });
     if (ticket.kind === "direct_instruction" && OWNER_SIDE.has(ticket.from)) {
       // The owner's reply, relayed by Jarvis, is the answer to what that agent asked.
       for (const q of ledger.openQuestions().filter((o) => o.question.asked_by === ticket.to)) {
         ledger.answerQuestion(q.id, ticket.goal);
+        emit({ type: "question.answered", id: q.id, answer: ticket.goal, answered_by: ticket.from, ticket_id: q.question.ticket_id });
         const t = ledger.getTicket(q.question.ticket_id);
-        if (t?.status === "waiting_on_owner") ledger.updateTicket(t.id, { status: "in_progress" });
+        if (t?.status === "waiting_on_owner") setStatus(t.id, "in_progress");
       }
     }
     dispatch(ticket);
@@ -212,7 +239,9 @@ export function createCity(opts: CityOptions) {
     if (existing?.state === "active") throw new Error(`${spec.id} is already hired; find it with list_registry`);
     if (existing) {
       log(`${spec.id}: revived from the registry`);
-      return ledger.updateAgent(spec.id, { state: "active", last_active_at: now() });
+      const row = ledger.updateAgent(spec.id, { state: "active", last_active_at: now() });
+      emit({ type: "agent.hired", agent: row, revived: true });
+      return row;
     }
     const active = ledger.agents("active").filter((a) => a.kind !== "core").length;
     if (active >= policy.caps.max_concurrent_agents) throw new Error(`cap reached: ${policy.caps.max_concurrent_agents} agents are already active. Retire one or reuse.`);
@@ -233,6 +262,7 @@ export function createCity(opts: CityOptions) {
       lifecycle: spec.lifecycle, idle_retire_minutes: spec.idle_retire_minutes, state: "active", session_id: null, prompt_path, created_at: now(), last_active_at: now(), total_cost_usd: 0,
     };
     ledger.putAgent(row);
+    emit({ type: "agent.hired", agent: row, revived: false });
     log(`${spec.id}: hired by ${by} (${spec.kind}, ${department})`);
     return row;
   }
@@ -255,6 +285,7 @@ export function createCity(opts: CityOptions) {
     if (dup) return { id: dup.id };
     const row: QuestionRow = { id: newId("q"), status: "open", question: q, created_at: now() };
     ledger.putQuestion(row);
+    emit({ type: "question.asked", id: row.id, question: q, ticket_id: q.ticket_id });
     const parent = agent(by).parent;
     if (!OWNER_SIDE.has(parent)) {
       const r = await deliver(parent, `[question from ${by} on ticket ${q.ticket_id}] ${JSON.stringify(q.questions)}\nIf the ticket, the codebase or earlier decisions settle it, reply with only {"answers": ["...", ...]} (one per question). Otherwise reply with only {"escalate": true} and it goes to the owner.`, ticket);
@@ -262,11 +293,12 @@ export function createCity(opts: CityOptions) {
       if (answers) {
         const answer = answers.join(" | ");
         ledger.answerQuestion(row.id, answer);
+        emit({ type: "question.answered", id: row.id, answer, answered_by: parent, ticket_id: q.ticket_id });
         sendTicket(parent, { to: by, kind: "direct_instruction", goal: `Answer to your question (${row.id}): ${answer}`, parent_id: q.ticket_id });
         return { id: row.id, answered_by: parent, answer };
       }
     }
-    if (q.blocking) ledger.updateTicket(q.ticket_id, { status: "waiting_on_owner" });
+    if (q.blocking) setStatus(q.ticket_id, "waiting_on_owner");
     emit({ type: "question", id: row.id, question: q, ticket_id: q.ticket_id });
     return { id: row.id };
   }
@@ -276,8 +308,9 @@ export function createCity(opts: CityOptions) {
     if (!q) throw new Error(`no question ${questionId}`);
     if (q.status === "answered") throw new Error(`question ${questionId} is already answered`);
     ledger.answerQuestion(questionId, text);
+    emit({ type: "question.answered", id: questionId, answer: text, answered_by: "owner", ticket_id: q.question.ticket_id });
     const t = ledger.getTicket(q.question.ticket_id);
-    if (t?.status === "waiting_on_owner") ledger.updateTicket(t.id, { status: "in_progress" });
+    if (t?.status === "waiting_on_owner") setStatus(t.id, "in_progress");
     const asker = agent(q.question.asked_by);
     return sendTicket("owner", { to: asker.id, cc: OWNER_SIDE.has(asker.parent) ? [] : [asker.parent], kind: "direct_instruction", goal: `Answer to your question (${questionId}): ${text}`, owner_words: text, parent_id: q.question.ticket_id });
   }
@@ -297,7 +330,8 @@ export function createCity(opts: CityOptions) {
     const t = ledger.getTicket(ticketId);
     if (!t) throw new Error(`no ticket ${ticketId}`);
     const round = (t.review_rounds ?? 0) + 1;
-    ledger.updateTicket(ticketId, { status: "in_review", review_rounds: round });
+    setStatus(ticketId, "in_review", { review_rounds: round });
+    emit({ type: "review.started", ticket_id: ticketId, round, by });
     // The repo under review: the ticket's own scope, else the latest sub-ticket's (the Orchestrator's ticket from Jarvis rarely names one).
     const repo = scopeDir(t) ?? [...ledger.ticketsFrom(t.to)].reverse().map(scopeDir).find(Boolean);
     const checks = await runChecks(repo ?? cwdFor(t), opts.exec);
@@ -312,16 +346,17 @@ export function createCity(opts: CityOptions) {
         : { verdict: "FAIL", findings: [{ severity: "major", problem: `the reviewer gave no verdict: ${r.text.slice(0, 300)}`, fix: "resubmit" }], summary: "no verdict", checks, round };
     }
     const result = { ...t.result, checks: [...checks.map(({ name, passed }) => ({ name, passed })), { name: `fable-review-${round}`, passed: verdict.verdict === "PASS" }] };
-    ledger.updateTicket(ticketId, { status: "in_progress", result });
-    if (verdict.verdict === "PASS") return verdict;
+    setStatus(ticketId, "in_progress", { result });
+    const done = (v: Verdict) => { emit({ type: "review.result", ticket_id: ticketId, round, verdict: v.verdict, summary: v.summary, checks, fix_ticket: v.fix_ticket, escalated: v.escalated }); return v; };
+    if (verdict.verdict === "PASS") return done(verdict);
     const findings = verdict.findings.map((f) => `- [${f.severity ?? "major"}] ${f.where ? `${f.where}: ` : ""}${f.problem ?? ""}${f.fix ? ` Fix: ${f.fix}` : ""}`).join("\n");
     if (round >= policy.caps.max_review_rounds) {
       // Asked as the Orchestrator so it goes straight to the owner (a manager's parent could answer it instead).
       await ask("orchestrator", { ticket_id: ticketId, blocking: true, questions: [{ text: `The review of ticket ${ticketId} failed ${round} times (${verdict.summary}). How should we proceed?`.slice(0, 200), options: ["one more round", "ship as is", "drop it"], default: "one more round", why: findings.slice(0, 200) }] });
-      return { ...verdict, escalated: true };
+      return done({ ...verdict, escalated: true });
     }
     const fix = sendTicket(by, { to: managerOf(t), kind: "fix", parent_id: ticketId, goal: `Review round ${round} of ticket ${ticketId} FAILED. ${verdict.summary}\nFix these, then have the review requested again:\n${findings}`, acceptance_criteria: ["every finding above is fixed", "automated checks pass"], scope: repo ? [repo] : t.scope });
-    return { ...verdict, fix_ticket: fix.id };
+    return done({ ...verdict, fix_ticket: fix.id });
   }
 
   // The manager that owns a ticket's work: the manager its recipient delegated to (latest sub-ticket,
@@ -342,7 +377,7 @@ export function createCity(opts: CityOptions) {
     const obj = z.record(z.string(), z.unknown());
     return [
       { name: "hire_agent", description: "Hire a manager or worker from an agent spec (schemas/agent_spec.schema.json). Reuse from list_registry first.", schema: { spec: obj }, handler: async ({ spec }) => hire(agentId, spec as Record<string, unknown>) },
-      { name: "retire_agent", description: "Retire an agent you hired. It stays in the registry for reuse.", schema: { id: z.string() }, handler: async ({ id }) => { ledger.updateAgent(id as string, { state: "retired" }); return { retired: id }; } },
+      { name: "retire_agent", description: "Retire an agent you hired. It stays in the registry for reuse.", schema: { id: z.string() }, handler: async ({ id }) => { ledger.updateAgent(id as string, { state: "retired" }); emit({ type: "agent.retired", id: id as string }); return { retired: id }; } },
       { name: "list_registry", description: "Find existing agents by role, department, skill or id. Empty query lists all, retired ones included.", schema: { query: z.string() }, handler: async ({ query }) => listRegistry(query as string) },
       { name: "send_ticket", description: "Send a ticket (schemas/ticket.schema.json) to an agent. id, from, status and created_at are filled in if missing.", schema: { ticket: obj }, handler: async ({ ticket }) => sendTicket(agentId, ticket as Record<string, unknown>) },
       { name: "ask_user", description: "Ask the owner (schemas/question.schema.json). Your manager answers first if it can. Keep working on the default unless blocking.", schema: { question: obj }, handler: async ({ question }) => ask(agentId, question as Record<string, unknown>) },
@@ -374,6 +409,23 @@ export function createCity(opts: CityOptions) {
     resume,
     idle,
     openTickets: () => ledger.ticketsByStatus("open", "in_progress", "in_review", "waiting_on_owner"),
+    // Everything the City View needs to draw the current state before events arrive.
+    snapshot: () => {
+      const agents = ledger.agents();
+      const departments = [...new Set(agents.map((a) => a.department).filter((d): d is string => !!d))];
+      return { agents, tickets: ledger.ticketsByStatus("open", "in_progress", "in_review", "waiting_on_owner"), questions: ledger.openQuestions(), usage: ledger.usageToday(), spend: Object.fromEntries(departments.map((d) => [d, ledger.spendToday(d)])) };
+    },
+    // The last n things an agent did, from the policy gate's audit log.
+    auditTail(agentId: string, n = 10): Array<{ ts: number; tool: string; decision: string; reason: string }> {
+      let text = "";
+      try { text = readFileSync(auditPath(policy), "utf8"); } catch { return []; }
+      const out: Array<{ ts: number; tool: string; decision: string; reason: string; agent?: string }> = [];
+      for (const line of text.split("\n")) {
+        if (!line.includes(`"agent":"${agentId}"`) && !line.includes(`"agent": "${agentId}"`)) continue;
+        try { const j = JSON.parse(line); if (j.agent === agentId) out.push(j); } catch { /* a torn line */ }
+      }
+      return out.slice(-n).map(({ ts, tool, decision, reason }) => ({ ts, tool, decision, reason }));
+    },
     close: () => ledger.close(),
   };
 }

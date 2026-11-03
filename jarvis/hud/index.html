@@ -131,6 +131,50 @@
   .confirm button:disabled{opacity:.5;cursor:default}
   @media (display-mode:standalone){html,body{overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}input{-webkit-user-select:text;user-select:text}}
   @media (prefers-reduced-motion:reduce){.core>svg{transform:none}.wakering{display:none}}
+  /* ---------- City View: the whole grid cell, overlays at the corners like the reference ---------- */
+  #city{display:none;position:relative;min-height:0;overflow:hidden;outline:none;background:#070a12}
+  body.view-city #city{display:block}
+  body.view-city .core,body.view-city .talk,body.view-city #status{display:none}
+  #city canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab}
+  #city canvas:active{cursor:grabbing}
+  .cityui{position:absolute;background:rgba(7,3,2,.78);border:1px solid var(--line);backdrop-filter:blur(6px);font-size:11px;
+    clip-path:polygon(0 8px,8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%)}
+  .cityui h3{font-family:Orbitron,sans-serif;font-weight:500;font-size:10px;letter-spacing:.22em;color:var(--o2);margin:0 0 6px}
+  .cityui .mute{color:var(--mute)}
+  #citytop{top:10px;left:50%;transform:translateX(-50%);display:flex;gap:18px;padding:8px 16px;white-space:nowrap;max-width:calc(100% - 20px);overflow-x:auto}
+  #citytop .stat{display:flex;flex-direction:column;align-items:flex-start}
+  #citytop .stat .k{color:var(--mute);letter-spacing:.15em;font-size:9px}
+  #citytop .stat b{font-family:Orbitron,sans-serif;font-size:13px;color:var(--txt)}
+  #citydepts{top:10px;right:10px;width:150px;padding:10px;display:flex;flex-direction:column;gap:4px;max-height:calc(100% - 180px);overflow-y:auto}
+  #citydepts .dept{text-align:left;background:transparent;border:0;border-left:3px solid var(--line);color:var(--txt);padding:5px 8px;cursor:pointer;font:inherit}
+  #citydepts .dept:hover,#citydepts .dept:focus-visible{background:rgba(255,106,26,.12);outline:none}
+  #cityfeed{left:10px;bottom:74px;width:300px;padding:10px;max-height:40%;overflow-y:auto}
+  #cityfeed .line{display:flex;gap:8px;padding:2px 0;color:var(--txt)}
+  #cityfeed .line .t{color:var(--mute);flex:none}
+  #cityfeed .line.fail{color:var(--bad)}#cityfeed .line.pass,#cityfeed .line.done{color:var(--ok)}#cityfeed .line.question{color:#ffd21e}
+  #cityinbox{right:10px;bottom:74px;width:300px;padding:10px;max-height:40%;overflow-y:auto}
+  #cityinbox .q{border-top:1px solid var(--line);padding:8px 0;display:flex;flex-direction:column;gap:4px}
+  #cityinbox .q .who{color:var(--o2)}#cityinbox .q .text{color:var(--txt)}
+  #cityinbox input,#citypanel input{width:100%;background:rgba(0,0,0,.4);border:1px solid var(--line);color:var(--txt);font:inherit;padding:5px 6px}
+  #cityinbox button[type=submit],#citypanel button[type=submit],#citypanel .wide{margin-top:4px;background:var(--o);color:#1a0800;border:0;font:inherit;padding:5px 10px;cursor:pointer;letter-spacing:.1em}
+  #citypanel{top:10px;left:10px;width:320px;max-height:calc(100% - 100px);overflow-y:auto;padding:12px}
+  #citypanel header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+  #citypanel header h3{margin:0;font-size:12px}
+  #citypanel header .ibtn{width:28px;height:28px;font-size:16px}
+  #citypanel .badge{display:inline-block;color:#111;font-weight:bold;padding:1px 8px;margin-bottom:8px;border-radius:2px}
+  #citypanel .row{display:flex;gap:10px;padding:2px 0;border-bottom:1px dashed rgba(255,106,26,.15)}
+  #citypanel .row .k{color:var(--mute);width:90px;flex:none;letter-spacing:.1em}
+  #citypanel .row .v{color:var(--txt);word-break:break-word}
+  #citypanel h4{font-size:10px;letter-spacing:.2em;color:var(--o2);margin:10px 0 4px}
+  #citypanel ul{list-style:none;margin:0;padding:0}#citypanel li{padding:2px 0;color:var(--txt)}
+  #citypanel .instruct{margin-top:10px;display:flex;flex-direction:column;gap:4px}
+  #citydemo{position:absolute;left:10px;top:10px;width:auto;height:28px;padding:0 10px;font-size:10px;letter-spacing:.2em}
+  body.view-city.panel-open #citydemo{top:auto;bottom:74px;left:320px}
+  #citydemolabel{position:absolute;left:50%;top:52px;transform:translateX(-50%);color:#1a0800;background:#ffd21e;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:.3em;padding:3px 12px}
+  .srlist{position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden}
+  .srlist:focus-within{position:absolute;left:10px;bottom:120px;width:auto;height:auto;background:rgba(7,3,2,.9);padding:8px;z-index:3}
+  @media (max-width:1200px){#cityfeed,#cityinbox{width:240px}#citydepts{width:120px}}
+  @media (max-width:800px){#citydepts{display:none}#cityfeed,#cityinbox{width:calc(50% - 15px);max-height:30%}}
   .core.panel{grid-area:auto;background:none;border:0;clip-path:none;padding:0;overflow:hidden;min-width:0;min-height:0}
   .core.panel:before{display:none}
   .hud-stat,.corelabel{display:none}
@@ -232,6 +276,7 @@
     <div class="vhint" id="vhint" role="status"></div>
     <div class="dock" id="dock">
       <button class="ibtn" id="chatbtn" title="Chat" aria-label="Chat" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v11H9l-5 4z"/></svg></button>
+      <button class="ibtn" id="citybtn" title="City" aria-label="City" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V8l4-2v15M9 21V11h6v10M15 21V5l4 2v14M11 14h2M11 17h2"/></svg></button>
       <button class="ibtn" id="statusbtn" title="Status" aria-label="Status" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M21 20H3"/></svg></button>
     </div>
     <div class="corelabel"><div class="big" id="coreval">-</div><div class="sub" id="coresub">AWAITING YOU</div></div>
@@ -240,6 +285,17 @@
     <div class="hud-stat hs3">BUILDING<b id="buildn">0</b>in progress</div>
     <div class="hud-stat hs4">BLOCKED<b id="blockn">0</b>need action</div>
 
+    <section id="city" tabindex="-1" aria-label="City view">
+      <canvas aria-label="Isometric city of the agents"></canvas>
+      <div class="cityui" id="citytop" role="status"></div>
+      <button class="ibtn cityui" id="citydemo" aria-pressed="false" title="Show a busy demo city with fake data">DEMO</button>
+      <div id="citydemolabel" hidden>DEMO DATA · NOTHING HERE IS REAL</div>
+      <nav class="cityui" id="citydepts" aria-label="Departments"></nav>
+      <div class="cityui" id="cityfeed" aria-live="polite"></div>
+      <div class="cityui" id="cityinbox" aria-live="polite"></div>
+      <aside class="cityui" id="citypanel" role="dialog" aria-label="Details" hidden></aside>
+      <nav id="citylist" class="srlist" aria-label="Buildings and agents (keyboard)"></nav>
+    </section>
     <div class="talk" id="talk">
       <header id="talkhead"><h3>TALK TO JARVIS</h3><span class="hint2">CLOSE</span></header>
       <div class="log" id="log"></div>
@@ -342,13 +398,17 @@ function add(cls, text){ const d=document.createElement("div"); d.className="msg
 /* Everything but the core lives in a view you open yourself. */
 const grid=$("grid"), statusSide=document.createElement("aside"); statusSide.id="status"; grid.append(statusSide);
 for(const c of [".top",".left",".right",".bl",".bc",".br"]) statusSide.append(document.querySelector(".panel"+c));
-grid.append(talk);
+grid.append($("city"),talk);
 $("dock").insertBefore($("mic"),$("statusbtn")); $("dock").insertBefore($("voice"),$("statusbtn"));
 let view="";
-function setView(v,focus=false){ view=v; document.body.classList.toggle("view-chat",v==="chat"); document.body.classList.toggle("view-status",v==="status");
-  for(const [id,name] of [["chatbtn","chat"],["statusbtn","status"]]){ $(id).classList.toggle("active",v===name); $(id).setAttribute("aria-pressed",String(v===name)); }
-  if(v==="chat"){ log.scrollTop=log.scrollHeight; if(focus) say.focus(); } }
+function setView(v,focus=false){ view=v; document.body.classList.toggle("view-chat",v==="chat"); document.body.classList.toggle("view-status",v==="status"); document.body.classList.toggle("view-city",v==="city");
+  for(const [id,name] of [["chatbtn","chat"],["statusbtn","status"],["citybtn","city"]]){ $(id).classList.toggle("active",v===name); $(id).setAttribute("aria-pressed",String(v===name)); }
+  if(v==="chat"){ log.scrollTop=log.scrollHeight; if(focus) say.focus(); }
+  if(v==="city") $("city").focus({preventScroll:true});
+  document.dispatchEvent(new CustomEvent("jarvis-view",{detail:v})); }
 $("chatbtn").onclick=()=>setView(view==="chat"?"":"chat",true);
+$("citybtn").onclick=()=>setView(view==="city"?"":"city");
+if(new URLSearchParams(location.search).get("view")==="city") setView("city");
 $("statusbtn").onclick=()=>setView(view==="status"?"":"status");
 $("talkhead").onclick=()=>setView("");
 let hintTimer=null;
@@ -690,5 +750,6 @@ $("cmdbtn").onclick=async()=>{ const t=$("cmdin").value.trim(); if(!t) return; c
   try{ await navigator.clipboard.writeText(line); $("cmdhint").textContent="Copied: "+line; }catch(e){ $("cmdhint").textContent="Paste this in the booqy chat: "+line; } };
 $("cmdin").addEventListener("keydown",e=>{ if(e.key==="Enter") $("cmdbtn").click(); });
 </script>
+<script type="module" src="./city.js"></script>
 </body>
 </html>

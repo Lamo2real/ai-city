@@ -117,7 +117,7 @@ test("@id from the owner is a direct instruction to that agent with its manager 
   assert.equal(t.goal, "use SwiftData");
   assert.deepEqual(calls.map((c) => c.agentId), ["ios-dev"]);
   assert.match(calls[0].prompt, /^\[direct instruction from owner, cc app-manager\]/);
-  assert.deepEqual(city.ledger.inbox("app-manager").map((x) => x.id), [t.id]);
+  assert.equal(city.ledger.getTicket(t.id)?.status, "done", "a direct instruction is done once heard");
   assert.equal(city.instruct("plain text"), null);
   assert.throws(() => city.instruct("@nobody hi"), /no agent nobody/);
   city.close();
@@ -201,8 +201,8 @@ test("a failed turn fails the ticket and the owner hears about it", async () => 
   const ticket = city.sendTicket({ to: "orchestrator", goal: "x" });
   await city.idle();
   assert.equal(city.ledger.getTicket(ticket.id)?.status, "failed");
-  assert.equal(events[0].type, "result");
-  assert.match(events[0].type === "result" ? events[0].summary : "", /Needs you/);
+  const result = events.find((e) => e.type === "result");
+  assert.match(result?.type === "result" ? result.summary : "", /Needs you/);
   city.close();
 });
 

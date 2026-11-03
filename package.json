@@ -16,6 +16,7 @@
     "start": "npm start -w jarvis",
     "test": "npm test --workspaces --if-present",
     "policy:selftest": "python3 .claude/hooks/policy_gate.py --selftest",
-    "test:voice": "cd jarvis/voice && uv run pytest -q"
+    "test:voice": "cd jarvis/voice && uv run pytest -q",
+    "test:e2e": "node --test --test-force-exit jarvis/test/city.playwright.test.js"
   }
 }

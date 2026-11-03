@@ -1,5 +1,6 @@
 // Jarvis OS local server. Listens on 127.0.0.1, on the LAN only if the iPhone option is on (phone.js), and takes tailnet traffic only if that is on (tailnet.js).
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { createServer as createHttpServer } from "node:http";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -16,6 +17,7 @@ import { isOwner, startTailnetListener } from "./tailnet.js";
 import { synthesize } from "./voice.js";
 
 const HUD_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "hud");
+const THREE_DIR = dirname(createRequire(import.meta.url).resolve("three")); // three's build/ folder, served as /vendor
 const HOST = "127.0.0.1";
 const MAX_BODY = 64 * 1024;
 const MAX_MESSAGE = 20_000; // About ten minutes of speech.
@@ -33,10 +35,14 @@ const STATIC = {
   "/icon-192.png": ["icon-192.png", "image/png"],
   "/icon-512.png": ["icon-512.png", "image/png"],
   "/apple-touch-icon.png": ["apple-touch-icon.png", "image/png"],
+  "/city.js": ["city.js", "text/javascript; charset=utf-8"],
+  "/city-state.js": ["city-state.js", "text/javascript; charset=utf-8"],
+  "/vendor/three.module.js": [join(THREE_DIR, "three.module.js"), "text/javascript; charset=utf-8"],
+  "/vendor/three.core.js": [join(THREE_DIR, "three.core.js"), "text/javascript; charset=utf-8"],
 };
 const CSP = [
   "default-src 'self'",
-  "script-src 'unsafe-inline'",
+  "script-src 'self' 'unsafe-inline'",
   "style-src 'unsafe-inline' https://fonts.googleapis.com",
   "font-src https://fonts.gstatic.com",
   "media-src data:",
@@ -329,9 +335,14 @@ async function handleLogin(req, res, access) {
   return sendJson(res, 401, { error: "Wrong passcode." });
 }
 
-// What the city says unprompted (questions, results) reaches every open HUD as server-sent events.
+// What the city says unprompted (questions, results) reaches every open HUD as server-sent events,
+// and so does everything that moves in the city (hires, tickets, questions, reviews, cost) for the City View.
 function createEventStream(talk, speak) {
   const clients = new Set();
+  talk.city?.on((event) => {
+    if (event.type === "log") return;
+    for (const res of clients) res.write(`data: ${JSON.stringify({ type: "city", event })}\n\n`);
+  });
   talk.on?.(async ({ sessionId, text }) => {
     const event = { type: "jarvis", sessionId, text: scrubSecrets(text) };
     if (voiceBySession.get(sessionId)) {
@@ -349,6 +360,38 @@ function createEventStream(talk, speak) {
     clients.add(res);
     req.on("close", () => clients.delete(res));
   };
+}
+
+// The City View's data: a snapshot to start from, an agent's last actions, and the two ways the owner
+// talks back through the bus (an @mention direct instruction, an answer to a question).
+async function handleCity(req, res, city, path) {
+  if (!city) return sendJson(res, 404, { error: "the city backend is not running" });
+  if (req.method === "GET" && path === "/api/city") return sendJson(res, 200, city.snapshot());
+  if (req.method === "GET" && path === "/api/city/audit") {
+    const agent = new URL(req.url, "http://localhost").searchParams.get("agent") ?? "";
+    return /^[a-z][a-z0-9-]{0,40}$/.test(agent) ? sendJson(res, 200, city.auditTail(agent)) : sendJson(res, 400, { error: "bad agent" });
+  }
+  if (req.method !== "POST") return sendJson(res, 405, { error: "method not allowed" });
+  let body;
+  try {
+    body = JSON.parse(await readBody(req));
+  } catch (err) {
+    return sendJson(res, err.status ?? 400, { error: "bad request" });
+  }
+  try {
+    if (path === "/api/city/instruct") {
+      if (typeof body?.text !== "string" || body.text.length > MAX_MESSAGE) return sendJson(res, 400, { error: "bad text" });
+      const ticket = city.instruct(body.text);
+      return ticket ? sendJson(res, 200, { ticket }) : sendJson(res, 400, { error: "start with @agent-id" });
+    }
+    if (path === "/api/city/answer") {
+      if (typeof body?.id !== "string" || typeof body?.text !== "string" || !body.text.trim() || body.text.length > MAX_MESSAGE) return sendJson(res, 400, { error: "bad answer" });
+      return sendJson(res, 200, { ticket: city.answer(body.id, body.text.trim()) });
+    }
+  } catch (err) {
+    return sendJson(res, 400, { error: scrubSecrets(err.message) });
+  }
+  return sendJson(res, 404, { error: "not found" });
 }
 
 export function createServer({ booqyDir, dataDir, port, getState, chat, speak = synthesize, transcribe, gate, firstWaitMs, startLive = createLiveSession }) {
@@ -372,6 +415,7 @@ export function createServer({ booqyDir, dataDir, port, getState, chat, speak = 
     }
     if (req.method === "GET" && path === "/api/live/status") return sendJson(res, 200, { available: !phone && liveAvailable() });
     if (req.method === "GET" && path === "/api/events") return events(req, res);
+    if (path.startsWith("/api/city")) return await handleCity(req, res, talk.city, path);
     if (req.method === "POST" && path === "/api/confirm") return await handleConfirm(req, res, { gate: mergeGate, speak });
     if (req.method === "POST" && path === "/api/listen") return await handleListen(req, res, { transcribe: hear });
     if (req.method !== "GET" && req.method !== "HEAD") return sendJson(res, 405, { error: "method not allowed" });
@@ -385,7 +429,7 @@ export function createServer({ booqyDir, dataDir, port, getState, chat, speak = 
     }
     const entry = STATIC[path];
     if (!entry) return sendJson(res, 404, { error: "not found" });
-    return send(res, 200, entry[1], await readFile(join(HUD_DIR, entry[0])));
+    return send(res, 200, entry[1], await readFile(entry[0].startsWith("/") ? entry[0] : join(HUD_DIR, entry[0])));
   }
 
   function fail(res, err) {
