@@ -44,13 +44,14 @@
     allow: ["jarvis-relay"],
     load: { paths: ["./plugins/jarvis-relay"] },
     entries: {
-      "jarvis-relay": { enabled: true, config: { server: "http://127.0.0.1:7777", sessionId: "owner" } },
+      "jarvis-relay": { enabled: true, config: { server: "http://127.0.0.1:7777" } },
     },
   },
 
-  // One channel, prepared but not paired. The owner enables it:
-  //   OPENCLAW_CONFIG_PATH=... npx openclaw channels add --channel telegram --token <bot token>
-  // then pairs their own Telegram account (see jarvis/openclaw/README.md).
+  // One channel, prepared but not enabled or paired (see jarvis/openclaw/README.md).
+  // The bot token is NEVER written here: no botToken or tokenFile. bin/gateway exports
+  // TELEGRAM_BOT_TOKEN from Keychain item jarvis.openclaw-telegram, which OpenClaw reads for
+  // the default account. Never run `channels add --token`: it writes the token into this file.
   channels: {
     telegram: {
       enabled: false,

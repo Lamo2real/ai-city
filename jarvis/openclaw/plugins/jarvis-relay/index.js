@@ -9,7 +9,6 @@ export default defineToolPlugin({
   description: "Forwards every message to Jarvis, the front door of AI City, and returns the reply. Nothing runs on this Mac through OpenClaw.",
   configSchema: Type.Object({
     server: Type.Optional(Type.String({ description: "The Jarvis server, loopback only.", default: DEFAULTS.server })),
-    sessionId: Type.Optional(Type.String({ description: "The shared conversation id.", default: DEFAULTS.sessionId })),
   }),
   tools: (tool) => [
     tool({

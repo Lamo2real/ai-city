@@ -13,6 +13,12 @@ import { createMergeGate, isConfirmPhrase } from "./merge.js";
 import { FILLERS, allFillers, fillerLanguage, sentenceSplitter, toolFiller } from "./progress.js";
 import { createKeychain } from "./keychain.js";
 import { createAppApi } from "./app-api.js";
+import { bearer, createTokenCheck } from "./token-check.js";
+
+// The OpenClaw relay's own route and Keychain item (see jarvis/openclaw/README.md).
+export const RELAY_PATH = "/api/relay/chat";
+export const RELAY_SERVICE = "jarvis.openclaw-relay";
+const RELAY_SESSION = "owner"; // the shared conversation, like the HUD, voice and the phone
 import { LOGIN_PAGE, createPhoneAccess, inSubnet, startPhoneListener } from "./phone.js";
 import { createStateSource } from "./state.js";
 import { isOwner, startTailnetListener } from "./tailnet.js";
@@ -141,17 +147,18 @@ async function handleListen(req, res, { transcribe }) {
   }
 }
 
-async function handleChat(req, res, { chat, speak, gate, phone }) {
-  let body;
+// `parsed` is a body a restricted channel (the OpenClaw relay) has already read and checked.
+async function handleChat(req, res, { chat, speak, gate, phone, parsed }) {
+  let body = parsed;
   try {
-    body = JSON.parse(await readBody(req));
+    body ??= JSON.parse(await readBody(req));
   } catch (err) {
     return sendJson(res, err.status ?? 400, { error: "bad request" });
   }
   const { message, sessionId, voice } = body ?? {};
   if (typeof message !== "string" || !message.trim() || message.length > MAX_MESSAGE) return sendJson(res, 400, { error: "bad message" });
   if (typeof sessionId !== "string" || !SESSION_ID.test(sessionId)) return sendJson(res, 400, { error: "bad sessionId" });
-  voiceBySession.set(sessionId, voice === true);
+  if (!parsed) voiceBySession.set(sessionId, voice === true); // A relayed turn must not switch the voice session's audio off.
 
   // Handled here so the model is never part of the confirmation. The phone route
   // is plain HTTP on a shared network, so it can never confirm a merge to main.
@@ -418,6 +425,21 @@ export function createServer({ booqyDir, dataDir, port, getState, chat, speak = 
     chatStream: (req, res, parsed) => handleChatStream(req, res, { chat: talk, speak, gate: mergeGate, phone: true, firstWaitMs, parsed }),
     logger: log,
   });
+  const relayToken = createTokenCheck({ keychain, service: RELAY_SERVICE, logger: log });
+
+  // The OpenClaw relay (Telegram and other chat apps): phone rights, not the HUD's. A merge to main
+  // can't be confirmed through it, and a merge it starts is cancelled. Localhost listener only, and
+  // only with the relay token, so another local program can't pass as the relay to get its channel.
+  async function handleRelay(req, res) {
+    if (!(await relayToken(bearer(req)))) return sendJson(res, 401, { error: "relay not authorised" });
+    let body;
+    try {
+      body = JSON.parse(await readBody(req));
+    } catch (err) {
+      return sendJson(res, err.status ?? 400, { error: "bad request" });
+    }
+    return handleChat(req, res, { chat: talk, speak, gate: mergeGate, phone: true, parsed: { message: body?.message, sessionId: RELAY_SESSION, voice: false } });
+  }
 
   async function route(req, res, phone) {
     const path = new URL(req.url, "http://localhost").pathname;
@@ -459,6 +481,7 @@ export function createServer({ booqyDir, dataDir, port, getState, chat, speak = 
     try {
       const localPort = server.address().port ?? port;
       if (!allowedRequest(req, [`localhost:${localPort}`, `127.0.0.1:${localPort}`])) return sendJson(res, 403, { error: "forbidden" });
+      if (req.method === "POST" && new URL(req.url, "http://localhost").pathname === RELAY_PATH) return await handleRelay(req, res);
       return await route(req, res, false);
     } catch (err) {
       fail(res, err);
