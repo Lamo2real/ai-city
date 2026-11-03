@@ -1,4 +1,4 @@
-// A message in → one POST to Jarvis's relay route (phone rights) with the relay token → the reply out.
+// A message in → one POST to Jarvis's relay route with the relay token, on loopback only → the reply out.
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { after, before, test } from "node:test";

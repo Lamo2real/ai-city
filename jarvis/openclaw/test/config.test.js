@@ -38,11 +38,17 @@ for (const name of CONFIGS) {
     for (const word of ["funnel", "tunnel", "0.0.0.0"]) assert.ok(!text.includes(word), `no ${word} in the config`);
   });
 
-  test(`${name}: Telegram is off, groups disabled, and no bot token in the file`, () => {
-    const t = load(name).channels.telegram;
-    assert.equal(t.enabled, false);
+  test(`${name}: Telegram DMs from the owner's numeric ID only; no groups, no owner commands, no bot token in the file`, () => {
+    const c = load(name);
+    const t = c.channels.telegram;
+    assert.equal(t.dmPolicy, "allowlist", "only allowlisted senders reach the relay; never pairing or open");
+    assert.deepEqual(t.allowFrom, ["${TELEGRAM_OWNER_ID}"], "exactly one sender: the owner's ID from the Keychain");
     assert.equal(t.groupPolicy, "disabled");
+    assert.ok(!("groupAllowFrom" in t) && !("groups" in t) && !("accounts" in t), "no groups and no extra bot accounts");
     assert.ok(!("botToken" in t) && !("tokenFile" in t), "the bot token comes from the Keychain via TELEGRAM_BOT_TOKEN, never the config");
+    assert.ok(!("webhookUrl" in t), "polling only: no inbound webhook port");
+    assert.ok(!c.commands?.ownerAllowFrom, "no OpenClaw owner commands are granted");
+    assert.deepEqual(Object.keys(c.channels), ["telegram"], "Telegram is the only channel");
   });
 
   test(`${name}: every secret-looking value is only a \${ENV} reference`, () => {
@@ -77,11 +83,12 @@ test("openclaw stays pinned to one exact version", () => {
   assert.equal(pkg.dependencies.openclaw, "2026.10.10");
 });
 
-test("bin/gateway loads every secret from the Keychain and the relay token is required", () => {
+test("bin/gateway names every secret by its Keychain item and never writes a token into config", () => {
   const sh = readFileSync(join(HERE, "bin/gateway"), "utf8");
   assert.match(sh, /need OPENCLAW_GATEWAY_TOKEN jarvis\.openclaw-gateway/);
   assert.match(sh, /need JARVIS_RELAY_TOKEN jarvis\.openclaw-relay/);
-  assert.match(sh, /keychain jarvis\.openclaw-telegram/);
+  assert.match(sh, /need_entered TELEGRAM_BOT_TOKEN jarvis\.openclaw-telegram /);
+  assert.match(sh, /need_entered TELEGRAM_OWNER_ID jarvis\.openclaw-telegram-owner /);
   assert.match(sh, /unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN/);
   assert.ok(!/channels add/.test(sh));
 });

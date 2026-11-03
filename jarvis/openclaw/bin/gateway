@@ -2,8 +2,9 @@
 # Starts the OpenClaw gateway with only what it needs, all from the macOS Keychain, never from files:
 #   jarvis.openclaw-gateway   OPENCLAW_GATEWAY_TOKEN  clients must present it to the gateway (required)
 #   jarvis.openclaw-relay     JARVIS_RELAY_TOKEN      the relay presents it to Jarvis's relay route (required)
-#   jarvis.openclaw-telegram  TELEGRAM_BOT_TOKEN      the Telegram bot token (optional; only once Telegram is set up)
-# openclaw.json only references these by name, so no secret is ever written to a git-tracked file.
+#   jarvis.openclaw-telegram  TELEGRAM_BOT_TOKEN      the Telegram bot token from @BotFather (required)
+#   jarvis.openclaw-telegram-owner TELEGRAM_OWNER_ID  the owner's numeric Telegram user ID, the only allowed sender (required)
+# openclaw.json only references these by name, so no secret or personal ID is ever written to a git-tracked file.
 # No Claude OAuth token, no API key ever reaches OpenClaw; its Claude CLI backend uses the `claude` login.
 # Usage: jarvis/openclaw/bin/gateway [gateway|security audit --deep|pairing ...]
 set -e
@@ -24,9 +25,21 @@ need() { # $1 env var, $2 Keychain item
 }
 need OPENCLAW_GATEWAY_TOKEN jarvis.openclaw-gateway
 need JARVIS_RELAY_TOKEN jarvis.openclaw-relay
-if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
-  value="$(keychain jarvis.openclaw-telegram)" && export TELEGRAM_BOT_TOKEN="$value"
-fi
+need_entered() { # $1 env var, $2 Keychain item, $3 what it is: entered by the owner at a prompt, never generated
+  eval "current=\${$1:-}"
+  [ -n "$current" ] && { export "$1"; return; }
+  value="$(keychain "$2")" || {
+    echo "gateway: Keychain item $2 ($3) is missing. Store it at a prompt: security add-generic-password -s $2 -a jarvis -w" >&2
+    exit 1
+  }
+  export "$1=$value"
+}
+need_entered TELEGRAM_BOT_TOKEN jarvis.openclaw-telegram "the bot token from @BotFather"
+need_entered TELEGRAM_OWNER_ID jarvis.openclaw-telegram-owner "your numeric Telegram user ID"
+# The allowlist must be exactly one numeric ID: anything else could widen or break who may talk to Jarvis.
+case "$TELEGRAM_OWNER_ID" in
+  ''|*[!0-9]*) echo "gateway: jarvis.openclaw-telegram-owner must be your numeric Telegram user ID (digits only)." >&2; exit 1 ;;
+esac
 unset value current
 
 mkdir -p "$OPENCLAW_STATE_DIR" && chmod 700 "$OPENCLAW_STATE_DIR"

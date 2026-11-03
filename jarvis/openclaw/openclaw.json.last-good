@@ -48,14 +48,17 @@
     },
   },
 
-  // One channel, prepared but not enabled or paired (see jarvis/openclaw/README.md).
-  // The bot token is NEVER written here: no botToken or tokenFile. bin/gateway exports
-  // TELEGRAM_BOT_TOKEN from Keychain item jarvis.openclaw-telegram, which OpenClaw reads for
-  // the default account. Never run `channels add --token`: it writes the token into this file.
+  // Telegram: direct messages from the owner's own account only. dmPolicy "allowlist" with his numeric
+  // user ID, which bin/gateway exports as TELEGRAM_OWNER_ID from Keychain item jarvis.openclaw-telegram-owner.
+  // Anyone else is dropped by OpenClaw before the agent sees it. If the ID is missing it stays an unresolved
+  // literal that matches nobody, and bin/gateway refuses to start. No groups, no owner commands.
+  // The bot token is NEVER written here (no botToken or tokenFile): bin/gateway exports TELEGRAM_BOT_TOKEN
+  // from Keychain item jarvis.openclaw-telegram. Never run `channels add --token`: it writes the token here.
   channels: {
     telegram: {
-      enabled: false,
-      dmPolicy: "pairing",
+      enabled: true,
+      dmPolicy: "allowlist",
+      allowFrom: ["${TELEGRAM_OWNER_ID}"],
       groupPolicy: "disabled",
     },
   },

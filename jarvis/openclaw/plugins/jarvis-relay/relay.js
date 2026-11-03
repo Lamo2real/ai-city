@@ -1,6 +1,7 @@
 // The one thing OpenClaw may do: hand the owner's words to Jarvis and bring back the reply.
-// It uses Jarvis's relay route, which has phone rights (no merge confirmations), in the shared
-// `owner` conversation (fixed on the server). The relay token comes from the gateway's environment:
+// It uses Jarvis's relay route, in the shared `owner` conversation (fixed on the server). By the
+// owner's decision that route has the HUD's rights; only his allowlisted Telegram account reaches it,
+// and every relayed turn is audited. The relay token comes from the gateway's environment:
 // bin/gateway reads it from Keychain item jarvis.openclaw-relay. It is never in config or logs.
 export const DEFAULTS = { server: "http://127.0.0.1:7777" };
 export const RELAY_PATH = "/api/relay/chat";

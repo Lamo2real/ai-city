@@ -1,0 +1,7 @@
+#!/bin/zsh
+# Stops Jarvis's Telegram channel and keeps it stopped (also after a restart). Keychain items are kept;
+# to remove them too: security delete-generic-password -s jarvis.openclaw-telegram (and the other three).
+set -euo pipefail
+launchctl bootout "gui/$(id -u)/se.lamo.jarvis-openclaw" 2>/dev/null || true
+rm -f "$HOME/Library/LaunchAgents/se.lamo.jarvis-openclaw.plist"
+echo "Telegram channel is off."

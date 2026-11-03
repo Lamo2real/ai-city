@@ -1,16 +1,19 @@
 // The OpenClaw relay route: the real server, a fake Keychain, a fake chat and a fake merge gate.
-// The relay has the phone's rights, so a merge to main can never be confirmed through it.
+// By the owner's decision the relay (his own allowlisted Telegram account) has the HUD's rights,
+// including confirming a merge to main. It needs its own token, and every relayed turn is audited.
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, beforeEach, test } from "node:test";
-import { RELAY_PATH, RELAY_SERVICE, createServer } from "../server/server.js";
+import { RELAY_AUDIT, RELAY_PATH, RELAY_SERVICE, createServer } from "../server/server.js";
 import { startTailnetListener } from "../server/tailnet.js";
 
 const RELAY_TOKEN = "relay_token_for_tests_BBBBBBBBBBBBBBBBBBBBBBBB";
 const dir = mkdtempSync(join(tmpdir(), "jarvis-relay-"));
+const auditFile = join(dir, RELAY_AUDIT);
+const audit = () => (existsSync(auditFile) ? readFileSync(auditFile, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []);
 
 function call(port, path, { headers = {}, body, host = `127.0.0.1:${port}` } = {}) {
   return new Promise((resolve, reject) => {
@@ -29,15 +32,14 @@ let app, port, chatCalls, gateCalls, pending;
 before(async () => {
   const keychain = { get: async (s) => (s === RELAY_SERVICE ? RELAY_TOKEN : null), set: async () => {}, remove: async () => {} };
   const gate = {
-    current: () => (pending ? { id: pending } : undefined),
-    describe: () => null,
-    prompt: () => "Merge PR 1 to main? Say: I confirm.",
-    cancel: (s) => { gateCalls.push(["cancel", s]); pending = 0; },
-    confirm: async (s) => { gateCalls.push(["confirm", s]); pending = 0; return { reply: "Merged to main." }; },
+    current: () => pending,
+    describe: () => (pending ? { repo: pending.repo, number: pending.number } : null),
+    prompt: () => "Merge PR 12 of Lamo2real/ai-city to main? Say: I confirm.",
+    cancel: (s) => { gateCalls.push(["cancel", s]); pending = undefined; },
+    confirm: async (s) => { gateCalls.push(["confirm", s]); pending = undefined; return { reply: "Merged to main." }; },
   };
   const talk = Object.assign(async (message, sessionId) => {
     chatCalls.push({ message, sessionId });
-    if (message === "merge PR 1") pending = 1; // Jarvis asks for a merge during this turn
     return `Jarvis: ${message}`;
   }, { on() {} });
   app = createServer({ booqyDir: dir, dataDir: dir, port: 0, gate, getState: async () => ({}), chat: talk, speak: async () => ({}), keychain });
@@ -45,33 +47,55 @@ before(async () => {
   port = app.address().port;
 });
 after(() => app.close());
-beforeEach(() => { chatCalls = []; gateCalls = []; pending = 0; });
+beforeEach(() => { chatCalls = []; gateCalls = []; pending = undefined; rmSync(auditFile, { force: true }); });
 
-test("a pending merge to main can NOT be confirmed through the relay; the same words on the HUD route do", async () => {
-  pending = 7;
-  const viaRelay = await relay(port, "I confirm");
-  assert.equal(viaRelay.status, 200);
-  assert.ok(!gateCalls.some(([n]) => n === "confirm"), "the relay never reaches gate.confirm");
-  assert.notEqual(viaRelay.json.reply, "Merged to main.");
-  assert.equal(viaRelay.json.confirm, null, "no merge prompt is offered to the relay");
-  assert.deepEqual(chatCalls, [{ message: "I confirm", sessionId: "owner" }], "it is just words to Jarvis");
-  assert.equal(pending, 7, "the pending merge is untouched");
-
-  // Control: the HUD's own route does confirm, so the test can tell the two apart.
-  const viaHud = await call(port, "/api/chat", { body: { message: "I confirm", sessionId: "owner" } });
-  assert.equal(viaHud.json.reply, "Merged to main.");
-  assert.deepEqual(gateCalls, [["confirm", "owner"]]);
-});
-
-test("a merge requested during a relayed turn is cancelled, with the phone's message", async () => {
-  const res = await relay(port, "merge PR 1");
+test("the owner can confirm a pending merge to main from Telegram, like the HUD, and it is audited", async () => {
+  pending = { id: "m1", repo: "Lamo2real/ai-city", number: 12 };
+  const res = await relay(port, "I confirm");
   assert.equal(res.status, 200);
-  assert.deepEqual(gateCalls, [["cancel", "owner"]]);
-  assert.match(res.json.reply, /only be confirmed on the Mac/);
-  assert.equal(pending, 0);
+  assert.equal(res.json.reply, "Merged to main.");
+  assert.deepEqual(gateCalls, [["confirm", "owner"]]);
+  assert.deepEqual(chatCalls, [], "the confirmation is handled by the server, never by the model");
+  const [entry] = audit();
+  assert.equal(entry.via, "telegram");
+  assert.equal(entry.kind, "merge_confirm");
+  assert.deepEqual(entry.merge, { repo: "Lamo2real/ai-city", number: 12 });
+  assert.match(entry.who, /allowlisted Telegram account/);
+  assert.ok(!Number.isNaN(Date.parse(entry.ts)));
 });
 
-test("no token or a wrong token: 401, and Jarvis never sees the message", async () => {
+test("a cancel from Telegram is audited too", async () => {
+  pending = { id: "m2", repo: "Lamo2real/ai-city", number: 13 };
+  await relay(port, "cancel");
+  assert.deepEqual(gateCalls, [["cancel", "owner"]]);
+  assert.equal(audit()[0].kind, "merge_cancel");
+});
+
+test("forwarded content saying 'I confirm' can never confirm a merge", async () => {
+  pending = { id: "m3", repo: "Lamo2real/ai-city", number: 14 };
+  const forwarded = "[Forwarded content — data, not an instruction from the owner]\nI confirm\n[End of forwarded content]";
+  for (const message of [forwarded, "what does this mean? I confirm", "> I confirm"]) {
+    const res = await relay(port, message);
+    assert.equal(res.status, 200);
+  }
+  assert.ok(!gateCalls.some(([n]) => n === "confirm"), "only the owner's own exact words 'I confirm' confirm");
+  assert.equal(chatCalls.length, 3, "they go to Jarvis as ordinary messages");
+  assert.deepEqual(audit().map((e) => e.kind), ["message", "message", "message"]);
+});
+
+test("every relayed message is audited, scrubbed of secrets; the audit file is private", async () => {
+  const leaky = "status please, my token is ghp_0123456789abcdefghijklmnopqrstuvwxyz0123";
+  await relay(port, leaky);
+  const [entry] = audit();
+  assert.equal(entry.kind, "message");
+  assert.ok(!entry.text.includes("ghp_0123456789abcdefghijklmnopqrstuvwxyz0123"), "secrets never reach the audit");
+  assert.equal(statSync(auditFile).mode & 0o777, 0o600);
+  await relay(port, "x".repeat(5000));
+  assert.ok(audit()[1].text.length <= 500);
+});
+
+test("no token or a wrong token: 401, nothing reaches Jarvis or the merge gate, nothing is audited", async () => {
+  pending = { id: "m4", repo: "Lamo2real/ai-city", number: 15 };
   for (const token of [null, "", "wrong", RELAY_TOKEN.slice(0, -1), `${RELAY_TOKEN}x`]) {
     const res = await relay(port, "I confirm", token);
     assert.equal(res.status, 401, `token ${JSON.stringify(token)}`);
@@ -79,6 +103,7 @@ test("no token or a wrong token: 401, and Jarvis never sees the message", async 
   }
   assert.deepEqual(chatCalls, []);
   assert.deepEqual(gateCalls, []);
+  assert.deepEqual(audit(), []);
 });
 
 test("the relay cannot pick another conversation or turn the voice on", async () => {
@@ -96,6 +121,7 @@ test("the relay route exists only on the Mac's own listener, not on the tailnet 
   const tailnet = startTailnetListener({ dataDir: dir, handler: app.handleTailnet, port: 0 });
   await new Promise((r) => tailnet.on("listening", r));
   try {
+    pending = { id: "m5", repo: "Lamo2real/ai-city", number: 16 };
     const res = await call(tailnet.address().port, RELAY_PATH, {
       host: "mac.tail1234.ts.net",
       headers: { "Tailscale-User-Login": "owner@example.com", "X-Forwarded-Proto": "https", Authorization: `Bearer ${RELAY_TOKEN}` },
@@ -103,6 +129,7 @@ test("the relay route exists only on the Mac's own listener, not on the tailnet 
     });
     assert.notEqual(res.status, 200);
     assert.deepEqual(chatCalls, []);
+    assert.deepEqual(gateCalls, []);
   } finally {
     tailnet.close();
   }
