@@ -25,7 +25,7 @@
   /* Only the core by default. Chat or status open beside it, never over it. */
   #grid{display:grid;height:100%;height:100dvh;padding:calc(14px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left));gap:12px;
     grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr)}
-  body.view-chat #grid,body.view-status #grid{grid-template-columns:minmax(0,1fr) 420px}
+  body.view-chat #grid,body.view-status #grid,body.view-inbox #grid{grid-template-columns:minmax(0,1fr) 420px}
   .panel{position:relative;background:var(--panel);border:1px solid var(--line);padding:10px 12px;overflow:hidden;
     clip-path:polygon(0 10px,10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%);}
   .panel:before{content:"";position:absolute;left:0;top:0;height:2px;width:46px;background:var(--o)}
@@ -121,6 +121,27 @@
   .core.speaking .vstate{color:#1a0800;background:var(--o2);box-shadow:0 0 14px var(--o)}
   .wakering{position:absolute;left:50%;top:50%;width:16%;aspect-ratio:1;border:2px solid #fff5e8;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none;animation:wakering .7s ease-out forwards}
   @keyframes wakering{to{width:90%;opacity:0;border-color:var(--r)}}
+  /* Needs you: the inbox side panel and its dock badge */
+  .dock .ibtn{position:relative}
+  .dock .cnt{position:absolute;top:-4px;right:-4px;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:var(--r);color:#fff;font:700 11px/20px Orbitron,sans-serif;text-align:center}
+  #inbox{display:none;flex-direction:column;gap:10px;overflow-y:auto;min-height:0;overscroll-behavior:contain;outline:none}
+  body.view-inbox #inbox{display:flex}
+  #inbox header{display:flex;align-items:center;justify-content:space-between}
+  #inbox header h3{font-family:Orbitron,sans-serif;font-weight:500;font-size:12px;letter-spacing:.22em;color:var(--o2)}
+  #inbox .x{width:40px;height:40px;border:1px solid var(--line);background:rgba(0,0,0,.4);color:var(--txt);font:inherit;font-size:18px;cursor:pointer}
+  #inbox .mute,#inbox .note{color:var(--mute);font-size:12px}
+  #inbox .err{color:#fff;background:var(--bad);padding:6px 10px;font-size:12px}
+  #inbox .confirm{margin:0}
+  #inbox .q{border:1px solid var(--line);padding:10px;display:flex;flex-direction:column;gap:8px;font-size:12px}
+  #inbox .q .who{color:var(--o2)}#inbox .q .text{color:var(--txt);font-size:13px}#inbox .q .why{color:var(--mute)}
+  #inbox .opts{display:flex;flex-wrap:wrap;gap:8px}
+  #inbox .opts button,#inbox .free button{min-height:40px;padding:0 14px;border:1px solid var(--line);background:rgba(0,0,0,.4);color:var(--txt);font:inherit;cursor:pointer}
+  #inbox .opts button.dflt{border-color:var(--o);color:var(--o2)}
+  #inbox .free{display:flex;gap:8px}
+  #inbox .free input{flex:1;min-width:0;min-height:40px;background:rgba(0,0,0,.4);border:1px solid var(--line);color:var(--txt);font:inherit;font-size:16px;padding:0 8px}
+  #inbox .free button{background:var(--o);color:#1a0800;border:0}
+  #inbox button:disabled{opacity:.5;cursor:default}
+  #inbox button:focus-visible,#inbox input:focus-visible,.dock .ibtn:focus-visible,#cityinbox button:focus-visible{outline:2px solid var(--o2);outline-offset:2px}
   .ibtn.armed{border-color:var(--o);box-shadow:inset 0 0 8px rgba(255,106,26,.6)}
   .confirm{margin:8px 0;padding:10px;border:1px solid var(--r);background:rgba(255,46,26,.1);font-size:12px}
   .confirm b{display:block;font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:.18em;color:var(--bad);margin-bottom:4px}
@@ -135,7 +156,12 @@
   /* ---------- City View: the whole grid cell, overlays at the corners like the reference ---------- */
   #city{display:none;position:relative;min-height:0;overflow:hidden;outline:none;background:#070a12}
   body.view-city #city{display:block}
-  body.view-city .core,body.view-city .talk,body.view-city #status{display:none}
+  /* In the City the core's art is hidden but its dock stays, so Needs you is reachable from there. */
+  body.view-city .talk,body.view-city #status,body.view-city #inbox{display:none}
+  body.view-city .core{display:contents}
+  body.view-city .core>:not(.dock){display:none}
+  body.view-city #grid{position:relative}
+  body.view-city .dock{z-index:5}
   #city canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab}
   #city canvas:active{cursor:grabbing}
   .cityui{position:absolute;background:rgba(7,3,2,.78);border:1px solid var(--line);backdrop-filter:blur(6px);font-size:11px;
@@ -153,11 +179,10 @@
   #cityfeed .line{display:flex;gap:8px;padding:2px 0;color:var(--txt)}
   #cityfeed .line .t{color:var(--mute);flex:none}
   #cityfeed .line.fail{color:var(--bad)}#cityfeed .line.pass,#cityfeed .line.done{color:var(--ok)}#cityfeed .line.question{color:#ffd21e}
-  #cityinbox{right:10px;bottom:74px;width:300px;padding:10px;max-height:40%;overflow-y:auto}
-  #cityinbox .q{border-top:1px solid var(--line);padding:8px 0;display:flex;flex-direction:column;gap:4px}
-  #cityinbox .q .who{color:var(--o2)}#cityinbox .q .text{color:var(--txt)}
-  #cityinbox input,#citypanel input{width:100%;background:rgba(0,0,0,.4);border:1px solid var(--line);color:var(--txt);font:inherit;padding:5px 6px}
-  #cityinbox button[type=submit],#citypanel button[type=submit],#citypanel .wide{margin-top:4px;background:var(--o);color:#1a0800;border:0;font:inherit;padding:5px 10px;cursor:pointer;letter-spacing:.1em}
+  #cityinbox{right:10px;bottom:74px;width:300px;padding:10px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+  #cityinbox button{min-height:40px;padding:0 12px;background:var(--o);color:#1a0800;border:0;font:inherit;letter-spacing:.1em;cursor:pointer}
+  #citypanel input{width:100%;background:rgba(0,0,0,.4);border:1px solid var(--line);color:var(--txt);font:inherit;padding:5px 6px}
+  #citypanel button[type=submit],#citypanel .wide{margin-top:4px;background:var(--o);color:#1a0800;border:0;font:inherit;padding:5px 10px;cursor:pointer;letter-spacing:.1em}
   #citypanel{top:10px;left:10px;width:320px;max-height:calc(100% - 100px);overflow-y:auto;padding:12px}
   #citypanel header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
   #citypanel header h3{margin:0;font-size:12px}
@@ -197,12 +222,12 @@
   .cmd input,.bar2 input{min-width:0}
   .bar2{gap:6px}.ibtn{flex:none}
   @media (max-width:800px){
-    body.view-chat #grid,body.view-status #grid{grid-template-columns:minmax(0,1fr);grid-template-rows:34dvh minmax(0,1fr)}
+    body.view-chat #grid,body.view-status #grid,body.view-inbox #grid{grid-template-columns:minmax(0,1fr);grid-template-rows:34dvh minmax(0,1fr)}
     .cmd input,.bar2 input{font-size:16px}
     .dock .ibtn{width:44px;height:44px}.dock #mic{width:52px;height:52px}
-    body.view-chat .core>svg,body.view-status .core>svg,body.view-chat #wave,body.view-status #wave{top:28px;height:calc(100% - 88px)}
-    body.view-chat .vstate,body.view-status .vstate{top:4px}
-    body.view-chat .wakering,body.view-status .wakering{top:calc(28px + (100% - 88px)/2)}
+    body.view-chat .core>svg,body.view-status .core>svg,body.view-inbox .core>svg,body.view-chat #wave,body.view-status #wave,body.view-inbox #wave{top:28px;height:calc(100% - 88px)}
+    body.view-chat .vstate,body.view-status .vstate,body.view-inbox .vstate{top:4px}
+    body.view-chat .wakering,body.view-status .wakering,body.view-inbox .wakering{top:calc(28px + (100% - 88px)/2)}
   }
 </style>
 </head>
@@ -277,6 +302,7 @@
     <div class="dock" id="dock">
       <button class="ibtn" id="chatbtn" title="Chat" aria-label="Chat" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v11H9l-5 4z"/></svg></button>
       <button class="ibtn" id="citybtn" title="City" aria-label="City" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V8l4-2v15M9 21V11h6v10M15 21V5l4 2v14M11 14h2M11 17h2"/></svg></button>
+      <button class="ibtn" id="inboxbtn" title="Needs you" aria-label="Needs you, nothing waiting" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 13l3-8h10l3 8v6H4zM4 13h5l1 2h4l1-2h5"/></svg><span class="cnt" id="inboxcnt" hidden>0</span></button>
       <button class="ibtn" id="statusbtn" title="Status" aria-label="Status" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M21 20H3"/></svg></button>
     </div>
     <div class="corelabel"><div class="big" id="coreval">-</div><div class="sub" id="coresub">AWAITING YOU</div></div>
@@ -291,10 +317,17 @@
       <div id="cityerror" role="alert" hidden></div>
       <nav class="cityui" id="citydepts" aria-label="Departments"></nav>
       <div class="cityui" id="cityfeed" aria-live="polite"></div>
-      <div class="cityui" id="cityinbox" aria-live="polite"></div>
+      <div class="cityui" id="cityinbox" aria-live="polite"><span id="citysum">Nothing waiting.</span><button type="button" id="cityopeninbox">Open Needs you</button></div>
       <aside class="cityui" id="citypanel" role="dialog" aria-label="Details" hidden></aside>
       <nav id="citylist" class="srlist" aria-label="Buildings and agents (keyboard)"></nav>
     </section>
+    <aside class="panel" id="inbox" tabindex="-1" aria-label="Needs you">
+      <header><h3>NEEDS YOU</h3><button type="button" class="x" id="inboxclose" aria-label="Close Needs you">×</button></header>
+      <div class="err" id="inboxerr" role="alert" hidden></div>
+      <div class="note" id="inboxnote" role="status"></div>
+      <div id="inboxlist" aria-live="polite"><div id="inboxmerge"></div><div id="inboxqs"></div></div>
+      <div class="mute" id="inboxempty">Nothing is waiting for you.</div>
+    </aside>
     <div class="talk" id="talk">
       <header id="talkhead"><h3>TALK TO JARVIS</h3><span class="hint2">CLOSE</span></header>
       <div class="log" id="log"></div>
@@ -390,18 +423,21 @@ function add(cls, text){ const d=document.createElement("div"); d.className="msg
 /* Everything but the core lives in a view you open yourself. */
 const grid=$("grid"), statusSide=document.createElement("aside"); statusSide.id="status"; grid.append(statusSide);
 for(const c of [".top",".left",".right",".bl",".bc",".br"]) statusSide.append(document.querySelector(".panel"+c));
-grid.append($("city"),talk);
+grid.append($("city"),talk,$("inbox"));
 $("dock").insertBefore($("mic"),$("statusbtn")); $("dock").insertBefore($("voice"),$("statusbtn"));
 let view="";
-function setView(v,focus=false){ view=v; document.body.classList.toggle("view-chat",v==="chat"); document.body.classList.toggle("view-status",v==="status"); document.body.classList.toggle("view-city",v==="city");
-  for(const [id,name] of [["chatbtn","chat"],["statusbtn","status"],["citybtn","city"]]){ $(id).classList.toggle("active",v===name); $(id).setAttribute("aria-pressed",String(v===name)); }
+function setView(v,focus=false){ view=v; document.body.classList.toggle("view-chat",v==="chat"); document.body.classList.toggle("view-status",v==="status"); document.body.classList.toggle("view-city",v==="city"); document.body.classList.toggle("view-inbox",v==="inbox");
+  for(const [id,name] of [["chatbtn","chat"],["statusbtn","status"],["citybtn","city"],["inboxbtn","inbox"]]){ $(id).classList.toggle("active",v===name); $(id).setAttribute("aria-pressed",String(v===name)); }
   if(v==="chat"){ log.scrollTop=log.scrollHeight; if(focus) say.focus(); }
+  if(v==="inbox") $("inbox").focus({preventScroll:true});
   if(v==="city") $("city").focus({preventScroll:true});
   document.dispatchEvent(new CustomEvent("jarvis-view",{detail:v})); }
 $("chatbtn").onclick=()=>setView(view==="chat"?"":"chat",true);
 $("citybtn").onclick=()=>setView(view==="city"?"":"city");
 if(new URLSearchParams(location.search).get("view")==="city") setView("city");
 $("statusbtn").onclick=()=>setView(view==="status"?"":"status");
+$("inboxbtn").onclick=()=>setView(view==="inbox"?"":"inbox");
+$("inboxclose").onclick=()=>setView("");
 $("talkhead").onclick=()=>setView("");
 let hintTimer=null;
 function showHint(text){ $("vhint").textContent=text; $("vhint").classList.add("show"); clearTimeout(hintTimer); hintTimer=setTimeout(()=>$("vhint").classList.remove("show"),6000); }
@@ -460,11 +496,13 @@ async function speak(text,b64,type){ if(live){ liveSay(text); return; } if(!voic
 
 /* ---------- merge to main: the server decides; this only shows what it asks ---------- */
 let confirmCard=null, confirmData=null, confirmTimer=null, confirmAct=null;
-function clearConfirm(){ confirmCard?.remove(); confirmCard=null; confirmData=null; confirmAct=null; clearInterval(confirmTimer); }
+const inboxNote=t=>{ $("inboxnote").textContent=t||""; };
+function clearConfirm(){ const had=!!confirmData; confirmCard?.remove(); confirmCard=null; confirmData=null; confirmAct=null; clearInterval(confirmTimer);
+  if(had) document.dispatchEvent(new CustomEvent("jarvis-confirm",{detail:null})); }
 function syncConfirm(c){
   if(!c){ clearConfirm(); return; }
   if(confirmData?.id===c.id) return;
-  clearConfirm(); confirmData=c; setView("chat");
+  clearConfirm(); confirmData=c; c.expiresAt=Date.now()+c.expiresInMs; inboxNote(""); setView("inbox"); add("sys","Merge confirmation waiting in Needs you.");
   const card=document.createElement("div"); card.className="confirm"; card.setAttribute("role","alertdialog");
   const head=document.createElement("b"); head.textContent="MERGE TO MAIN · PRODUCTION";
   const name=document.createElement("div"); const link=document.createElement("a"); link.textContent=c.repo.split("/").pop()+"#"+c.number; link.target="_blank"; link.rel="noopener";
@@ -476,13 +514,14 @@ function syncConfirm(c){
   const go=document.createElement("button"); go.className="go"; go.textContent="MERGE"; const no=document.createElement("button"); no.textContent="CANCEL";
   const act=async action=>{ go.disabled=no.disabled=true; setState("thinking");
     try{ const r=await fetch("./api/confirm",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId,id:c.id,action,voice:voiceOn&&!live})}); const j=await r.json().catch(()=>({}));
-      clearConfirm(); if(r.ok){ add("j",j.reply); await speak(j.reply,j.audio,j.audioType); load(); } else add("sys",j.error||"Nothing was merged."); }
-    catch(e){ clearConfirm(); add("sys","Could not reach the server. Nothing was confirmed."); }
+      clearConfirm(); if(r.ok){ add("j",j.reply); inboxNote(j.reply); await speak(j.reply,j.audio,j.audioType); load(); } else { add("sys",j.error||"Nothing was merged."); inboxNote(j.error||"Nothing was merged."); } }
+    catch(e){ clearConfirm(); add("sys","Could not reach the server. Nothing was confirmed."); inboxNote("Could not reach the server. Nothing was confirmed."); }
     setState(live?"listening":idleState()); };
   confirmAct=act; go.onclick=()=>act("merge"); no.onclick=()=>act("cancel"); btns.append(go,no);
   const hint=document.createElement("div"); hint.className="facts"; hint.style.margin="8px 0 0";
-  const end=Date.now()+c.expiresInMs; const tick=()=>{ const s=Math.ceil((end-Date.now())/1000); if(s<=0){ clearConfirm(); add("sys","The merge confirmation expired. Nothing was merged."); return; } hint.textContent=`Or say exactly "I confirm". Expires in ${s} s.`; };
-  card.append(head,name,facts,btns,hint); log.appendChild(card); log.scrollTop=log.scrollHeight; confirmCard=card; tick(); confirmTimer=setInterval(tick,1000);
+  const end=c.expiresAt; const tick=()=>{ const s=Math.ceil((end-Date.now())/1000); if(s<=0){ clearConfirm(); add("sys","The merge confirmation expired. Nothing was merged."); inboxNote("Expired. Nothing was merged. Ask Jarvis again if you still want it."); return; } hint.textContent=`Or say exactly "I confirm". Expires in ${s} s.`; };
+  card.append(head,name,facts,btns,hint); $("inboxmerge").appendChild(card); confirmCard=card; tick(); confirmTimer=setInterval(tick,1000);
+  document.dispatchEvent(new CustomEvent("jarvis-confirm",{detail:c}));
 }
 
 /* One turn at a time. A new message or talking over Jarvis cancels the one in progress. */
@@ -738,5 +777,95 @@ $("cmdbtn").onclick=async()=>{ const t=$("cmdin").value.trim(); if(!t) return; c
 $("cmdin").addEventListener("keydown",e=>{ if(e.key==="Enter") $("cmdbtn").click(); });
 </script>
 <script type="module" src="./city.js"></script>
+<script type="module">
+/* Needs you: open agent questions (city snapshot + live events) and the pending merge, as one inbox.
+   Nothing is ever sent without an explicit click on a button. */
+import { applySnapshot, reduce, initialState, inboxItems } from "./city-state.js";
+const $ = (id) => document.getElementById(id);
+let state = initialState(), confirm = null, es = null, streamLost = false, shownSig = null;
+const drafts = new Map(), sentIds = new Set(), notes = new Map(); // per-question: typed text, already sent, last message
+const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+const error = (t) => { $("inboxerr").textContent = t ?? ""; $("inboxerr").hidden = !t; };
+
+async function send(item, text, card) {
+  if (!text.trim() || sentIds.has(item.id)) return;
+  sentIds.add(item.id); notes.set(item.id, "Sending…"); paintCard(card, item);
+  try {
+    const r = await fetch("./api/city/answer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: item.id, text }) });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) notes.set(item.id, "Sent."); else { sentIds.delete(item.id); notes.set(item.id, j.error || `Not sent (server error ${r.status}).`); }
+  } catch { sentIds.delete(item.id); notes.set(item.id, "Could not reach the server. Nothing was sent."); }
+  paintCard(card, item);
+}
+function paintCard(card, item) {
+  const busy = sentIds.has(item.id);
+  for (const b of card.querySelectorAll("button")) b.disabled = busy || (b.dataset.send && !card.querySelector("input").value.trim());
+  card.querySelector(".note").textContent = notes.get(item.id) ?? "";
+}
+function questionCard(item) {
+  const card = mk("form", "q"); card.dataset.question = item.id; card.setAttribute("aria-label", `Question from ${item.path}`);
+  card.append(mk("div", "who", item.path));
+  for (const x of item.questions) {
+    card.append(mk("div", "text", x.text));
+    if (x.why) card.append(mk("div", "why", x.why));
+    const opts = mk("div", "opts");
+    for (const o of x.options ?? []) {
+      const isDefault = o === x.default;
+      const b = mk("button", isDefault ? "dflt" : "", isDefault ? `${o} (default)` : String(o)); b.type = "button"; b.dataset.option = o;
+      b.onclick = () => send(item, String(o), card);
+      opts.append(b);
+    }
+    if (opts.children.length) card.append(opts);
+  }
+  const free = mk("div", "free"); const input = mk("input"); input.type = "text"; input.autocomplete = "off"; input.placeholder = "Or write your own answer"; input.setAttribute("aria-label", `Your own answer to ${item.path}`);
+  input.value = drafts.get(item.id) ?? "";
+  const go = mk("button", "", "Send"); go.type = "submit"; go.dataset.send = "1";
+  input.oninput = () => { drafts.set(item.id, input.value); paintCard(card, item); };
+  free.append(input, go);
+  card.append(free, mk("div", "note"));
+  card.onsubmit = (ev) => { ev.preventDefault(); send(item, input.value, card); };
+  paintCard(card, item);
+  return card;
+}
+
+function render() {
+  const items = inboxItems(state, confirm, Date.now());
+  const n = items.length;
+  const label = n ? `Needs you, ${n} waiting` : "Needs you, nothing waiting";
+  $("inboxbtn").setAttribute("aria-label", label); $("inboxbtn").title = label;
+  $("inboxcnt").textContent = String(n); $("inboxcnt").hidden = !n;
+  $("citysum").textContent = n ? `${n} waiting` : "Nothing waiting.";
+  $("inboxempty").hidden = n > 0;
+  const qs = items.filter((i) => i.kind === "question");
+  const sig = JSON.stringify(qs.map((q) => [q.id, q.path, q.questions]));
+  if (sig === shownSig) return; // keep what the owner is typing
+  shownSig = sig;
+  $("inboxqs").replaceChildren(...qs.map(questionCard));
+}
+
+async function load() {
+  es?.close();
+  try {
+    const r = await fetch("./api/city");
+    const snap = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(snap.error || `server error ${r.status}`);
+    state = applySnapshot(state, snap); error(null);
+  } catch (err) {
+    state = applySnapshot(state, { agents: [], tickets: [], questions: [], usage: null, spend: {} });
+    error(`Can't reach Jarvis (${err.message === "Failed to fetch" ? "no connection" : err.message}). Questions may be missing.`);
+  }
+  render();
+  try {
+    es = new EventSource("./api/events"); es.inbox = true;
+    es.onmessage = (m) => { try { const j = JSON.parse(m.data); if (j.type === "city" && /^question\./.test(j.event?.type ?? "")) { state = reduce(state, j.event, Date.now()); render(); } } catch { /* a bad event is ignored */ } };
+    es.onerror = () => { streamLost = true; error("Live updates from Jarvis stopped. Reconnecting…"); };
+    // Back after a drop: events may have been missed, so start again from a fresh snapshot.
+    es.onopen = () => { if (streamLost) { streamLost = false; error(null); load(); } };
+  } catch { error("Live updates from Jarvis are not available."); }
+}
+document.addEventListener("jarvis-confirm", (ev) => { confirm = ev.detail; render(); });
+$("cityopeninbox").onclick = () => window.setView("inbox", true);
+load();
+</script>
 </body>
 </html>
