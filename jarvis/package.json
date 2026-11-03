@@ -12,6 +12,10 @@
     "test": "node --test --test-force-exit test/"
   },
   "dependencies": {
-    "city": "*"
+    "city": "*",
+    "three": "0.187.0"
+  },
+  "devDependencies": {
+    "playwright": "1.58.0"
   }
 }

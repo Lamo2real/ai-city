@@ -126,3 +126,42 @@ test("chat.idle waits for relayed turns, so a CLI does not exit before Jarvis ha
   await held.idle();
   assert.equal(settled, true);
 });
+
+test("the City View gets a snapshot, an agent's audit tail, and talks back through the bus", async () => {
+  const snap = await call({ path: "/api/city" });
+  assert.equal(snap.status, 200);
+  const s = JSON.parse(snap.text);
+  assert.ok(Array.isArray(s.agents) && s.agents.some((a) => a.id === "orchestrator"));
+  assert.deepEqual(Object.keys(s).sort(), ["agents", "questions", "spend", "tickets", "usage"]);
+  assert.equal((await call({ path: "/api/city/audit?agent=Bad%20Name" })).status, 400);
+  assert.equal((await call({ path: "/api/city/audit?agent=orchestrator" })).status, 200);
+  const noAt = await call({ method: "POST", path: "/api/city/instruct", body: { text: "hello" } });
+  assert.equal(noAt.status, 400);
+  const unknown = await call({ method: "POST", path: "/api/city/instruct", body: { text: "@nobody do it" } });
+  assert.equal(unknown.status, 400);
+  assert.match(JSON.parse(unknown.text).error, /no agent nobody/);
+  const ok = await call({ method: "POST", path: "/api/city/instruct", body: { text: "@orchestrator pause the app work" } });
+  assert.equal(ok.status, 200);
+  const t = JSON.parse(ok.text).ticket;
+  assert.equal(t.kind, "direct_instruction");
+  assert.equal(t.to, "orchestrator");
+  const badAnswer = await call({ method: "POST", path: "/api/city/answer", body: { id: "q-none", text: "yes" } });
+  assert.equal(badAnswer.status, 400);
+  await city.idle();
+});
+
+test("city events reach the HUD on the same event stream", async () => {
+  const pushed = [];
+  const es = request({ host: "127.0.0.1", port, path: "/api/events", headers: { Host: `localhost:${port}` } });
+  const opened = new Promise((resolve) => es.on("response", (res) => { res.setEncoding("utf8"); res.on("data", (chunk) => { for (const line of chunk.split("\n")) if (line.startsWith("data: ")) pushed.push(JSON.parse(line.slice(6))); }); resolve(); }));
+  es.end();
+  await opened;
+  city.sendTicket({ to: "secretary", goal: "a city event" });
+  await city.idle();
+  await new Promise((r) => setTimeout(r, 50));
+  const cityEvents = pushed.filter((e) => e.type === "city").map((e) => e.event.type);
+  assert.ok(cityEvents.includes("ticket.status"), JSON.stringify(cityEvents));
+  assert.ok(cityEvents.includes("cost.update"));
+  assert.ok(!cityEvents.includes("log"));
+  es.destroy();
+});

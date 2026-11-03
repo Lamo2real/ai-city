@@ -11,6 +11,7 @@ Everything below was done unattended on your Claude Max subscription. No merges,
 | 2 — review gate (Phase 3 of the build plan) | `phase-3-review-gate` (from phase-1) | https://github.com/Lamo2real/ai-city/pull/3 | done, reviewer mocked |
 | 3 — voice, non-audio parts (Phase 2 of the build plan) | `phase-2-voice` (from phase-3) | https://github.com/Lamo2real/ai-city/pull/4 | done, audio UNVERIFIED |
 | 4 — OpenClaw phone channel | `phase-4-openclaw` (from phase-2) | https://github.com/Lamo2real/ai-city/pull/5 | done, pairing needs you |
+| 5 — City View | `phase-5-city-view` (from phase-4) | https://github.com/Lamo2real/ai-city/pull/6 | done, 40-agent fps not measured |
 
 **STEP 0.** The repo had no commits, so the first commit on `main` is your folder as it was (app + kit), pushed to the new private repo `Lamo2real/ai-city`. Then, on `phase-0-setup`: the app moved into `jarvis/` with `git mv` (165 existing tests still pass, the server still serves the HUD), the root became an npm workspace over `jarvis/` and `city/`, the kit README merged into `README.md`, `.kit/` deleted, `CLAUDE.md` rewritten for the new stack and layout, the blueprint applied to the prompts, `max_concurrent_agents` set to 4, the policy self-test passes (16 cases). `city/` already holds the TypeScript port of the policy gate (`city/src/policy.ts`, same 16 cases) and the billing guard (`city/src/auth.ts`). `jarvis/bin/jarvis-env` runs a command with Keychain secrets in its environment.
 
@@ -30,6 +31,8 @@ INFO summary.attack_surface  groups: open=0, allowlist=0 · tools.elevated: disa
 ```
 The warning is the audit's own probe client lacking a scope, not an exposure. The first run found the config file world-readable (fixed: `bin/gateway` sets 600) and a multi-user heuristic from the group allowlist (fixed: groups disabled).
 
+**STEP 5.** A **City** tab in the HUD: an isometric voxel city drawn by three.js from the registry and the ledger. The runtime now emits typed events for everything that moves (`agent.hired/retired`, `ticket.status`, `question.asked/answered`, `review.started/result`, `cost.update` with today's token usage from the SDK) and offers a snapshot and per-agent audit tails; the server exposes them at `/api/city*` and on the existing event stream, and takes `@id` instructions and question answers back through the bus. The scene is all procedural boxes with an original cast (hologram Jarvis at the fountain, the Orchestrator with a baton on the HQ roof, the Secretary jogging summaries to Jarvis, the Inspector with clipboard and magnifier at the reviewed building's door, hard-hat managers, workers with a prop by specialty, model-colour badges), status animations (typing sparks, bouncing "?", smoke and red lamp on FAIL, coffee mug when idle, confetti on done), construction animations, walk-ins and walk-outs, wheel/pinch zoom, drag pan, double-click zoom, Esc, Stockholm day/night, reduced-motion and keyboard support, agent and department panels, activity feed, "Needs you" inbox, and a DEMO switch. Tests: reducer and panel mappings (6), the event stream end to end, the endpoints, and a Playwright smoke test (loads the City tab, sees HQ, clicks an agent, sees the panel) driving the Google Chrome on this Mac. Checked by eye at 1440 px.
+
 MCP servers connected tonight (`claude mcp list`): Claude Docs, Google Calendar, Epidemic Sound, Firecrawl, Perplexity Computer, Higgsfield, HyperFrames, Gmail, draw.io, Google Drive. Needing authentication: Tella, Microsoft 365, Slack, Zoom, Indeed, Stripe, the engineering plugin's Slack and Linear. The project's own `.mcp.json` servers (github, terraform, meta-ads, playwright) are disabled in `.claude/settings.local.json`; Docker is not installed, so terraform would not start anyway. Skills available: ponytail, ponytail-review, ponytail-audit, impeccable, jarvis-voice, agent-factory, jarvis-voice-streaming, booqy-meta-ads, booqy-site-builder, engineering:*, design:*, marketing:*, skill-creator, and the rest listed in the session.
 
 ## 2. Decisions I made for you
@@ -45,6 +48,7 @@ MCP servers connected tonight (`claude mcp list`): Claude Docs, Google Calendar,
 - **A ticket an agent ends its turn on without reporting or delegating** gets one reminder, then fails with the agent's last words so you hear about it instead of waiting forever.
 - **Blueprint differences resolved (drawing wins):** the Reviewer Gate covers PR→main, push→dev and spend (the kit also listed public publish and non-dev infra; those now go to you through the policy gate, not Fable). Departments are App, IT, Cloud, Marketing, Video, Travel (the kit's reviewer listed Data and Finance; removed). The Phase 4 team includes a QA Tester as drawn. Review FAIL goes back to the Orchestrator's flow and the fix ticket to the owning manager, as drawn. The fast path keeps "simple facts and math" (not drawn, but Phase 1's `9+9` check needs it).
 - **`max_concurrent_agents` is 4**, so the agent-factory skill's test now blocks the 5th agent, not the 9th.
+- **City View:** three.js is served from the installed npm package (`/vendor/three.module.js`), not copied into the repo; the city's data comes over the existing server-sent event stream (there is no HUD WebSocket); one shared `owner` conversation id; the Playwright test uses the installed Google Chrome because Playwright's own Chromium download never completed on this network. `docs/city-view-reference.png` (your reference image) is committed with the branch.
 - **Smoke tests ran everything above Sonnet on Sonnet** (`JARVIS_MODEL_CAP`), with a scratch `JARVIS_HOME`, so your real `~/.jarvis/ledger.db` is untouched (only `~/.jarvis/audit.jsonl` got lines).
 
 ## 3. Broken or skipped
@@ -57,11 +61,12 @@ MCP servers connected tonight (`claude mcp list`): Claude Docs, Google Calendar,
 - **The escalation question's text is capped at 200 characters** by the question schema; full findings are in the fix tickets and the ticket's result.
 - **OpenClaw's deep audit probe** reports `missing scope: operator.read` for its own client; I could not find a config that satisfies it without widening scopes, and left it. The `openclaw` npm package's postinstall scripts were held back by npm's install-script policy; the CLI and gateway work without them.
 - **Impeccable's context launcher** is not executable in this install; I read the existing HUD and kept its design.
+- **City View, not measured:** 60 fps with 40 agents on an M-series Mac. The view shows its frame rate as `data-fps` on the `#city` element; the 15-agent demo ran smoothly in the desktop app. Trackpad pinch (two-pointer distance, ctrl+wheel) was checked with the wheel only.
 - Not done: Phases 4–9 of the build plan (as intended).
 
 ## 4. Needs you
 
-1. **Merge the PRs in order:** #1 (`phase-0-setup` → main), then #2, #3, #4, #5 (each targets the previous branch; after #1 merges, retarget #2 to main, and so on, or merge them down the chain).
+1. **Merge the PRs in order 0 → 1 → 3 → 2 → 4 → 5:** #1 (`phase-0-setup` → main), then #2, #3, #4, #5, #6 (each targets the previous branch; after #1 merges, retarget #2 to main, and so on, or merge them down the chain).
 2. **Re-run the installer** so the LaunchAgent points at the new folder (it still points at `~/projects/jarvis-os`): `./jarvis/scripts/install.sh`. Until then the server at login runs the old app.
 3. **GitHub remote:** the repo is `Lamo2real/ai-city`, private, as asked. Nothing to rename.
 4. **Keychain items to create** (I did not touch the Keychain): `jarvis.cartesia` for the voice; `jarvis.openclaw-gateway` for OpenClaw (`security add-generic-password -s jarvis.openclaw-gateway -a jarvis -w "$(openssl rand -hex 32)"`); `jarvis.github` if you want the GitHub MCP server. `jarvis.claude-oauth` already exists.
@@ -72,7 +77,7 @@ MCP servers connected tonight (`claude mcp list`): Claude Docs, Google Calendar,
 
 ## 5. How to try it
 
-Check out `phase-4-openclaw` (it contains all four phases), then:
+Check out `phase-5-city-view` (it contains all five steps), then:
 
 ```bash
 npm install
@@ -96,6 +101,8 @@ JARVIS_PORT=7778 npm start
 
 Then open http://localhost:7778 (7777 is the old LaunchAgent until you re-run the installer), press the chat button and type, or press the microphone and talk. Both go to the same conversation; the speaker button decides whether typed replies are spoken. Questions and results from the city appear in the chat by themselves. Stop the CLI before starting the server (one ledger owner at a time).
 
+The city button in the dock opens the City View; http://localhost:7778/?demo=1&view=city opens it straight away with the DEMO city. Click an agent or a building, answer a question in the bottom-right inbox, double-click a building to zoom, Esc to zoom out.
+
 ## 6. Subscription usage
 
-About 25 live calls in total, all on Haiku and Sonnet (`JARVIS_MODEL_CAP=claude-sonnet-5-5`): one `9+9` call and six runs of the hire scenario (the first five found real bugs, fixed in Phase 1; the sixth went end to end: Jarvis → Orchestrator → hired manager → repo with one commit → report → Secretary → Jarvis told the owner "The hello-world repository is ready, sir"). No usage-limit message appeared. Phases 2–4 made no live calls.
+About 25 live calls in total, all on Haiku and Sonnet (`JARVIS_MODEL_CAP=claude-sonnet-5-5`): one `9+9` call and six runs of the hire scenario (the first five found real bugs, fixed in Phase 1; the sixth went end to end: Jarvis → Orchestrator → hired manager → repo with one commit → report → Secretary → Jarvis told the owner "The hello-world repository is ready, sir"). No usage-limit message appeared. Phases 2–5 made no live calls.

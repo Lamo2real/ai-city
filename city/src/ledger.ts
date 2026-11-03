@@ -67,7 +67,7 @@ const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tickets (id TEXT PRIMARY KEY, to_agent TEXT NOT NULL, from_agent TEXT NOT NULL, status TEXT NOT NULL, parent_id TEXT, json TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, kind TEXT NOT NULL, parent TEXT NOT NULL, state TEXT NOT NULL, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS questions (id TEXT PRIMARY KEY, ticket_id TEXT NOT NULL, asked_by TEXT NOT NULL, status TEXT NOT NULL, json TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS costs (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, ticket_id TEXT, usd REAL NOT NULL, ts TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS costs (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, ticket_id TEXT, usd REAL NOT NULL, tokens INTEGER NOT NULL DEFAULT 0, ts TEXT NOT NULL);
 `;
 
 export const now = () => new Date().toISOString();
@@ -77,6 +77,7 @@ export function openLedger(path: string) {
   const db = new DatabaseSync(path);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
   db.exec(SCHEMA);
+  try { db.exec("ALTER TABLE costs ADD COLUMN tokens INTEGER NOT NULL DEFAULT 0"); } catch { /* already there */ }
   const rows = <T>(sql: string, ...args: (string | number)[]) => db.prepare(sql).all(...args).map((r) => JSON.parse(String((r as { json: string }).json)) as T);
   const one = <T>(sql: string, ...args: (string | number)[]) => { const r = db.prepare(sql).get(...args) as { json: string } | undefined; return r ? (JSON.parse(r.json) as T) : undefined; };
   const inTx = <T>(fn: () => T): T => { db.exec("BEGIN IMMEDIATE"); try { const v = fn(); db.exec("COMMIT"); return v; } catch (e) { db.exec("ROLLBACK"); throw e; } };
@@ -133,13 +134,18 @@ export function openLedger(path: string) {
       });
     },
 
-    addCost(agentId: string, ticketId: string | null, usd: number) {
-      if (!usd) return;
+    addCost(agentId: string, ticketId: string | null, usd: number, tokens = 0) {
+      if (!usd && !tokens) return;
       inTx(() => {
-        db.prepare("INSERT INTO costs (agent_id, ticket_id, usd, ts) VALUES (?, ?, ?, ?)").run(agentId, ticketId, usd, now());
+        db.prepare("INSERT INTO costs (agent_id, ticket_id, usd, tokens, ts) VALUES (?, ?, ?, ?, ?)").run(agentId, ticketId, usd, tokens, now());
         const a = one<AgentRow>("SELECT json FROM agents WHERE id = ?", agentId);
         if (a) db.prepare("UPDATE agents SET json = ? WHERE id = ?").run(JSON.stringify({ ...a, total_cost_usd: (a.total_cost_usd ?? 0) + usd, last_active_at: now() }), agentId);
       });
+    },
+    // Today's subscription usage: what the SDK reported per turn, summed.
+    usageToday(): { usd: number; tokens: number; turns: number } {
+      const day = now().slice(0, 10);
+      return db.prepare("SELECT COALESCE(SUM(usd), 0) AS usd, COALESCE(SUM(tokens), 0) AS tokens, COUNT(*) AS turns FROM costs WHERE ts >= ?").get(day) as { usd: number; tokens: number; turns: number };
     },
     spendToday(department: string): number {
       const day = now().slice(0, 10);

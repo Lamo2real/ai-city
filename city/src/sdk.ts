@@ -30,6 +30,7 @@ export interface TurnResult {
   text: string;
   sessionId: string;
   costUsd: number;
+  tokens?: number; // input + output tokens of the turn, from the SDK's usage
 }
 
 export type Runner = (req: TurnRequest) => Promise<TurnResult>;
@@ -85,7 +86,7 @@ export function createRunner({ policy, env, queryFn = query }: { policy: Policy;
           hooks: [async (input) => {
             if (input.hook_event_name !== "PreToolUse") return {};
             const [decision, reason] = decide(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>, policy);
-            audit(policy, input.tool_name, decision, reason);
+            audit(policy, input.tool_name, decision, reason, req.agentId);
             if (decision === "allow") return {};
             // shortcut: "ask" is denied with the reason, the agent asks the owner through ask_user; add an approvals store when a gated action must be retried after a yes.
             return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: `${reason} Not run. Ask the owner with ask_user if it is needed.` } };
@@ -96,6 +97,7 @@ export function createRunner({ policy, env, queryFn = query }: { policy: Policy;
     let text = "";
     let sessionId = req.resume ?? "";
     let costUsd = 0;
+    let tokens = 0;
     for await (const m of queryFn({ prompt: req.prompt, options }) as AsyncIterable<SDKMessage>) {
       if (m.type === "stream_event") {
         const e = m.event as { type: string; delta?: { type?: string; text?: string } };
@@ -105,6 +107,7 @@ export function createRunner({ policy, env, queryFn = query }: { policy: Policy;
       } else if (m.type === "result") {
         sessionId = m.session_id;
         costUsd = m.total_cost_usd ?? 0;
+        tokens = (m.usage?.input_tokens ?? 0) + (m.usage?.output_tokens ?? 0);
         if (m.subtype === "success") text = m.result;
         else {
           const detail = m.errors.join("; ");
@@ -114,6 +117,6 @@ export function createRunner({ policy, env, queryFn = query }: { policy: Policy;
       }
     }
     if (isUsageLimit(text)) throw new UsageLimit(text);
-    return { text, sessionId, costUsd };
+    return { text, sessionId, costUsd, tokens };
   };
 }

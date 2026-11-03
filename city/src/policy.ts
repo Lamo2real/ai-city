@@ -64,8 +64,10 @@ export function decide(toolName: string, toolInput: Record<string, unknown>, pol
   return found;
 }
 
-export function audit(policy: Policy, toolName: string, decision: Decision, reason: string): void {
-  const path = policy.audit_log.replace(/^~(?=$|\/)/, homedir());
+export const auditPath = (policy: Policy) => policy.audit_log.replace(/^~(?=$|\/)/, homedir());
+
+export function audit(policy: Policy, toolName: string, decision: Decision, reason: string, agent?: string): void {
+  const path = auditPath(policy);
   mkdirSync(dirname(path), { recursive: true });
-  appendFileSync(path, `${JSON.stringify({ ts: Date.now() / 1000, tool: toolName, decision, reason })}\n`);
+  appendFileSync(path, `${JSON.stringify({ ts: Date.now() / 1000, tool: toolName, decision, reason, ...(agent ? { agent } : {}) })}\n`);
 }

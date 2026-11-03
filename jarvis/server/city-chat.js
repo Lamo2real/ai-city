@@ -62,6 +62,7 @@ export function createCityChat({ city, runner, dataDir, logger = () => {} }) {
     return next;
   };
   chat.on = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
+  chat.city = city; // for the City View's snapshot, events and bus endpoints
   chat.idle = () => Promise.allSettled([...queues.values()]);
 
   // The city speaks through Jarvis: its question or result becomes a Jarvis turn, told unprompted.
