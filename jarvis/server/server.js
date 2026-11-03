@@ -11,6 +11,8 @@ import { createTranscriber, isWav, parseWake } from "./listen.js";
 import { createLiveSession, liveAvailable } from "./live.js";
 import { createMergeGate, isConfirmPhrase } from "./merge.js";
 import { FILLERS, allFillers, fillerLanguage, sentenceSplitter, toolFiller } from "./progress.js";
+import { createKeychain } from "./keychain.js";
+import { createAppApi } from "./app-api.js";
 import { LOGIN_PAGE, createPhoneAccess, inSubnet, startPhoneListener } from "./phone.js";
 import { createStateSource } from "./state.js";
 import { isOwner, startTailnetListener } from "./tailnet.js";
@@ -189,17 +191,18 @@ const pick = (list) => list[Math.floor(Math.random() * list.length)];
 
 // As /api/chat, but one JSON line per event, so speech can start before the reply is done:
 // filler (a progress line), sentence (part of the reply), then done or error.
-async function handleChatStream(req, res, { chat, speak, gate, phone, firstWaitMs = FIRST_WAIT_MS }) {
-  let body;
+// `parsed` is a body the phone bridge has already read and checked.
+async function handleChatStream(req, res, { chat, speak, gate, phone, firstWaitMs = FIRST_WAIT_MS, parsed }) {
+  let body = parsed;
   try {
-    body = JSON.parse(await readBody(req));
+    body ??= JSON.parse(await readBody(req));
   } catch (err) {
     return sendJson(res, err.status ?? 400, { error: "bad request" });
   }
   const { message, sessionId, voice } = body ?? {};
   if (typeof message !== "string" || !message.trim() || message.length > MAX_MESSAGE) return sendJson(res, 400, { error: "bad message" });
   if (typeof sessionId !== "string" || !SESSION_ID.test(sessionId)) return sendJson(res, 400, { error: "bad sessionId" });
-  voiceBySession.set(sessionId, voice === true);
+  if (!parsed) voiceBySession.set(sessionId, voice === true); // The phone speaks for itself: its turns must not switch off the voice session's audio.
 
   res.writeHead(200, { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "X-Accel-Buffering": "no" });
   res.flushHeaders();
@@ -339,12 +342,14 @@ async function handleLogin(req, res, access) {
 // and so does everything that moves in the city (hires, tickets, questions, reviews, cost) for the City View.
 function createEventStream(talk, speak) {
   const clients = new Set();
+  const listeners = new Set(); // The phone bridge: Jarvis's words only, no audio, no city events.
   talk.city?.on((event) => {
     if (event.type === "log") return;
     for (const res of clients) res.write(`data: ${JSON.stringify({ type: "city", event })}\n\n`);
   });
   talk.on?.(async ({ sessionId, text }) => {
     const event = { type: "jarvis", sessionId, text: scrubSecrets(text) };
+    for (const fn of listeners) fn({ sessionId, text: event.text });
     if (voiceBySession.get(sessionId)) {
       try {
         Object.assign(event, await speak(event.text));
@@ -354,12 +359,17 @@ function createEventStream(talk, speak) {
     }
     for (const res of clients) res.write(`data: ${JSON.stringify(event)}\n\n`);
   });
-  return (req, res) => {
+  const handler = (req, res) => {
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "X-Accel-Buffering": "no" });
     res.write(": connected\n\n");
     clients.add(res);
     req.on("close", () => clients.delete(res));
   };
+  handler.subscribe = (fn) => {
+    listeners.add(fn);
+    return () => listeners.delete(fn);
+  };
+  return handler;
 }
 
 // The City View's data: a snapshot to start from, an agent's last actions, and the two ways the owner
@@ -394,13 +404,20 @@ async function handleCity(req, res, city, path) {
   return sendJson(res, 404, { error: "not found" });
 }
 
-export function createServer({ booqyDir, dataDir, port, getState, chat, speak = synthesize, transcribe, gate, firstWaitMs, startLive = createLiveSession }) {
+export function createServer({ booqyDir, dataDir, port, getState, chat, speak = synthesize, transcribe, gate, firstWaitMs, startLive = createLiveSession, keychain = createKeychain() }) {
   const state = getState ?? createStateSource({ booqyDir, logger: log });
   const mergeGate = gate ?? createMergeGate({ dataDir, logger: log });
   const talk = chat ?? createChat({ booqyDir, dataDir, gate: mergeGate, logger: log });
   const hear = transcribe ?? createTranscriber({ dataDir });
   const access = createPhoneAccess({ dataDir });
   const events = createEventStream(talk, speak);
+  const appApi = createAppApi({
+    keychain,
+    events,
+    // No merge confirmation from the phone, and the phone speaks, so no audio.
+    chatStream: (req, res, parsed) => handleChatStream(req, res, { chat: talk, speak, gate: mergeGate, phone: true, firstWaitMs, parsed }),
+    logger: log,
+  });
 
   async function route(req, res, phone) {
     const path = new URL(req.url, "http://localhost").pathname;
@@ -453,6 +470,8 @@ export function createServer({ booqyDir, dataDir, port, getState, chat, speak = 
   server.handleTailnet = async (req, res, config) => {
     try {
       if (!allowedRequest(req, [config.host, `${config.host}:443`], "https") || !isOwner(req, config)) return sendJson(res, 403, { error: "forbidden" });
+      // The app API has its own Bearer token on top of the owner check. It exists on this listener only.
+      if (appApi.isAppPath(new URL(req.url, "http://localhost").pathname)) return await appApi.handle(req, res);
       return await route(req, res, false);
     } catch (err) {
       fail(res, err);

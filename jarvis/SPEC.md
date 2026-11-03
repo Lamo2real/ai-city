@@ -43,3 +43,18 @@ Works like a voice agent: replies stream sentence by sentence with spoken progre
 
 With `OPENAI_API_KEY` set, an open conversation uses GPT-Live (`gpt-live-1`, voice `vesper`, client delegation) over WebRTC. The key stays on the server: the page sends its SDP offer to `POST /api/live/session`. The wake word stays local. Delegated work runs on the existing Claude backend, and a merge to main is still confirmed only by the owner's button or their transcribed words, never by the model.
 
+
+## Phone app bridge
+
+A token-authenticated API for the Jarvis iPhone app, in `server/app-api.js`. It exists only on the tailnet listener (`tailscale serve` HTTPS → 127.0.0.1:7778), after the Host, HTTPS and Tailscale owner-login checks. It is not served on localhost or the LAN listener.
+
+**Auth:** `Authorization: Bearer <token>`, compared in constant time (both sides SHA-256 hashed, then `timingSafeEqual`) with the Keychain item `jarvis.phone-pairing`. Missing or wrong → `401 {"error":"not paired"}`. The token is cached and re-read from Keychain at most every 10 s when one does not match, so re-pairing needs no restart. The token and the Authorization header are never logged.
+
+**Limits:** 5 wrong tokens lock the API (all callers, even the right token) for 30 s, doubling on each repeat up to 1 h, with `429` and `Retry-After`; a correct token resets it. 30 requests a minute per token and one chat in flight → `429` with `Retry-After`. Request bodies up to 96 KB, messages 1 to 20000 characters. POST needs `Content-Type: application/json`.
+
+**Endpoints** (base `/api/app/v1`):
+- `GET /health` → `{"ok":true,"name":"Jarvis"}`
+- `POST /chat` `{"message": string}` → the normal NDJSON stream (`filler`, `sentence`, then `done` or `error`). It runs as session `owner`, shared with voice and the HUD, with `phone=true`: a merge to main cannot be confirmed from the phone (`confirm` is always null), and there is no audio, since the phone speaks. Jarvis creates tickets itself through `send_ticket`, as from the HUD.
+- `GET /events` → server-sent events, only `{"type":"jarvis","text":...}` for session `owner` (results and questions Jarvis raises unprompted). No audio, no city events. A `: keepalive` comment every 25 s.
+
+**Pairing:** `jarvis/scripts/pair-iphone.sh` (`node server/app-api.js pair`) needs `tailnet.json` (run `scripts/enable-tailscale.sh` first). It makes 32 random bytes (base64url, 43 characters), stores them in Keychain through `security -i` on stdin (replacing any old token, which rotates it), and shows `jarvis-pair://v1?host=<tailnet host>&token=<token>` as a terminal QR code (`scripts/qr.swift`, payload on stdin) plus once as text. Nothing is written to files. `pair-iphone.sh unpair` removes the item.
