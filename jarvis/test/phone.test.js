@@ -53,7 +53,7 @@ before(async () => {
     }
     return "Good evening, sir.";
   };
-  server = createServer({ booqyDir: dataDir, dataDir, port: 0, chat, gate, getState: async () => ({ demo: false }), speak: async () => ({}), transcribe: async () => "heard" });
+  server = createServer({ booqyDir: dataDir, dataDir, port: 0, chat, gate, getState: async () => ({ live: true }), speak: async () => ({}), transcribe: async () => "heard" });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   phone = startPhoneListener({ dataDir, port: 0, handler: server.handlePhone, network: async () => net, bindAddress: "127.0.0.1" });
   await phone.ready;
@@ -96,7 +96,7 @@ test("without the passcode only the prompt is served", async () => {
 test("the passcode opens the HUD and state", async () => {
   const cookie = await signIn();
   assert.match((await call("/", { cookie })).text, /BUILDING/);
-  assert.deepEqual((await call("/state.json", { cookie })).json(), { demo: false });
+  assert.deepEqual((await call("/state.json", { cookie })).json(), { live: true });
   assert.equal((await call("/api/chat", { method: "POST", cookie, body: { message: "status", sessionId: "s1" } })).json().reply, "Good evening, sir.");
 });
 

@@ -1,5 +1,5 @@
-// Builds /state.json live from infrastructure@dev and GitHub. Same shape as the
-// HUD's DEMO object. uptime and alarms are null: nothing local measures them.
+// Builds /state.json live from infrastructure@dev and GitHub, in the shape the HUD's
+// Status view renders. uptime and alarms are null: nothing local measures them.
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -173,7 +173,6 @@ export function createStateSource({ booqyDir, logger = () => {}, now = Date.now 
     const updated = docs.status.match(/^Last updated:\s*(.+)$/m)?.[1];
     return {
       generatedAt: new Date(now()).toISOString(),
-      demo: false,
       pipeline,
       features,
       prs: repos.flatMap((r) => r.prs),
