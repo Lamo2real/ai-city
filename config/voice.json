@@ -1,0 +1,15 @@
+{
+  "server": "http://127.0.0.1:7777",
+  "session_id": "owner",
+  "timing_log": "~/Library/Logs/jarvis-voice-timings.jsonl",
+  "cartesia": {
+    "model": "sonic-3",
+    "voice_id": "PICK-BY-EAR: a stock British male voice id from the Cartesia library, never a clone",
+    "language_sv_via_same_model": true
+  },
+  "offline": {
+    "en": { "engine": "kokoro", "voice": "bm_george" },
+    "sv": { "engine": "piper", "model_dir": "~/.jarvis/tts/vits-piper-sv_SE-nst-medium" }
+  },
+  "targets_ms": { "first_audio_p50": 800, "stop_on_barge_in": 200 }
+}

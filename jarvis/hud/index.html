@@ -334,7 +334,7 @@ setInterval(()=>{ $("clock").textContent=new Date().toLocaleTimeString("sv-SE");
 const CHAT_URL = (window.JARVIS_CHAT_URL || "./api/chat");
 const talk=$("talk"), log=$("log"), say=$("say"), core=document.querySelector(".core");
 const store = { get(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }, set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} } };
-let sessionId = store.get("jarvis-session") || Math.random().toString(36).slice(2); store.set("jarvis-session",sessionId);
+const sessionId = "owner"; // one conversation: typed here, spoken here or through jarvis/voice, or from the CLI
 let voiceOn = store.get("jarvis-voice")==="on", online = null, speakTurn = false;
 function add(cls, text){ const d=document.createElement("div"); d.className="msg "+cls; if(cls==="sys"&&view!=="chat"&&text!=="…") showHint(text);
   if(cls==="j"){ d.innerHTML="<b>JARVIS</b>"+esc(text).replace(/\n/g,"<br>"); } else if(cls==="me"){ d.innerHTML="<span>"+esc(text)+"</span>"; } else d.textContent=text;
