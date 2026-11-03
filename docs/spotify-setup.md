@@ -43,7 +43,7 @@ Then ask Jarvis: "play something by Daft Punk", "skip", "volume 40", "add this t
 
 ## Permissions Jarvis asks for
 
-Full read and write access by default: playback state and control, currently playing, streaming, reading and editing your playlists (private, collaborative, public) and their cover images, reading and editing your library, recently played, top items, the artists you follow, and your account details. All of them are listed in one place, `jarvis/spotify/scopes.js`. To narrow access, delete lines there and run `login` again.
+Full read and write access by default: playback state and control, currently playing, streaming, reading and editing your playlists (private, collaborative, public) and their cover images, reading and editing your library, recently played, top items, the artists you follow, and your account details. All of them are listed in one place, `jarvis/spotify/scopes.js`. One is held for later: `streaming` lets Jarvis play audio itself in a browser (Spotify's Web Playback SDK). Nothing uses it yet. It's requested now so adding in-browser playback won't need a new sign-in. To narrow access, delete lines there and run `login` again.
 
 ## Signing out and revoking access
 

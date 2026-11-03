@@ -17,7 +17,7 @@ const TYPES = ["track", "album", "playlist", "artist"];
 const FLAGS_WITH_VALUE = new Set(["type", "limit", "search"]);
 
 const usage = (message) => new SpotifyError(CODES.API, message);
-const HELP = "Commands: setup, login, logout, status, search <q> [--type t,..] [--limit n], play [<uri>|--search q [--type t]], pause, resume, next, prev, seek <sec>, volume <0-100>, shuffle on|off, repeat off|track|context, queue <uri>|--search q, devices, transfer <device>, now, dj, recent, top [tracks|artists], playlists, playlist <id|uri>, playlist-create <name> [--public], playlist-add <playlist> <uri...>, playlist-remove <playlist> <uri...>, saved, save <uri...>, unsave <uri...>, help";
+const HELP = "Commands: setup, login, logout, status, search <q> [--type t,..] [--limit n], play [<uri>|--search q [--type t]], pause, resume, next, prev, seek <sec>, volume <0-100>, shuffle on|off, repeat off|track|context, queue <uri>|--search q, devices, transfer <device>, now, dj, recent, top [tracks|artists], playlists, playlist <id|uri>, playlist-create <name> [--public], playlist-add <playlist> <uri...>, playlist-remove <playlist> <uri...>, playlist-cover <playlist> <jpeg path>, saved, save <uri...>, unsave <uri...>, follow <artist|user|playlist uri...>, unfollow <uri...>, help";
 
 export function parseArgs(argv) {
   const [cmd = "help", ...rest] = argv;
@@ -81,6 +81,13 @@ async function findDevice(client, wanted) {
   const d = list.find((x) => x.id === wanted) ?? list.find((x) => x.name.toLowerCase() === w) ?? list.find((x) => x.name.toLowerCase().includes(w));
   if (!d) throw new SpotifyError(CODES.NOT_FOUND, `No Spotify device matches "${wanted}".`);
   return d;
+}
+
+function followable(args) {
+  needArgs(args, 1, "an artist, user or playlist URI");
+  const bad = args.find((u) => !/^spotify:(artist|user|playlist):[A-Za-z0-9._-]+$/.test(u));
+  if (bad) throw usage("Follow takes artist, user or playlist URIs, e.g. spotify:artist:… (search for the artist first).");
+  return args;
 }
 
 function onOff(v) {
@@ -175,6 +182,9 @@ const API = {
     if (!(data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff)) throw usage("A playlist cover must be a JPEG image.");
     return ok(await client.setPlaylistCover(args[0], Buffer.from(data).toString("base64")));
   },
+  // Following moved to /me/library in Feb 2026, same as saving, but only for artists, users and playlists.
+  async follow({ args }, { client }) { return ok(await client.save(followable(args))); },
+  async unfollow({ args }, { client }) { return ok(await client.unsave(followable(args))); },
   async save({ args }, { client }) { needArgs(args, 1, "a URI"); return ok(await client.save(args)); },
   async unsave({ args }, { client }) { needArgs(args, 1, "a URI"); return ok(await client.unsave(args)); },
 };

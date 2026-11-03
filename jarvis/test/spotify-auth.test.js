@@ -175,15 +175,37 @@ test("signIn binds to 127.0.0.1 only", async () => {
   assert.equal(address, "127.0.0.1");
 });
 
-test("signIn rejects on state mismatch and does not store tokens", async () => {
-  let exchanged = false;
-  const ctx = await setupSignIn(async () => { exchanged = true; return jsonRes(200, {}); }, async (auth) => {
-    const res = await globalThis.fetch(callbackFor(auth, { code: "c", state: "wrong" }));
-    assert.equal(res.status, 400);
+test("a wrong-state callback gets 400, exchanges nothing, and sign-in keeps waiting for the real one", async () => {
+  const exchanged = [];
+  const ctx = await setupSignIn(async (_url, init) => {
+    exchanged.push(new URLSearchParams(init.body).get("code"));
+    return jsonRes(200, { access_token: "access-token-1", refresh_token: "refresh-token-1", expires_in: 3600, scope: "a" });
+  }, async (auth) => {
+    const forged = await globalThis.fetch(callbackFor(auth, { code: "forged", state: "wrong" }));
+    assert.equal(forged.status, 400);
+    assert.equal(ctx.keychain.data[KEYCHAIN.tokens], undefined);
+    await globalThis.fetch(callbackFor(auth, { code: "real", state: auth.searchParams.get("state") }));
   });
-  await assert.rejects(ctx.run(), /state mismatch/);
-  assert.equal(exchanged, false);
+  assert.equal((await ctx.run()).signedIn, true);
+  assert.deepEqual(exchanged, ["real"]);
+});
+
+test("a wrong-state callback alone ends in the timeout, never in tokens", async () => {
+  const ctx = await setupSignIn(async () => assert.fail("no exchange"), async (auth) => {
+    await globalThis.fetch(callbackFor(auth, { code: "forged", state: "wrong" }));
+  });
+  await assert.rejects(ctx.run({ timeoutMs: 300 }), (e) => e.code === "SIGN_IN_REQUIRED" && /timed out/.test(e.message));
   assert.equal(ctx.keychain.data[KEYCHAIN.tokens], undefined);
+});
+
+test("a 429 on refresh keeps a still-valid token; an expired one still throws", async () => {
+  let t = 1_000_000;
+  const keychain = memoryKeychain({ [KEYCHAIN.clientId]: CLIENT_ID });
+  const store = createTokenStore({ keychain, now: () => t, fetch: async () => jsonRes(429, {}, { "retry-after": "30" }) });
+  await store.saveTokens({ access_token: "access-token-1", refresh_token: "refresh-token-1", expires_in: 30 }); // inside the 60 s refresh margin
+  assert.equal(await store.getAccessToken(), "access-token-1");
+  t += 31_000; // now expired
+  await assert.rejects(store.getAccessToken(), (e) => e.code === "RATE_LIMITED");
 });
 
 test("signIn surfaces access_denied clearly", async () => {

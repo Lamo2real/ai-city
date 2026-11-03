@@ -129,8 +129,14 @@ export function createTokenStore({ keychain, fetch = globalThis.fetch, now = Dat
   async function getAccessToken() {
     const tokens = await load();
     if (!tokens?.access_token) throw new SpotifyError(CODES.SIGN_IN_REQUIRED, "Not signed in to Spotify. Run sign-in.");
-    if (tokens.expires_at - now() < REFRESH_MARGIN_MS) return refresh();
-    return tokens.access_token;
+    if (tokens.expires_at - now() >= REFRESH_MARGIN_MS) return tokens.access_token;
+    try {
+      return await refresh();
+    } catch (err) {
+      // Rate limited while the current token still works: keep using it, refresh next time.
+      if (err?.code === CODES.RATE_LIMITED && tokens.expires_at > now()) return tokens.access_token;
+      throw err;
+    }
   }
 
   async function status() {
@@ -187,10 +193,8 @@ export function signIn({ store, fetch = globalThis.fetch, openUrl = defaultOpenU
       const url = new URL(req.url, "http://127.0.0.1");
       if (req.method !== "GET" || url.pathname !== "/callback") return reply(res, 404, "Not found.");
       const q = url.searchParams;
-      if (q.get("state") !== state) {
-        reply(res, 400, "State mismatch. Sign-in cancelled.");
-        return finish(new SpotifyError(CODES.API, "Sign-in failed: state mismatch."));
-      }
+      // A stray or forged callback is refused, but the real one can still arrive until the timeout.
+      if (q.get("state") !== state) return reply(res, 400, "This sign-in link doesn't match. Use the tab Jarvis opened.");
       if (q.get("error")) {
         const denied = q.get("error") === "access_denied";
         reply(res, 400, denied ? "Access was denied. You can close this tab." : "Sign-in failed. You can close this tab.");

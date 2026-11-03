@@ -158,3 +158,21 @@ test("playlist-cover reads the file as base64", async () => {
   const bad = deps({}, { readFile: async () => { throw new Error("ENOENT /secret/path"); } });
   assert.equal((await out(["playlist-cover", "p1", "/nope"], bad)).code, 1);
 });
+
+test("follow/unfollow go through the library with artist, user or playlist URIs only", async () => {
+  const seen = [];
+  const d = deps({ save: async (u) => { seen.push(["save", u]); return null; }, unsave: async (u) => { seen.push(["unsave", u]); return null; } });
+  assert.equal((await out(["follow", "spotify:artist:abc", "spotify:user:bob"], d)).json.ok, true);
+  assert.equal((await out(["unfollow", "spotify:playlist:p1"], d)).json.ok, true);
+  assert.deepEqual(seen, [["save", ["spotify:artist:abc", "spotify:user:bob"]], ["unsave", ["spotify:playlist:p1"]]]);
+  for (const bad of [["follow"], ["follow", "spotify:track:1"], ["unfollow", "Daft Punk"]]) {
+    const r = await out(bad, d);
+    assert.equal(r.code, 1);
+  }
+  assert.equal(seen.length, 2);
+});
+
+test("help lists every command, including playlist-cover, follow and unfollow", async () => {
+  const { json } = await out(["help"], deps());
+  for (const cmd of ["playlist-cover", "follow", "unfollow", "save", "dj", "transfer"]) assert.match(json.help, new RegExp(`\\b${cmd}\\b`));
+});
