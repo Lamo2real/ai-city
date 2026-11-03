@@ -224,6 +224,35 @@ test("Needs you: a merge confirmation opens the inbox, CANCEL posts {sessionId, 
   await page.close();
 });
 
+test("Needs you: MERGE is disarmed for ~800 ms after the card appears, so an immediate click does not merge", { skip }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await jsonRoute(page);
+  await streamDone(page, CONFIRM);
+  const posts = [];
+  await page.route("**/api/confirm", (r) => { posts.push(r.request().postDataJSON()); return r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ reply: "Merged (test double)." }) }); });
+  await page.goto(`http://localhost:${port}/`);
+  await page.click("#chatbtn");
+  await ask(page);
+  // Click the instant the card exists, from inside the page, before anything can re-enable it.
+  await page.waitForFunction(() => {
+    const go = [...document.querySelectorAll("#inboxmerge .confirm button")].find((b) => b.textContent === "MERGE");
+    if (!go) return false;
+    window.__armedAtArrival = !go.disabled;
+    go.click();
+    return true;
+  }, null, { polling: "raf" });
+  assert.equal(await page.evaluate(() => window.__armedAtArrival), false, "MERGE starts disabled");
+  await page.waitForTimeout(300);
+  assert.deepEqual(posts.filter((p) => p.action === "merge"), [], "an immediate click posts no merge");
+  assert.equal(await page.locator("#inboxmerge .confirm").count(), 1, "the card is still waiting");
+  await page.waitForFunction(() => [...document.querySelectorAll("#inboxmerge .confirm button")].find((b) => b.textContent === "MERGE")?.disabled === false, null, { timeout: 3000 });
+  await page.click("#inboxmerge button:text-is('MERGE')");
+  await page.waitForFunction(() => document.querySelector("#inboxmerge").children.length === 0);
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].action, "merge", "once armed, an explicit click posts the merge (to the intercepted route)");
+  await page.close();
+});
+
 test("Needs you: an expired merge says so honestly and leaves the list", { skip }, async () => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   await jsonRoute(page);

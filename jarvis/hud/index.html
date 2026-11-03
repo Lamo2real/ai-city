@@ -495,6 +495,7 @@ function playSpeech({text,b64,type}){
 async function speak(text,b64,type){ if(live){ liveSay(text); return; } if(!voiceOn) return; speakTurn=true; enqueueSpeech(text,b64,type); await speechDone(); }
 
 /* ---------- merge to main: the server decides; this only shows what it asks ---------- */
+const MERGE_ARM_MS=800; // the one control that merges to main stays disabled this long after it appears
 let confirmCard=null, confirmData=null, confirmTimer=null, confirmAct=null;
 const inboxNote=t=>{ $("inboxnote").textContent=t||""; };
 function clearConfirm(){ const had=!!confirmData; confirmCard?.remove(); confirmCard=null; confirmData=null; confirmAct=null; clearInterval(confirmTimer);
@@ -511,7 +512,7 @@ function syncConfirm(c){
   const facts=document.createElement("div"); facts.className="facts"; const risky=c.mergeable!=="MERGEABLE"||/failed|running|no checks/.test(c.ci||"");
   const left=document.createElement("span"); facts.textContent=`Checks: ${c.ci}. Mergeable: ${String(c.mergeable).toLowerCase()}. Skips the Orchestrator's final review. `; if(risky) facts.classList.add("bad"); facts.append(left);
   const btns=document.createElement("div"); btns.className="btns";
-  const go=document.createElement("button"); go.className="go"; go.textContent="MERGE"; const no=document.createElement("button"); no.textContent="CANCEL";
+  const go=document.createElement("button"); go.className="go"; go.textContent="MERGE"; go.disabled=true; /* armed after MERGE_ARM_MS, so a stray tap or click as the card appears can't merge */ const no=document.createElement("button"); no.textContent="CANCEL";
   const act=async action=>{ go.disabled=no.disabled=true; setState("thinking");
     try{ const r=await fetch("./api/confirm",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId,id:c.id,action,voice:voiceOn&&!live})}); const j=await r.json().catch(()=>({}));
       clearConfirm(); if(r.ok){ add("j",j.reply); inboxNote(j.reply); await speak(j.reply,j.audio,j.audioType); load(); } else { add("sys",j.error||"Nothing was merged."); inboxNote(j.error||"Nothing was merged."); } }
@@ -520,7 +521,7 @@ function syncConfirm(c){
   confirmAct=act; go.onclick=()=>act("merge"); no.onclick=()=>act("cancel"); btns.append(go,no);
   const hint=document.createElement("div"); hint.className="facts"; hint.style.margin="8px 0 0";
   const end=c.expiresAt; const tick=()=>{ const s=Math.ceil((end-Date.now())/1000); if(s<=0){ clearConfirm(); add("sys","The merge confirmation expired. Nothing was merged."); inboxNote("Expired. Nothing was merged. Ask Jarvis again if you still want it."); return; } hint.textContent=`Or say exactly "I confirm". Expires in ${s} s.`; };
-  card.append(head,name,facts,btns,hint); $("inboxmerge").appendChild(card); confirmCard=card; tick(); confirmTimer=setInterval(tick,1000);
+  card.append(head,name,facts,btns,hint); $("inboxmerge").appendChild(card); confirmCard=card; setTimeout(()=>{ if(confirmCard===card&&!no.disabled) go.disabled=false; },MERGE_ARM_MS); tick(); confirmTimer=setInterval(tick,1000);
   document.dispatchEvent(new CustomEvent("jarvis-confirm",{detail:c}));
 }
 
