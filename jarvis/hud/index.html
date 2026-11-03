@@ -248,7 +248,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
         <input id="say" placeholder="Ask or instruct, e.g. status, or open the PR to main for gift cards" autocomplete="off">
         <button class="ibtn" id="send" title="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l16-8-6 16-2-7z"/></svg></button>
-        <button class="ibtn on" id="voice" title="Voice replies on/off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg></button>
+        <button class="ibtn" id="voice" title="Speak typed replies too (voice turns are always spoken)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg></button>
       </div>
     </div>
   </div>
@@ -335,7 +335,7 @@ const CHAT_URL = (window.JARVIS_CHAT_URL || "./api/chat");
 const talk=$("talk"), log=$("log"), say=$("say"), core=document.querySelector(".core");
 const store = { get(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }, set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} } };
 let sessionId = store.get("jarvis-session") || Math.random().toString(36).slice(2); store.set("jarvis-session",sessionId);
-let voiceOn = true, online = null;
+let voiceOn = store.get("jarvis-voice")==="on", online = null, speakTurn = false;
 function add(cls, text){ const d=document.createElement("div"); d.className="msg "+cls; if(cls==="sys"&&view!=="chat"&&text!=="…") showHint(text);
   if(cls==="j"){ d.innerHTML="<b>JARVIS</b>"+esc(text).replace(/\n/g,"<br>"); } else if(cls==="me"){ d.innerHTML="<span>"+esc(text)+"</span>"; } else d.textContent=text;
   log.appendChild(d); log.scrollTop=log.scrollHeight; }
@@ -371,7 +371,8 @@ let speechPaused=false;
 function pauseSpeech(){ if(speechPaused) return; speechPaused=true; out?.c.suspend().catch(()=>{}); if(!fallbackAudio.paused) { fallbackAudio.pause(); fallbackAudio.dataset.resume="1"; } speechSynthesis.pause(); }
 function resumeSpeech(){ if(!speechPaused) return; speechPaused=false; out?.c.resume().catch(()=>{}); if(fallbackAudio.dataset.resume){ delete fallbackAudio.dataset.resume; fallbackAudio.play().catch(()=>{}); } speechSynthesis.resume(); }
 function stopSpeech(){ speechQ.length=0; stopCurrentSpeech(); settleSpeech(); }
-$("voice").onclick=()=>{ voiceOn=!voiceOn; $("voice").classList.toggle("on",voiceOn); outCtx().c.resume().catch(()=>{}); if(!voiceOn) stopSpeech(); };
+$("voice").classList.toggle("on",voiceOn);
+$("voice").onclick=()=>{ voiceOn=!voiceOn; store.set("jarvis-voice",voiceOn?"on":"off"); $("voice").classList.toggle("on",voiceOn); outCtx().c.resume().catch(()=>{}); if(!voiceOn){ speakTurn=false; stopSpeech(); } };
 function speakBrowser(text, done){
   try{ const u=new SpeechSynthesisUtterance(text); const vs=speechSynthesis.getVoices();
        u.voice = vs.find(v=>/en-GB/i.test(v.lang)&&/Daniel|Arthur|Male/i.test(v.name)) || vs.find(v=>/en-GB/i.test(v.lang)) || null;
@@ -381,7 +382,7 @@ function speakBrowser(text, done){
 let lastSpoken="", cutOffAt=""; const speechQ=[]; let speechPlaying=false, speechHold=false, speechWaiters=[];
 function settleSpeech(){ if(!speechPlaying&&!speechQ.length){ speechWaiters.splice(0).forEach(r=>r()); } }
 const speechDone=()=>new Promise(r=>{ speechWaiters.push(r); settleSpeech(); });
-function enqueueSpeech(text,b64,type,filler=false){ if(!voiceOn) return; speechQ.push({text,b64,type,filler}); pumpSpeech(); }
+function enqueueSpeech(text,b64,type,filler=false){ if(!speakTurn) return; speechQ.push({text,b64,type,filler}); pumpSpeech(); }
 async function pumpSpeech(){
   if(speechPlaying||speechHold) return;
   while(speechQ.length>1&&speechQ[0].filler) speechQ.shift();
@@ -403,7 +404,7 @@ function playSpeech({text,b64,type}){
       fallbackAudio.play().catch(()=>{ add("sys","Sound is blocked. Click anywhere in the window to allow it."); done(); }); }
   });
 }
-async function speak(text,b64,type){ if(live){ liveSay(text); return; } if(!voiceOn) return; enqueueSpeech(text,b64,type); await speechDone(); }
+async function speak(text,b64,type){ if(live){ liveSay(text); return; } if(!voiceOn) return; speakTurn=true; enqueueSpeech(text,b64,type); await speechDone(); }
 function preview(q){
   const d = window.__lastState || DEMO; const f=d.features||[]; const c=k=>f.filter(x=>stClass(x.status)===k).length;
   if(/status|brief|läge|hur går/i.test(q)) return `Preview mode, sir. ${c("production")} features in production, ${c("dev")} on dev awaiting you, ${c("building")} in progress, ${c("blocked")} blocked. Pipeline: ${d.pipeline?.step||"idle"}. ${(d.actions||[]).length} human actions open.`;
@@ -440,9 +441,9 @@ function syncConfirm(c){
 /* One turn at a time. A new message or talking over Jarvis cancels the one in progress. */
 let activeTurn=null, turnSeq=0;
 function cancelTurn(){ activeTurn?.abort(); activeTurn=null; stopSpeech(); }
-async function ask(q){
+async function ask(q,spoken=false){
   if(q&&live){ add("me",q); say.value=""; liveSay(`The owner typed: "${q}". Respond to it now, using the backend if it needs it.`); return; }
-  if(!q) return; cancelTurn(); const turn=++turnSeq, ctrl=new AbortController(); activeTurn=ctrl;
+  if(!q) return; cancelTurn(); const turn=++turnSeq, ctrl=new AbortController(); activeTurn=ctrl; speakTurn=spoken||voiceOn;
   add("me",q); say.value=""; setListenWindow(0); setState("thinking");
   // Claude wrote more than the owner heard; it should answer from what was actually said.
   const wording=cutOffAt&&!confirmData?`[You were interrupted. The owner stopped you while you were saying: "${cutOffAt}" They did not hear anything after that.]\n${q}`:q; cutOffAt=""; lastSpoken="";
@@ -455,7 +456,7 @@ async function ask(q){
     else if(e.type==="done"){ final=e.reply; confirm=e.confirm; }
     else if(e.type==="error") failure=e.error; };
   try{
-    const r=await fetch("./api/chat/stream",{method:"POST",headers:{"Content-Type":"application/json"},credentials:"include",signal:ctrl.signal,body:JSON.stringify({message:wording,sessionId,voice:voiceOn})});
+    const r=await fetch("./api/chat/stream",{method:"POST",headers:{"Content-Type":"application/json"},credentials:"include",signal:ctrl.signal,body:JSON.stringify({message:wording,sessionId,voice:speakTurn})});
     online=true;
     if(!r.ok){ const j=await r.json().catch(()=>({})); failure=j.error||("Server error "+r.status); }
     else{ const reader=r.body.getReader(), dec=new TextDecoder(); let held="";
@@ -527,7 +528,7 @@ async function startLive(firstLine){
 async function openConversation(said,woke){
   if(liveOk&&mic.stream){ const first=said?`The owner just said: "${said}". Respond to it now, generating <|SpawnThinking|> if it needs the backend.`:woke?"The owner just called your name. Answer briefly, as a person would.":null;
     if(await startLive(first)) return; }
-  if(said) ask(said); else setListenWindow(CONVERSATION_MS);
+  if(said) ask(said,true); else setListenWindow(CONVERSATION_MS);
 }
 const unlock=()=>{ outCtx().c.resume().catch(()=>{}); };
 for(const ev of ["pointerdown","touchend","click"]) document.addEventListener(ev,unlock,{passive:true}); // iOS only unlocks sound on some of these.
@@ -611,9 +612,9 @@ function endUtterance(){
   u.chain.then(()=>{
     u.bubble?.remove();
     const said=u.parts.join(" "), raw=u.raw.join(" ");
-    if(confirmData&&/^i confirm[.!,]*$/i.test(raw)){ speechHold=false; return ask(raw); }
+    if(confirmData&&/^i confirm[.!,]*$/i.test(raw)){ speechHold=false; return ask(raw,true); }
     if(u.active&&GOODBYE.test(said)){ speechHold=false; return closeConversation(); }
-    if(u.active&&said){ speechHold=false; return activeTurn||!liveOk?ask(said):openConversation(said,u.woke); }
+    if(u.active&&said){ speechHold=false; return activeTurn||!liveOk?ask(said,true):openConversation(said,u.woke); }
     // Nothing to act on: a noise, room talk, or only the wake phrase.
     speechHold=false; cutOffAt=""; resumeSpeech();
     if(u.woke&&!activeTurn) return openConversation("",true);
@@ -621,7 +622,7 @@ function endUtterance(){
     pumpSpeech();
   });
 }
-function chime(from,to){ if(!voiceOn) return; try{ const c=outCtx().c, o=c.createOscillator(), g=c.createGain(), t=c.currentTime; o.frequency.setValueAtTime(from,t); o.frequency.exponentialRampToValueAtTime(to,t+.14); g.gain.setValueAtTime(.0001,t); g.gain.exponentialRampToValueAtTime(.12,t+.02); g.gain.exponentialRampToValueAtTime(.0001,t+.22); o.connect(g).connect(c.destination); o.start(t); o.stop(t+.24); }catch(e){} }
+function chime(from,to){ if(!voiceOn&&!mic.stream) return; try{ const c=outCtx().c, o=c.createOscillator(), g=c.createGain(), t=c.currentTime; o.frequency.setValueAtTime(from,t); o.frequency.exponentialRampToValueAtTime(to,t+.14); g.gain.setValueAtTime(.0001,t); g.gain.exponentialRampToValueAtTime(.12,t+.02); g.gain.exponentialRampToValueAtTime(.0001,t+.22); o.connect(g).connect(c.destination); o.start(t); o.stop(t+.24); }catch(e){} }
 function wakeFlash(){ chime(660,990); const f=document.createElement("div"); f.className="wakering"; core.appendChild(f); setTimeout(()=>f.remove(),800); }
 const GOODBYE=/^\W*(?:(?:thanks|thank you)\W+)?(?:that'?s all|that is all|good ?bye|bye(?: bye)?|good ?night|stop listening|det var allt|hej då)(?: for now)?(?:\W+jarvis)?(?:\W+(?:thanks|thank you|tack))?\W*$/i;
 function closeConversation(){ if(live) return endLive("Conversation closed. Say Jarvis to start again."); cancelTurn(); setListenWindow(0); setState(mic.stream?"standby":"off"); chime(740,440); showHint("Conversation closed. Say Jarvis to start again."); }
@@ -676,6 +677,9 @@ function drawWave(now){
   requestAnimationFrame(drawWave);
 }
 
+/* The city speaks through Jarvis without being asked: questions from agents, results when work is done. */
+try{ const es=new EventSource("./api/events"); es.onmessage=e=>{ const j=JSON.parse(e.data); if(j.type!=="jarvis"||j.sessionId!==sessionId) return;
+  add("j",j.text); if(j.audio||speakTurn||voiceOn){ speakTurn=true; enqueueSpeech(j.text,j.audio,j.audioType); } }; }catch(e){}
 fetch("./api/warm",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId})}).catch(()=>{});
 (async()=>{ try{ liveOk=(await (await fetch("./api/live/status")).json()).available===true; }catch(e){} setState("off"); add("sys","Jarvis online. Say Jarvis, press the microphone, or open the chat to type.");
   try{ const p=await navigator.permissions.query({name:"microphone"});

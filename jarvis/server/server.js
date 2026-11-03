@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createChat, scrubSecrets } from "./chat.js";
+import { createCityChat } from "./city-chat.js";
 import { createTranscriber, isWav, parseWake } from "./listen.js";
 import { createLiveSession, liveAvailable } from "./live.js";
 import { createMergeGate, isConfirmPhrase } from "./merge.js";
@@ -23,6 +24,7 @@ const FIRST_WAIT_MS = 5_000; // Silence this long before "one moment". Quick rep
 const STILL_WORKING_MS = 12_000;
 const MIN_FILLER_GAP_MS = 5_000;
 const SESSION_ID = /^[\w-]{1,64}$/;
+const voiceBySession = new Map(); // Unprompted messages are spoken if the session's last turn was.
 const PHONE_MERGE = "A merge to main can only be confirmed on the Mac, sir. Nothing was merged.";
 const STATIC = {
   "/": ["index.html", "text/html; charset=utf-8"],
@@ -141,6 +143,7 @@ async function handleChat(req, res, { chat, speak, gate, phone }) {
   const { message, sessionId, voice } = body ?? {};
   if (typeof message !== "string" || !message.trim() || message.length > MAX_MESSAGE) return sendJson(res, 400, { error: "bad message" });
   if (typeof sessionId !== "string" || !SESSION_ID.test(sessionId)) return sendJson(res, 400, { error: "bad sessionId" });
+  voiceBySession.set(sessionId, voice === true);
 
   // Handled here so the model is never part of the confirmation. The phone route
   // is plain HTTP on a shared network, so it can never confirm a merge to main.
@@ -190,6 +193,7 @@ async function handleChatStream(req, res, { chat, speak, gate, phone, firstWaitM
   const { message, sessionId, voice } = body ?? {};
   if (typeof message !== "string" || !message.trim() || message.length > MAX_MESSAGE) return sendJson(res, 400, { error: "bad message" });
   if (typeof sessionId !== "string" || !SESSION_ID.test(sessionId)) return sendJson(res, 400, { error: "bad sessionId" });
+  voiceBySession.set(sessionId, voice === true);
 
   res.writeHead(200, { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "X-Accel-Buffering": "no" });
   res.flushHeaders();
@@ -325,12 +329,35 @@ async function handleLogin(req, res, access) {
   return sendJson(res, 401, { error: "Wrong passcode." });
 }
 
+// What the city says unprompted (questions, results) reaches every open HUD as server-sent events.
+function createEventStream(talk, speak) {
+  const clients = new Set();
+  talk.on?.(async ({ sessionId, text }) => {
+    const event = { type: "jarvis", sessionId, text: scrubSecrets(text) };
+    if (voiceBySession.get(sessionId)) {
+      try {
+        Object.assign(event, await speak(event.text));
+      } catch (err) {
+        log(`voice failed: ${err.message}`);
+      }
+    }
+    for (const res of clients) res.write(`data: ${JSON.stringify(event)}\n\n`);
+  });
+  return (req, res) => {
+    res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "X-Accel-Buffering": "no" });
+    res.write(": connected\n\n");
+    clients.add(res);
+    req.on("close", () => clients.delete(res));
+  };
+}
+
 export function createServer({ booqyDir, dataDir, port, getState, chat, speak = synthesize, transcribe, gate, firstWaitMs, startLive = createLiveSession }) {
   const state = getState ?? createStateSource({ booqyDir, logger: log });
   const mergeGate = gate ?? createMergeGate({ dataDir, logger: log });
   const talk = chat ?? createChat({ booqyDir, dataDir, gate: mergeGate, logger: log });
   const hear = transcribe ?? createTranscriber({ dataDir });
   const access = createPhoneAccess({ dataDir });
+  const events = createEventStream(talk, speak);
 
   async function route(req, res, phone) {
     const path = new URL(req.url, "http://localhost").pathname;
@@ -344,6 +371,7 @@ export function createServer({ booqyDir, dataDir, port, getState, chat, speak = 
       return sendJson(res, 200, {});
     }
     if (req.method === "GET" && path === "/api/live/status") return sendJson(res, 200, { available: !phone && liveAvailable() });
+    if (req.method === "GET" && path === "/api/events") return events(req, res);
     if (req.method === "POST" && path === "/api/confirm") return await handleConfirm(req, res, { gate: mergeGate, speak });
     if (req.method === "POST" && path === "/api/listen") return await handleListen(req, res, { transcribe: hear });
     if (req.method !== "GET" && req.method !== "HEAD") return sendJson(res, 405, { error: "method not allowed" });
@@ -413,7 +441,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.JARVIS_PORT ?? 7777);
   const booqyDir = process.env.JARVIS_BOOQY_DIR ?? join(homedir(), "projects/it-hjalparna/booqy");
   const dataDir = process.env.JARVIS_DATA_DIR ?? join(homedir(), "Library/Application Support/Jarvis");
-  const server = createServer({ booqyDir, dataDir, port });
+  // JARVIS_BACKEND=booqy keeps the old headless Claude in the Booqy folder; the default is the city.
+  const chat = process.env.JARVIS_BACKEND === "booqy" ? undefined : await cityChat(dataDir);
+  const server = createServer({ booqyDir, dataDir, port, chat });
   server.requestTimeout = 0;
   server.listen(port, HOST, () => {
     log(`listening on http://${HOST}:${port}`);
@@ -421,6 +451,19 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   });
   startPhoneListener({ dataDir, port, handler: server.handlePhone, logger: log });
   startTailnetListener({ dataDir, handler: server.handleTailnet, logger: log });
-  for (const missing of ["ORCHESTRATOR_FIRE_URL", "ORCHESTRATOR_TOKEN"].filter((n) => !process.env[n])) log(`${missing} is not set: relaying to the Orchestrator will fail`);
+  if (process.env.JARVIS_BACKEND === "booqy") for (const missing of ["ORCHESTRATOR_FIRE_URL", "ORCHESTRATOR_TOKEN"].filter((n) => !process.env[n])) log(`${missing} is not set: relaying to the Orchestrator will fail`);
   process.on("SIGTERM", () => server.close(() => process.exit(0)));
+}
+
+// The city runs inside this process: Jarvis's session, the core agents and the ledger at ~/.jarvis.
+// shortcut: one process at a time owns the ledger (this server or the CLI), two would both resume the same tickets; add a lock when both must run.
+async function cityChat(dataDir) {
+  const { assertNoApiKey, createCity, createRunner, loadPolicy, sdkEnv } = await import("city");
+  assertNoApiKey();
+  const policy = loadPolicy();
+  const runner = createRunner({ policy, env: await sdkEnv() });
+  const city = createCity({ runner, policy, log });
+  const chat = createCityChat({ city, runner, dataDir, logger: log });
+  city.resume().catch((err) => log(`resume failed: ${err.message}`));
+  return chat;
 }

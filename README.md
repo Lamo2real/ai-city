@@ -67,6 +67,28 @@ Everything runs on the owner's Claude subscription through the logged-in `claude
 | Video | `ffmpeg` + YouTube Data API | Add an upload MCP or a small script in Phase 7. |
 | Voice | Cartesia API, Kokoro-MLX, Piper | Python libraries, not MCP. |
 
+## Try it
+
+```bash
+./jarvis/bin/jarvis.js "what's 9+9"
+```
+
+```bash
+npm start
+```
+
+Then open http://localhost:7777, press the chat button and type, or press the microphone and talk. Both go to the same Jarvis conversation. The CLI stays open while the city works on something you asked for, prints questions and results as they come, and takes your answers on stdin.
+
+| Variable | Meaning |
+|---|---|
+| `JARVIS_BACKEND=booqy` | The old headless Claude in the Booqy folder instead of the city. |
+| `JARVIS_HOME` | Where the ledger, hired agents' prompts and the audit log live (default `~/.jarvis`). |
+| `JARVIS_MODEL_CAP=claude-sonnet-5-5` | Run every agent above that model on it (smoke tests). |
+| `JARVIS_VERBOSE=1` | The CLI prints every agent turn, hire and retirement. |
+| `JARVIS_ALLOW_API_KEY=1` | Only for future customer-facing features. Without it an `ANTHROPIC_API_KEY` in the environment stops the start. |
+
+One process at a time owns the ledger: the HUD server or the CLI, not both.
+
 ## Jarvis: the app
 
 Local assistant at http://localhost:7777. Everything below lives in `jarvis/`.
