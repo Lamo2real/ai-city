@@ -4,11 +4,17 @@
   "private": true,
   "type": "module",
   "description": "AI City: an agent organization (city/) with Jarvis as its voice and text front door (jarvis/)",
-  "engines": { "node": ">=24" },
-  "workspaces": ["jarvis", "city"],
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "jarvis",
+    "city"
+  ],
   "scripts": {
     "start": "npm start -w jarvis",
     "test": "npm test --workspaces --if-present",
-    "policy:selftest": "python3 .claude/hooks/policy_gate.py --selftest"
+    "policy:selftest": "python3 .claude/hooks/policy_gate.py --selftest",
+    "test:voice": "cd jarvis/voice && uv run pytest -q"
   }
 }

@@ -21,7 +21,7 @@ const env = await sdkEnv();
 const runner = createRunner({ policy, env });
 const city = createCity({ runner, policy, log });
 const chat = createCityChat({ city, runner, dataDir, logger: log });
-const SESSION = "cli";
+const SESSION = "owner"; // the same conversation as the HUD and the voice pipeline
 
 chat.on(({ text }) => process.stdout.write(`\nJarvis: ${text}\n`));
 
