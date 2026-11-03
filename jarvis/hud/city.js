@@ -1,7 +1,7 @@
 // The City View: a procedural voxel city of the agents, drawn by three.js from city-state.js.
 // Everything here is original blocky art built from boxes; nothing is copied from any game.
 import * as THREE from "./vendor/three.module.js";
-import { CORE, MODEL_COLOR, MODEL_NAME, agentPanel, agentStatus, applySnapshot, deptColor, deptOf, demoEvent, demoSnapshot, departmentPanel, fmt, initialState, layout, propFor, reduce, topBar } from "./city-state.js";
+import { CORE, MODEL_COLOR, MODEL_NAME, agentPanel, agentStatus, applySnapshot, deptColor, deptOf, departmentPanel, fmt, initialState, layout, propFor, reduce, topBar } from "./city-state.js";
 
 const REACTIONS = ["On it!", "Five more minutes...", "I swear it compiled locally", "Have you tried turning it off and on?", "Coffee first.", "Shipping it. Probably.", "Who touched my branch?", "Reviewing my own code. Bold.", "The tests pass on my machine", "Ask the manager."];
 const PROP_COLOR = { laptop: 0xbfc7d5, camera: 0x222222, chart: 0x3bd36b, wrench: 0x9a9a9a, ticket: 0xffd21e, clipboard: 0xf4e4c1, coffee: 0x6b3e26, notebook: 0xe8d9b5, magnifier: 0x88ccff, baton: 0xffffff };
@@ -109,7 +109,7 @@ function makeCharacter(agent, dept) {
   return g;
 }
 
-export function mountCity(root, { fetchImpl = fetch, demo = false, EventSourceImpl = EventSource } = {}) {
+export function mountCity(root, { fetchImpl = fetch, EventSourceImpl = EventSource } = {}) {
   const $ = (sel) => root.querySelector(sel);
   const canvas = $("canvas");
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance" });
@@ -124,7 +124,6 @@ export function mountCity(root, { fetchImpl = fetch, demo = false, EventSourceIm
   scene.add(new THREE.Mesh(new THREE.PlaneGeometry(400, 400).rotateX(-Math.PI / 2), mat(0x0f1a12)));
 
   let state = initialState();
-  state.demo = demo;
   const buildings = new Map(); // dept → group
   const people = new Map(); // id → group
   let roads = null, trees = null;
@@ -310,7 +309,7 @@ export function mountCity(root, { fetchImpl = fetch, demo = false, EventSourceIm
   async function openAgent(id) {
     open = { agent: id };
     let audit = [];
-    try { if (!state.demo) audit = await (await fetchImpl(`./api/city/audit?agent=${encodeURIComponent(id)}`)).json(); } catch { /* unknown: shown as nothing */ }
+    try { audit = await (await fetchImpl(`./api/city/audit?agent=${encodeURIComponent(id)}`)).json(); } catch { /* unknown: shown as nothing */ }
     const p = agentPanel(state, id, audit);
     if (!p) return;
     const box = showPanel(`${p.role}`, "agent");
@@ -319,7 +318,7 @@ export function mountCity(root, { fetchImpl = fetch, demo = false, EventSourceIm
     box.append(row("id", p.id), row("model", p.model), row("department", p.department), row("reports to", p.parent), row("status", p.status.replace(/_/g, " ")), row("ticket", p.ticket ? `${p.ticket.status.replace(/_/g, " ")}: ${p.ticket.goal}` : "—"), row("cost so far", p.costUsd === null ? "—" : `$${fmt(p.costUsd, 3)}`), row("tokens today", p.tokensToday === null ? "—" : String(p.tokensToday)));
     box.append(el("h4", null, "Last actions"));
     const ul = el("ul", "actions");
-    if (!p.actions.length) ul.append(el("li", "mute", state.demo ? "— (DEMO)" : "—"));
+    if (!p.actions.length) ul.append(el("li", "mute", "—"));
     for (const a of p.actions) ul.append(el("li", null, a.text));
     box.append(ul);
     const form = el("form", "instruct");
@@ -327,7 +326,7 @@ export function mountCity(root, { fetchImpl = fetch, demo = false, EventSourceIm
     const send = el("button", null, "Send"); send.type = "submit";
     const note = el("div", "mute");
     form.append(input, send, note);
-    form.onsubmit = async (ev) => { ev.preventDefault(); const text = input.value.trim(); if (!text) return; const line = text.startsWith("@") ? text : `@${p.id} ${text}`; if (state.demo) { note.textContent = "DEMO: nothing was sent."; return; } try { const r = await fetchImpl("./api/city/instruct", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: line }) }); const j = await r.json(); note.textContent = r.ok ? `Sent as ticket ${j.ticket.id}, manager cc'd.` : j.error; if (r.ok) input.value = ""; } catch { note.textContent = "Could not reach the server."; } };
+    form.onsubmit = async (ev) => { ev.preventDefault(); const text = input.value.trim(); if (!text) return; const line = text.startsWith("@") ? text : `@${p.id} ${text}`; try { const r = await fetchImpl("./api/city/instruct", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: line }) }); const j = await r.json(); note.textContent = r.ok ? `Sent as ticket ${j.ticket.id}, manager cc'd.` : j.error; if (r.ok) input.value = ""; } catch { note.textContent = "Could not reach the server."; } };
     box.append(form);
   }
   function openDept(name) {
@@ -362,16 +361,13 @@ export function mountCity(root, { fetchImpl = fetch, demo = false, EventSourceIm
       const input = el("input"); input.placeholder = q.question.questions[0]?.default ?? ""; input.setAttribute("aria-label", `Answer for ${q.question.path}`);
       const send = el("button", null, "Answer"); send.type = "submit"; const note = el("div", "mute");
       card.append(input, send, note);
-      card.onsubmit = async (ev) => { ev.preventDefault(); const text = input.value.trim() || input.placeholder; if (state.demo) { onEvent({ type: "question.answered", id: q.id, answer: text, answered_by: "owner", ticket_id: q.question.ticket_id }); return; } try { const r = await fetchImpl("./api/city/answer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: q.id, text }) }); const j = await r.json(); note.textContent = r.ok ? "Sent." : j.error; } catch { note.textContent = "Could not reach the server."; } };
+      card.onsubmit = async (ev) => { ev.preventDefault(); const text = input.value.trim() || input.placeholder; try { const r = await fetchImpl("./api/city/answer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: q.id, text }) }); const j = await r.json(); note.textContent = r.ok ? "Sent." : j.error; } catch { note.textContent = "Could not reach the server."; } };
       inbox.append(card);
     }
     const a11y = $("#citylist"); a11y.replaceChildren();
     for (const name of ["HQ", ...Object.keys(state.departments)]) { const b = el("button", null, `Building: ${name}`); b.dataset.building = name; b.onclick = () => openDept(name); a11y.append(b); }
     for (const a of Object.values(state.agents)) { if (a.state === "retired") continue; const b = el("button", null, `Agent: ${a.id} (${a.role}, ${MODEL_NAME[a.model] ?? a.model})`); b.dataset.agent = a.id; b.onclick = () => { const p = people.get(a.id); if (p) clickAgent(p); else openAgent(a.id); }; a11y.append(b); }
     feedDom();
-    $("#citydemo").classList.toggle("on", state.demo);
-    $("#citydemo").setAttribute("aria-pressed", String(state.demo));
-    $("#citydemolabel").hidden = !state.demo;
     if (open?.dept) openDept(open.dept);
   }
   const stat = (k, v) => { const s = el("div", "stat"); s.append(el("span", "k", k), el("b", null, v)); return s; };
@@ -381,26 +377,32 @@ export function mountCity(root, { fetchImpl = fetch, demo = false, EventSourceIm
     for (const f of state.feed.slice(0, 8)) { const line = el("div", `line ${f.kind}`); line.append(el("span", "t", new Date(f.at).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })), el("span", null, f.text)); feed.append(line); }
   }
 
-  // Data: a snapshot, then events. DEMO replaces both with a scripted busy city.
-  let es = null, demoTimer = null, demoIndex = 0;
+  // Data: a snapshot, then events. If either is missing the view says so; it never fills the gap with made-up data.
+  let es = null, streamLost = false; // streamLost: the live stream dropped and has not come back yet
+  const problem = (text) => { const e = $("#cityerror"); e.textContent = text ?? ""; e.hidden = !text; };
   async function load() {
-    es?.close(); clearInterval(demoTimer);
+    es?.close();
     for (const p of people.values()) scene.remove(p); people.clear();
     for (const b of buildings.values()) scene.remove(b); buildings.clear();
-    if (state.demo) {
-      state = applySnapshot(state, demoSnapshot());
-      setupLayout();
-      demoTimer = setInterval(() => onEvent(demoEvent(demoIndex++)), 3500);
-      return;
-    }
     try {
-      const snap = await (await fetchImpl("./api/city")).json();
+      const r = await fetchImpl("./api/city");
+      const snap = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(snap.error || `server error ${r.status}`);
       state = applySnapshot(state, snap);
-    } catch { state = applySnapshot(state, { agents: [], tickets: [], questions: [], usage: null, spend: {} }); }
+      problem(null);
+    } catch (err) {
+      state = applySnapshot(state, { agents: [], tickets: [], questions: [], usage: null, spend: {} });
+      problem(`Can't reach Jarvis (${err.message === "Failed to fetch" ? "no connection" : err.message}). Nothing is shown until it answers.`);
+    }
     setupLayout();
-    try { es = new EventSourceImpl("./api/events"); es.onmessage = (m) => { const j = JSON.parse(m.data); if (j.type === "city") onEvent(j.event); else if (j.type === "jarvis") onEvent({ type: "result", ticket_id: "", status: "done", summary: j.text }); }; } catch { /* no live stream: the snapshot stands */ }
+    try {
+      es = new EventSourceImpl("./api/events");
+      es.onmessage = (m) => { const j = JSON.parse(m.data); if (j.type === "city") onEvent(j.event); else if (j.type === "jarvis") onEvent({ type: "result", ticket_id: "", status: "done", summary: j.text }); };
+      es.onerror = () => { streamLost = true; problem("Live updates from Jarvis stopped. Reconnecting…"); };
+      // Back after a drop: events may have been missed, so start again from a fresh snapshot.
+      es.onopen = () => { if (streamLost) { streamLost = false; problem(null); load(); } };
+    } catch { problem("Live updates from Jarvis are not available."); }
   }
-  $("#citydemo").onclick = () => { state = { ...initialState(), demo: !state.demo }; closePanel(); load(); };
 
   // The frame loop: walks, bobs, status animations, camera tweens, day and night.
   let last = performance.now(), fpsN = 0, fpsT = last;
@@ -463,7 +465,7 @@ export function mountCity(root, { fetchImpl = fetch, demo = false, EventSourceIm
 let city = null;
 function openView() {
   const root = document.getElementById("city");
-  if (!city) city = mountCity(root, { demo: new URLSearchParams(location.search).get("demo") === "1" });
+  if (!city) city = mountCity(root);
   else city.resume();
 }
 document.addEventListener("jarvis-view", (ev) => { if (ev.detail === "city") openView(); });

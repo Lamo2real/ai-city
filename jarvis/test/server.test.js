@@ -152,17 +152,15 @@ test("GET / serves the HUD", async () => {
   assert.match(r.text, /JARVIS/);
 });
 
-test("state.json has the DEMO object's shape, built from the sources", async () => {
-  const hud = readFileSync(new URL("../hud/index.html", import.meta.url), "utf8");
-  const demo = new Function(`return ${hud.match(/const DEMO = (\{[\s\S]*?\n\});/)[1]}`)();
+test("state.json has the shape the HUD renders, built from the sources", async () => {
   const fresh = createStateSource({ booqyDir: dir });
   const state = await fresh();
-  assert.deepEqual(Object.keys(state).sort(), Object.keys(demo).sort());
-  assert.deepEqual(Object.keys(state.pipeline).sort(), Object.keys(demo.pipeline).sort());
-  assert.deepEqual(Object.keys(state.features[0]).sort(), Object.keys(demo.features[0]).sort());
-  assert.deepEqual(Object.keys(state.prs[0]).sort(), Object.keys(demo.prs[0]).sort());
-  assert.deepEqual(Object.keys(state.ci[0]).sort(), Object.keys(demo.ci[0]).sort());
-  assert.equal(state.demo, false);
+  for (const k of ["generatedAt", "pipeline", "features", "prs", "ci", "actions", "uptime", "ciPass", "alarms", "log"]) assert.ok(k in state, k);
+  for (const k of ["step", "lock"]) assert.ok(k in state.pipeline, k);
+  assert.deepEqual(["id", "name", "status"].filter((k) => !(k in state.features[0])), []);
+  assert.deepEqual(["repo", "number", "title", "state", "url"].filter((k) => !(k in state.prs[0])), []);
+  assert.deepEqual(["repo", "status"].filter((k) => !(k in state.ci[0])), []);
+  assert.ok(!("demo" in state), "no demo flag: the data is always live");
   assert.equal(state.ci.length, 6);
   assert.deepEqual(state.features[1], { id: "B", name: "Site builder", status: "building" });
   assert.equal(state.pipeline.lock, "free");
@@ -207,7 +205,7 @@ test("GitHub being down shows as unknown and is flagged, never as a pass", async
   assert.match(state.log[0], /GitHub unreachable/);
 });
 
-test("state answers 503 when the sources cannot be read, so the HUD shows DEMO", async () => {
+test("state answers 503 when the sources cannot be read, so the HUD shows it is offline", async () => {
   const broken = createServer({ booqyDir: dir, dataDir: join(dir, "data"), port: 0, getState: async () => { throw new Error("no"); } });
   await new Promise((resolve) => broken.listen(0, "127.0.0.1", resolve));
   const saved = port;
@@ -381,4 +379,20 @@ test("ledger, pipeline, PR and CI parsing", () => {
   assert.equal(ciStatus([{ workflowName: "a", status: "completed", conclusion: "skipped" }, { workflowName: "a", status: "completed", conclusion: "success" }]), "pass");
   assert.equal(ciStatus([{ workflowName: "a", status: "in_progress", conclusion: "" }, { workflowName: "b", status: "completed", conclusion: "success" }]), "running");
   assert.equal(ciStatus([{ workflowName: "a", status: "completed", conclusion: "failure" }, { workflowName: "b", status: "queued", conclusion: "" }]), "fail");
+});
+
+test("the HUD has no demo mode, no fake data and no canned replies", () => {
+  for (const f of ["index.html", "city.js", "city-state.js"]) {
+    const text = readFileSync(new URL(`../hud/${f}`, import.meta.url), "utf8");
+    assert.doesNotMatch(text, /demo/i, f);
+    assert.doesNotMatch(text, /preview mode|function preview/i, f);
+  }
+  const hud = readFileSync(new URL("../hud/index.html", import.meta.url), "utf8");
+  assert.match(hud, /catch\(e\)\{ showOffline\(\); \}/, "a failed /state.json load shows the offline state");
+  assert.match(hud, /Can't reach Jarvis/);
+  // The owner's instructions must not point at a demo either. MORNING_REPORT.md is a dated record and is exempt.
+  for (const doc of ["../../README.md", "../README.md", "../SPEC.md"]) {
+    const url = new URL(doc, import.meta.url);
+    if (existsSync(url)) assert.doesNotMatch(readFileSync(url, "utf8"), /demo/i, doc);
+  }
 });
