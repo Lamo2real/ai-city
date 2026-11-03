@@ -7,6 +7,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { z } from "zod";
 import { AGENTS_DIR, loadCorePrompt, parsePrompt, renderTemplate, type AgentPrompt } from "./agents.ts";
+import { checksText, runChecks, type Check, type Exec } from "./checks.ts";
 import { now, openLedger, type AgentRow, type Question, type QuestionRow, type Ticket } from "./ledger.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
 import { validate } from "./schemas.ts";
@@ -19,6 +20,7 @@ export type CityEvent =
 
 export interface CityOptions {
   runner: Runner;
+  exec?: Exec;
   dataDir?: string;
   ledgerPath?: string;
   policy?: Policy;
@@ -96,8 +98,9 @@ export function createCity(opts: CityOptions) {
     return roles.join(" › ") || agent(id).role;
   }
 
+  const scopeDir = (t?: Ticket) => t?.scope?.find((s) => isAbsolute(s) && existsSync(s));
   function cwdFor(ticket?: Ticket): string {
-    const dir = ticket?.scope?.find((s) => isAbsolute(s) && existsSync(s));
+    const dir = scopeDir(ticket);
     if (dir) return dir;
     const work = join(dataDir, "work");
     mkdirSync(work, { recursive: true });
@@ -287,13 +290,52 @@ export function createCity(opts: CityOptions) {
     return sendTicket("owner", { to: a.id, cc: OWNER_SIDE.has(a.parent) ? [] : [a.parent], kind: "direct_instruction", goal: m[2].trim(), owner_words: text.trim() });
   }
 
-  async function requestReview(by: string, ticketId: string, artifact: string): Promise<unknown> {
+  // The review gate: automated checks first, then the Fable reviewer. FAIL → a fix ticket to the
+  // owning manager. After max_review_rounds the owner decides.
+  interface Verdict { verdict: "PASS" | "FAIL"; findings: Array<{ severity?: string; where?: string; problem?: string; fix?: string; owner_hint?: string }>; summary: string; checks: Check[]; round: number; fix_ticket?: string; escalated?: boolean }
+  async function requestReview(by: string, ticketId: string, artifact: string): Promise<Verdict> {
     const t = ledger.getTicket(ticketId);
     if (!t) throw new Error(`no ticket ${ticketId}`);
-    ledger.updateTicket(ticketId, { status: "in_review", review_rounds: (t.review_rounds ?? 0) + 1 });
-    const r = await deliver("reviewer", `[review request from ${by} for ticket ${ticketId}]\n${artifact}`, t);
-    ledger.updateTicket(ticketId, { status: "in_progress" });
-    return parseJson(r.text) ?? { verdict: "FAIL", findings: [], summary: `reviewer gave no JSON: ${r.text.slice(0, 300)}` };
+    const round = (t.review_rounds ?? 0) + 1;
+    ledger.updateTicket(ticketId, { status: "in_review", review_rounds: round });
+    // The repo under review: the ticket's own scope, else the latest sub-ticket's (the Orchestrator's ticket from Jarvis rarely names one).
+    const repo = scopeDir(t) ?? [...ledger.ticketsFrom(t.to)].reverse().map(scopeDir).find(Boolean);
+    const checks = await runChecks(repo ?? cwdFor(t), opts.exec);
+    let verdict: Verdict;
+    if (checks.some((c) => !c.passed)) {
+      verdict = { verdict: "FAIL", findings: checks.filter((c) => !c.passed).map((c) => ({ severity: "blocker", where: c.name, problem: `automated check failed:\n${c.output}`, fix: "make it pass" })), summary: `automated checks failed: ${checks.filter((c) => !c.passed).map((c) => c.name).join(", ")}`, checks, round };
+    } else {
+      const r = await deliver("reviewer", `[review request from ${by} for ticket ${ticketId}, round ${round}]\nAutomated checks:\n${checksText(checks)}\n\nArtifact:\n${artifact}`, t);
+      const j = parseJson(r.text) as Partial<Verdict> | null;
+      verdict = j?.verdict === "PASS" || j?.verdict === "FAIL"
+        ? { verdict: j.verdict, findings: Array.isArray(j.findings) ? j.findings : [], summary: String(j.summary ?? ""), checks, round }
+        : { verdict: "FAIL", findings: [{ severity: "major", problem: `the reviewer gave no verdict: ${r.text.slice(0, 300)}`, fix: "resubmit" }], summary: "no verdict", checks, round };
+    }
+    const result = { ...t.result, checks: [...checks.map(({ name, passed }) => ({ name, passed })), { name: `fable-review-${round}`, passed: verdict.verdict === "PASS" }] };
+    ledger.updateTicket(ticketId, { status: "in_progress", result });
+    if (verdict.verdict === "PASS") return verdict;
+    const findings = verdict.findings.map((f) => `- [${f.severity ?? "major"}] ${f.where ? `${f.where}: ` : ""}${f.problem ?? ""}${f.fix ? ` Fix: ${f.fix}` : ""}`).join("\n");
+    if (round >= policy.caps.max_review_rounds) {
+      // Asked as the Orchestrator so it goes straight to the owner (a manager's parent could answer it instead).
+      await ask("orchestrator", { ticket_id: ticketId, blocking: true, questions: [{ text: `The review of ticket ${ticketId} failed ${round} times (${verdict.summary}). How should we proceed?`.slice(0, 200), options: ["one more round", "ship as is", "drop it"], default: "one more round", why: findings.slice(0, 200) }] });
+      return { ...verdict, escalated: true };
+    }
+    const fix = sendTicket(by, { to: managerOf(t), kind: "fix", parent_id: ticketId, goal: `Review round ${round} of ticket ${ticketId} FAILED. ${verdict.summary}\nFix these, then have the review requested again:\n${findings}`, acceptance_criteria: ["every finding above is fixed", "automated checks pass"], scope: repo ? [repo] : t.scope });
+    return { ...verdict, fix_ticket: fix.id };
+  }
+
+  // The manager that owns a ticket's work: the manager its recipient delegated to (latest sub-ticket,
+  // by parent_id when the model set one), else the recipient if it is a manager, else the first manager above it.
+  function managerOf(t: Ticket): string {
+    const isManager = (id: string) => ledger.getAgent(id)?.kind === "manager";
+    const subs = ledger.ticketsFrom(t.to).filter((s) => s.kind !== "fix" && isManager(s.to)).reverse();
+    const sub = subs.find((s) => s.parent_id === t.id) ?? subs[0];
+    if (sub) return sub.to;
+    for (let a = ledger.getAgent(t.to); a; a = ledger.getAgent(a.parent)) {
+      if (a.kind === "manager" || a.id === "orchestrator") return a.id;
+      if (OWNER_SIDE.has(a.parent)) break;
+    }
+    return "orchestrator";
   }
 
   function toolsFor(agentId: string): JarvisTool[] {
@@ -304,7 +346,7 @@ export function createCity(opts: CityOptions) {
       { name: "list_registry", description: "Find existing agents by role, department, skill or id. Empty query lists all, retired ones included.", schema: { query: z.string() }, handler: async ({ query }) => listRegistry(query as string) },
       { name: "send_ticket", description: "Send a ticket (schemas/ticket.schema.json) to an agent. id, from, status and created_at are filled in if missing.", schema: { ticket: obj }, handler: async ({ ticket }) => sendTicket(agentId, ticket as Record<string, unknown>) },
       { name: "ask_user", description: "Ask the owner (schemas/question.schema.json). Your manager answers first if it can. Keep working on the default unless blocking.", schema: { question: obj }, handler: async ({ question }) => ask(agentId, question as Record<string, unknown>) },
-      { name: "request_review", description: "Send an artifact (diff, plan, campaign, video notes) to the Reviewer Gate. Returns {verdict, findings, summary}.", schema: { ticket_id: z.string(), artifact: z.string() }, handler: async ({ ticket_id, artifact }) => requestReview(agentId, ticket_id as string, artifact as string) },
+      { name: "request_review", description: "The Reviewer Gate: automated checks (tests, lint, typecheck) in the ticket's scope, then the Fable reviewer. FAIL sends a fix ticket to the owning manager; after max_review_rounds the owner is asked. Returns {verdict, findings, summary, checks, round, fix_ticket?, escalated?}.", schema: { ticket_id: z.string(), artifact: z.string() }, handler: async ({ ticket_id, artifact }) => requestReview(agentId, ticket_id as string, artifact as string) },
       { name: "report", description: "Report a ticket's outcome to whoever sent it.", schema: { ticket_id: z.string(), status: z.enum(["done", "failed"]), summary: z.string(), artifacts: z.array(z.string()) }, handler: async ({ ticket_id, status, summary, artifacts }) => { finish(ticket_id as string, status as Ticket["status"], summary as string, artifacts as string[]); return { ok: true }; } },
     ];
   }

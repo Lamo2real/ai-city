@@ -1,6 +1,6 @@
 // The city with a scripted runner in place of the Agent SDK: no network, no credentials.
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -193,12 +193,8 @@ test("after a restart the daemon resumes in_progress tickets and re-asks open qu
   city.close();
 });
 
-test("request_review runs the reviewer and counts rounds; a failed turn fails the ticket and reaches the owner", async () => {
-  const { runner } = fakeRunner({
-    reviewer: () => 'Here you go: {"verdict": "FAIL", "findings": [{"severity": "major", "where": "a.py", "problem": "p", "fix": "f", "owner_hint": "IT"}], "summary": "one bug"}',
-    orchestrator: () => { throw new Error("boom"); },
-    secretary: () => "**Done:** nothing. **Needs you:** the orchestrator failed.",
-  });
+test("a failed turn fails the ticket and the owner hears about it", async () => {
+  const { runner } = fakeRunner({ orchestrator: () => { throw new Error("boom"); }, secretary: () => "**Done:** nothing. **Needs you:** the orchestrator failed." });
   const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy });
   const events: CityEvent[] = [];
   city.on((e) => events.push(e));
@@ -207,10 +203,112 @@ test("request_review runs the reviewer and counts rounds; a failed turn fails th
   assert.equal(city.ledger.getTicket(ticket.id)?.status, "failed");
   assert.equal(events[0].type, "result");
   assert.match(events[0].type === "result" ? events[0].summary : "", /Needs you/);
-  const t2 = city.ledger.getTicket(city.sendTicket({ to: "secretary", goal: "y" }).id)!;
-  const verdict = await city.toolsFor("secretary").find((t) => t.name === "request_review")!.handler({ ticket_id: t2.id, artifact: "diff" }) as { verdict: string };
-  assert.equal(verdict.verdict, "FAIL");
-  assert.equal(city.ledger.getTicket(t2.id)?.review_rounds, 1);
+  city.close();
+});
+
+// Phase 3: the review gate. A repo whose tests fail, fixed by its manager, passes on round 2.
+test("a deliberately buggy PR gets FAIL from the automated checks, a fix ticket to its manager, and PASS on round 2", async () => {
+  let fixed = false;
+  const exec = async (_cmd: string, args: string[]) => (args[1] === "test" && !fixed ? { ok: false, output: "1 failing: hello prints nothing" } : { ok: true, output: "" });
+  const reviews: string[] = [];
+  const verdicts: Record<string, any>[] = [];
+  const repo = mkdtempSync(join(tmpdir(), "buggy-"));
+  writeFileSync(join(repo, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }));
+  const { runner, calls } = fakeRunner({
+    orchestrator: async (req) => {
+      const brace = req.prompt.indexOf("{");
+      const body = brace >= 0 ? JSON.parse(req.prompt.slice(brace)) : {};
+      if (req.prompt.startsWith("[ticket from jarvis]")) {
+        await use(req, "hire_agent", { spec: spec("it-manager", "manager", "orchestrator") });
+        await use(req, "send_ticket", { ticket: { to: "it-manager", goal: "build the feature", parent_id: body.id, scope: [repo] } });
+      } else if (req.prompt.startsWith("[report from it-manager")) {
+        const id = /on ticket (\S+)\]/.exec(req.prompt)![1];
+        const parent = city.ledger.getTicket(id)!.parent_id!;
+        const v = await use(req, "request_review", { ticket_id: parent, artifact: `diff v${verdicts.length + 1}` }) as Record<string, any>;
+        verdicts.push(v);
+        if (v.verdict === "PASS") await use(req, "report", { ticket_id: parent, status: "done", summary: "shipped", artifacts: ["PR #1"] });
+      }
+    },
+    "it-manager": async (req) => {
+      const body = JSON.parse(req.prompt.slice(req.prompt.indexOf("{")));
+      if (body.kind === "fix") fixed = true;
+      await use(req, "report", { ticket_id: body.id, status: "done", summary: body.kind === "fix" ? "fixed the print" : "built", artifacts: [] });
+    },
+    reviewer: (req) => { reviews.push(req.prompt); return '{"verdict": "PASS", "findings": [], "summary": "clean"}'; },
+    secretary: () => "**Done:** shipped.",
+  });
+  const city = createCity({ runner, exec, dataDir: dir(), ledgerPath: ":memory:", policy });
+  const events: CityEvent[] = [];
+  city.on((e) => events.push(e));
+  const t = city.sendTicket({ to: "orchestrator", goal: "feature" });
+  await city.idle();
+  assert.equal(verdicts.length, 2);
+  assert.equal(verdicts[0].verdict, "FAIL");
+  assert.equal(verdicts[0].round, 1);
+  assert.match(verdicts[0].summary, /automated checks failed: test/);
+  assert.match(verdicts[0].findings[0].problem, /hello prints nothing/);
+  const fix = city.ledger.getTicket(verdicts[0].fix_ticket)!;
+  assert.equal(fix.to, "it-manager");
+  assert.equal(fix.from, "orchestrator");
+  assert.equal(fix.kind, "fix");
+  assert.equal(fix.parent_id, t.id);
+  assert.deepEqual(fix.scope, [repo], "the fix happens in the reviewed repo");
+  assert.match(fix.goal, /Review round 1 of ticket .* FAILED/);
+  assert.equal(fix.status, "done");
+  assert.equal(reviews.length, 1, "the reviewer is only asked once the checks pass");
+  assert.match(reviews[0], /round 2\]\nAutomated checks:\n- test: PASS/);
+  assert.match(reviews[0], /Artifact:\ndiff v2/);
+  assert.equal(verdicts[1].verdict, "PASS");
+  const final = city.ledger.getTicket(t.id)!;
+  assert.equal(final.status, "done");
+  assert.equal(final.review_rounds, 2);
+  assert.deepEqual(final.result?.checks, [{ name: "test", passed: true }, { name: "fable-review-2", passed: true }]);
+  assert.ok(calls.some((c) => c.agentId === "reviewer" && c.model === "claude-fable-5-1"));
+  assert.deepEqual(events.filter((e) => e.type === "result").map((e) => e.type === "result" && e.status), ["done"]);
+  city.close();
+});
+
+test("a PR that fails max_review_rounds times reaches the owner as a question, with the findings", async () => {
+  const { runner } = fakeRunner({ reviewer: () => '{"verdict": "FAIL", "findings": [{"severity": "major", "where": "a.py", "problem": "p", "fix": "f", "owner_hint": "IT"}], "summary": "still broken"}' });
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy });
+  const events: CityEvent[] = [];
+  city.on((e) => events.push(e));
+  await city.toolsFor("orchestrator").find((x) => x.name === "hire_agent")!.handler({ spec: spec("it-manager", "manager", "orchestrator") });
+  await city.toolsFor("it-manager").find((x) => x.name === "hire_agent")!.handler({ spec: spec("py-dev", "worker", "it-manager") });
+  const t = city.ledger.getTicket(city.sendTicket({ to: "py-dev", goal: "feature" }).id)!;
+  await city.idle();
+  const review = city.toolsFor("orchestrator").find((x) => x.name === "request_review")!.handler;
+  const r1 = await review({ ticket_id: t.id, artifact: "diff" }) as Record<string, any>;
+  assert.equal(r1.verdict, "FAIL");
+  assert.equal(city.ledger.getTicket(r1.fix_ticket)?.to, "it-manager", "the worker's manager owns the fix");
+  assert.match(city.ledger.getTicket(r1.fix_ticket)!.goal, /\[major\] a\.py: p Fix: f/);
+  const r2 = await review({ ticket_id: t.id, artifact: "diff" }) as Record<string, any>;
+  assert.equal(r2.round, 2);
+  assert.equal(events.filter((e) => e.type === "question").length, 0);
+  const r3 = await review({ ticket_id: t.id, artifact: "diff" }) as Record<string, any>;
+  await city.idle();
+  assert.equal(r3.escalated, true);
+  assert.equal(r3.fix_ticket, undefined);
+  const q = events.find((e) => e.type === "question");
+  assert.ok(q && q.type === "question");
+  assert.equal(q.question.asked_by, "orchestrator", "straight to the owner, no parent could answer it");
+  assert.match(q.question.questions[0].text, /failed 3 times \(still broken\)/);
+  assert.match(q.question.questions[0].why!, /a\.py: p Fix: f/);
+  assert.deepEqual(q.question.questions[0].options, ["one more round", "ship as is", "drop it"]);
+  assert.equal(city.ledger.getTicket(t.id)?.status, "waiting_on_owner");
+  city.close();
+});
+
+test("a reviewer reply without a verdict counts as FAIL", async () => {
+  const { runner } = fakeRunner({ reviewer: () => "I think it is fine." });
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy });
+  const t = city.ledger.getTicket(city.sendTicket({ to: "orchestrator", goal: "x" }).id)!;
+  await city.idle();
+  const r = await city.toolsFor("orchestrator").find((x) => x.name === "request_review")!.handler({ ticket_id: t.id, artifact: "diff" }) as Record<string, any>;
+  assert.equal(r.verdict, "FAIL");
+  assert.match(r.findings[0].problem, /no verdict/);
+  assert.equal(city.ledger.getTicket(r.fix_ticket)?.to, "orchestrator");
+  await city.idle();
   city.close();
 });
 
