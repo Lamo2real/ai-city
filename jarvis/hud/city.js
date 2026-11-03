@@ -378,7 +378,7 @@ export function mountCity(root, { fetchImpl = fetch, EventSourceImpl = EventSour
   }
 
   // Data: a snapshot, then events. If either is missing the view says so; it never fills the gap with made-up data.
-  let es = null;
+  let es = null, streamLost = false; // streamLost: the live stream dropped and has not come back yet
   const problem = (text) => { const e = $("#cityerror"); e.textContent = text ?? ""; e.hidden = !text; };
   async function load() {
     es?.close();
@@ -398,8 +398,9 @@ export function mountCity(root, { fetchImpl = fetch, EventSourceImpl = EventSour
     try {
       es = new EventSourceImpl("./api/events");
       es.onmessage = (m) => { const j = JSON.parse(m.data); if (j.type === "city") onEvent(j.event); else if (j.type === "jarvis") onEvent({ type: "result", ticket_id: "", status: "done", summary: j.text }); };
-      es.onerror = () => problem("Live updates from Jarvis stopped. Reconnecting…");
-      es.onopen = () => { if ($("#cityerror").textContent.startsWith("Live updates")) { problem(null); load(); } };
+      es.onerror = () => { streamLost = true; problem("Live updates from Jarvis stopped. Reconnecting…"); };
+      // Back after a drop: events may have been missed, so start again from a fresh snapshot.
+      es.onopen = () => { if (streamLost) { streamLost = false; problem(null); load(); } };
     } catch { problem("Live updates from Jarvis are not available."); }
   }
 

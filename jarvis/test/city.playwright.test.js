@@ -73,6 +73,38 @@ test("when the city backend can't be reached, the City view says so and shows no
   await page.close();
 });
 
+test("a dropped live stream is shown, and on reconnect the error clears and the snapshot reloads", { skip }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  // A controllable stand-in for EventSource: the test fires error and open itself.
+  await page.addInitScript(() => {
+    window.__streams = [];
+    window.EventSource = class { constructor(url) { this.url = url; window.__streams.push(this); } close() { this.closed = true; } };
+  });
+  let snapshots = 0;
+  await page.route("**/api/city", (r) => { snapshots++; return r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(citySnapshot()) }); });
+  await page.goto(`http://localhost:${port}/`);
+  await page.click("#citybtn");
+  await page.waitForSelector("#citylist button[data-building='HQ']", { state: "attached", timeout: 15000 });
+  const cityStream = () => page.evaluate(() => window.__streams.filter((s) => !s.closed && typeof s.onopen === "function").length);
+  await page.waitForFunction(() => window.__streams.some((s) => typeof s.onopen === "function"));
+  assert.equal(snapshots, 1);
+  // An open with no drop before it changes nothing.
+  await page.evaluate(() => window.__streams.findLast((s) => s.onopen).onopen());
+  assert.equal(snapshots, 1, "no reload without a drop");
+  await page.evaluate(() => window.__streams.findLast((s) => s.onerror).onerror());
+  await page.waitForSelector("#cityerror:not([hidden])");
+  assert.match(await page.textContent("#cityerror"), /Live updates from Jarvis stopped/);
+  await page.evaluate(() => window.__streams.findLast((s) => s.onopen).onopen());
+  await page.waitForFunction(() => document.querySelector("#cityerror").hidden);
+  await page.waitForFunction(() => window.__streams.filter((s) => !s.closed && s.onopen).length === 1);
+  assert.equal(snapshots, 2, "one fresh snapshot after the reconnect");
+  // The new stream opening does not loop into another reload.
+  await page.evaluate(() => window.__streams.findLast((s) => s.onopen).onopen());
+  assert.equal(snapshots, 2);
+  assert.equal(await cityStream(), 1);
+  await page.close();
+});
+
 test("when /state.json fails, Status shows an offline state, never fake data", { skip }, async () => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   await page.route("**/state.json", (r) => r.abort());
