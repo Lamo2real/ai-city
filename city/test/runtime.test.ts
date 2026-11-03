@@ -75,9 +75,17 @@ test("a ticket from Jarvis flows orchestrator → manager → worker and back th
   city.close();
 });
 
+test("the real max_concurrent_agents is a sane positive integer", () => {
+  const cap = policy.caps.max_concurrent_agents;
+  assert.ok(Number.isInteger(cap) && cap >= 1 && cap <= 50, `max_concurrent_agents is ${cap}; keep it between 1 and 50`);
+});
+
+// The caps are pinned here, so this proves enforcement whatever config/policy.json says.
+const capped = { ...policy, caps: { ...policy.caps, max_concurrent_agents: 4, max_workers_per_manager: 4 } };
+
 test("caps block the agent over max_concurrent_agents and the 5th worker of one manager", async () => {
   const { runner } = fakeRunner({});
-  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy });
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: capped });
   const hire = (by: string, s: Record<string, unknown>) => city.toolsFor(by).find((t) => t.name === "hire_agent")!.handler({ spec: s });
   const retire = (by: string, id: string) => city.toolsFor(by).find((t) => t.name === "retire_agent")!.handler({ id });
   await hire("orchestrator", spec("mgr-a", "manager", "orchestrator"));
@@ -93,7 +101,7 @@ test("caps block the agent over max_concurrent_agents and the 5th worker of one 
   assert.equal((await city.toolsFor("mgr-a").find((t) => t.name === "list_registry")!.handler({ query: "wk" }) as unknown[]).length, 4, "retired agents stay in the registry");
   city.close();
 
-  const roomy = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: { ...policy, caps: { ...policy.caps, max_concurrent_agents: 10 } } });
+  const roomy = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: { ...capped, caps: { ...capped.caps, max_concurrent_agents: 10 } } });
   const h = (by: string, s: Record<string, unknown>) => roomy.toolsFor(by).find((t) => t.name === "hire_agent")!.handler({ spec: s });
   await h("orchestrator", spec("mgr-a", "manager", "orchestrator"));
   for (const id of ["wk-1", "wk-2", "wk-3", "wk-4"]) await h("mgr-a", spec(id, "worker", "mgr-a"));
