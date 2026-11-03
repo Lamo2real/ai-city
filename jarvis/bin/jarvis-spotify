@@ -1,0 +1,269 @@
+#!/usr/bin/env node
+// jarvis-spotify: Jarvis's Spotify tool. One compact, redacted JSON line on stdout; errors exit 1.
+import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { REDIRECT_URI } from "../spotify/scopes.js";
+import { SpotifyError, CODES } from "../spotify/errors.js";
+
+const FALLBACK_CODES = new Set([CODES.NOT_CONFIGURED, CODES.SIGN_IN_REQUIRED, CODES.PREMIUM_REQUIRED]);
+const FALLBACK_NOTES = {
+  [CODES.NOT_CONFIGURED]: "Spotify isn't set up for full control; run `jarvis-spotify setup`. Used the Spotify app directly.",
+  [CODES.SIGN_IN_REQUIRED]: "Not signed in to Spotify; run `jarvis-spotify login` for full control. Used the Spotify app directly.",
+  [CODES.PREMIUM_REQUIRED]: "Full control needs Spotify Premium on this account. Used the Spotify app directly.",
+};
+const TYPES = ["track", "album", "playlist", "artist"];
+const FLAGS_WITH_VALUE = new Set(["type", "limit", "search"]);
+
+const usage = (message) => new SpotifyError(CODES.API, message);
+const HELP = "Commands: setup, login, logout, status, search <q> [--type t,..] [--limit n], play [<uri>|--search q [--type t]], pause, resume, next, prev, seek <sec>, volume <0-100>, shuffle on|off, repeat off|track|context, queue <uri>|--search q, devices, transfer <device>, now, dj, recent, top [tracks|artists], playlists, playlist <id|uri>, playlist-create <name> [--public], playlist-add <playlist> <uri...>, playlist-remove <playlist> <uri...>, saved, save <uri...>, unsave <uri...>, help";
+
+export function parseArgs(argv) {
+  const [cmd = "help", ...rest] = argv;
+  const args = [];
+  const flags = {};
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i];
+    if (!a.startsWith("--")) { args.push(a); continue; }
+    const name = a.slice(2);
+    if (FLAGS_WITH_VALUE.has(name)) {
+      if (i + 1 >= rest.length) throw usage(`--${name} needs a value.`);
+      flags[name] = rest[++i];
+    } else flags[name] = true;
+  }
+  return { cmd, args, flags };
+}
+
+// ---- trimming: only what Jarvis needs ----
+const names = (list) => (list ?? []).map((a) => a.name);
+const trackOf = (t) => t && { name: t.name, artists: names(t.artists), album: t.album?.name, uri: t.uri };
+const albumOf = (a) => ({ name: a.name, artists: names(a.artists), uri: a.uri });
+const playlistOf = (p) => ({ name: p.name, owner: p.owner?.display_name, tracks: (p.items ?? p.tracks)?.total, uri: p.uri });
+const artistOf = (a) => ({ name: a.name, uri: a.uri });
+const deviceOf = (d) => ({ id: d.id, name: d.name, type: d.type, active: d.is_active, volume: d.volume_percent });
+const SHAPES = { track: trackOf, album: albumOf, playlist: playlistOf, artist: artistOf };
+
+function trimSearch(data) {
+  const out = {};
+  for (const type of TYPES) {
+    const items = data?.[`${type}s`]?.items;
+    if (items) out[`${type}s`] = items.filter(Boolean).map(SHAPES[type]);
+  }
+  return out;
+}
+const trimNow = (p) =>
+  p ? { playing: Boolean(p.is_playing), track: trackOf(p.item), device: p.device && deviceOf(p.device), progress_s: Math.round((p.progress_ms ?? 0) / 1000), shuffle: p.shuffle_state, repeat: p.repeat_state }
+    : { playing: false };
+
+// ---- helpers ----
+const ok = (extra) => ({ ok: true, ...extra });
+const needArgs = (args, n, what) => { if (args.length < n) throw usage(`Missing ${what}.`); };
+
+async function topResult(client, q, type = "track") {
+  if (!TYPES.includes(type)) throw usage(`Unknown type "${type}". Use track, album, playlist or artist.`);
+  const hit = (await client.search(q, [type], 1))?.[`${type}s`]?.items?.find(Boolean);
+  if (!hit) throw new SpotifyError(CODES.NOT_FOUND, `I couldn't find "${q}" on Spotify.`);
+  return hit;
+}
+
+async function resolveUri({ args, flags }, client) {
+  if (flags.search) {
+    const hit = await topResult(client, flags.search, flags.type);
+    return { uri: hit.uri, found: SHAPES[flags.type ?? "track"](hit) };
+  }
+  return { uri: args[0] };
+}
+
+async function findDevice(client, wanted) {
+  const list = await client.devices();
+  const w = wanted.toLowerCase();
+  const d = list.find((x) => x.id === wanted) ?? list.find((x) => x.name.toLowerCase() === w) ?? list.find((x) => x.name.toLowerCase().includes(w));
+  if (!d) throw new SpotifyError(CODES.NOT_FOUND, `No Spotify device matches "${wanted}".`);
+  return d;
+}
+
+function onOff(v) {
+  if (v !== "on" && v !== "off") throw usage("Say on or off.");
+  return v === "on";
+}
+
+// ---- Web API commands ----
+const API = {
+  async search({ args, flags }, { client }) {
+    needArgs(args, 1, "a search query");
+    const types = (flags.type ?? "track,album,playlist,artist").split(",");
+    return trimSearch(await client.search(args.join(" "), types, flags.limit ? Number(flags.limit) : undefined));
+  },
+  async play(a, { client }) {
+    const { uri, found } = await resolveUri(a, client);
+    await (uri ? client.play({ uri }) : client.resume());
+    return ok(found && { playing: found });
+  },
+  pause: async (_a, { client }) => ok(await client.pause()),
+  resume: async (_a, { client }) => ok(await client.resume()),
+  next: async (_a, { client }) => ok(await client.next()),
+  prev: async (_a, { client }) => ok(await client.previous()),
+  async seek({ args }, { client }) {
+    const s = Number(args[0]);
+    if (!Number.isFinite(s) || s < 0) throw usage("Seek needs a number of seconds.");
+    return ok(await client.seek(s * 1000));
+  },
+  async volume({ args }, { client }) {
+    const v = Number(args[0]);
+    if (args[0] === undefined || !Number.isFinite(v) || v < 0 || v > 100) throw usage("Volume is a number from 0 to 100.");
+    return ok(await client.volume(v));
+  },
+  shuffle: async ({ args }, { client }) => ok(await client.shuffle(onOff(args[0]))),
+  async repeat({ args }, { client }) {
+    if (!["off", "track", "context"].includes(args[0])) throw usage("Repeat is off, track or context.");
+    return ok(await client.repeat(args[0]));
+  },
+  async queue(a, { client }) {
+    const { uri, found } = await resolveUri(a, client);
+    if (!uri) throw usage("Queue needs a URI or --search.");
+    await client.queue(uri);
+    return ok(found && { queued: found });
+  },
+  devices: async (_a, { client }) => ({ devices: (await client.devices()).map(deviceOf) }),
+  async transfer({ args }, { client }) {
+    needArgs(args, 1, "a device name");
+    const d = await findDevice(client, args.join(" "));
+    await client.transfer(d.id, true);
+    return ok({ device: deviceOf(d) });
+  },
+  now: async (_a, { client }) => trimNow(await client.nowPlaying()),
+  dj: async (_a, deps) => (await deps.startDj({ client: deps.client, mac: deps.mac })),
+  async recent(_a, { client }) {
+    const r = await client.recent();
+    return { tracks: (r?.items ?? []).map((i) => trackOf(i.track)) };
+  },
+  async top({ args }, { client }) {
+    const type = args[0] ?? "tracks";
+    if (type !== "tracks" && type !== "artists") throw usage("Top is tracks or artists.");
+    const r = await client.top(type);
+    return { [type]: (r?.items ?? []).map(type === "tracks" ? trackOf : artistOf) };
+  },
+  playlists: async (_a, { client }) => ({ playlists: ((await client.myPlaylists())?.items ?? []).filter(Boolean).map(playlistOf) }),
+  async playlist({ args }, { client }) {
+    needArgs(args, 1, "a playlist id");
+    const r = await client.playlistItems(args[0]);
+    return { tracks: (r?.items ?? []).map((i) => trackOf(i.item ?? i.track)).filter(Boolean) };
+  },
+  async "playlist-create"({ args, flags }, { client }) {
+    needArgs(args, 1, "a playlist name");
+    const p = await client.createPlaylist(args.join(" "), { public: Boolean(flags.public) });
+    return ok({ playlist: playlistOf(p) });
+  },
+  async "playlist-add"({ args }, { client }) {
+    needArgs(args, 2, "a playlist and at least one URI");
+    return ok(await client.addToPlaylist(args[0], args.slice(1)));
+  },
+  async "playlist-remove"({ args }, { client }) {
+    needArgs(args, 2, "a playlist and at least one URI");
+    return ok(await client.removeFromPlaylist(args[0], args.slice(1)));
+  },
+  async saved(_a, { client }) {
+    const [tracks, artists] = await Promise.all([client.savedTracks(), client.followedArtists()]);
+    return { tracks: (tracks?.items ?? []).map((i) => trackOf(i.track)), artists: (artists?.artists?.items ?? []).map(artistOf) };
+  },
+  async "playlist-cover"({ args }, { client, readFile: read = readFile }) {
+    needArgs(args, 2, "a playlist and a JPEG path");
+    let data;
+    try { data = await read(args[1]); } catch { throw usage("I couldn't read that image file."); }
+    // Only real JPEGs leave the Mac: a cover upload must never become a way to send other files out.
+    if (!(data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff)) throw usage("A playlist cover must be a JPEG image.");
+    return ok(await client.setPlaylistCover(args[0], Buffer.from(data).toString("base64")));
+  },
+  async save({ args }, { client }) { needArgs(args, 1, "a URI"); return ok(await client.save(args)); },
+  async unsave({ args }, { client }) { needArgs(args, 1, "a URI"); return ok(await client.unsave(args)); },
+};
+
+// ---- AppleScript fallback (basic controls only) ----
+const MAC = {
+  async play({ args }, { mac }) { if (args[0]) await mac.playUri(args[0]); else await mac.play(); return ok(); },
+  pause: async (_a, { mac }) => { await mac.pause(); return ok(); },
+  resume: async (_a, { mac }) => { await mac.play(); return ok(); },
+  next: async (_a, { mac }) => { await mac.next(); return ok(); },
+  prev: async (_a, { mac }) => { await mac.previous(); return ok(); },
+  volume: async ({ args }, { mac }) => { await mac.setVolume(Number(args[0])); return ok(); },
+  shuffle: async ({ args }, { mac }) => { await mac.setShuffle(onOff(args[0])); return ok(); },
+  now: async (_a, { mac }) => mac.nowPlaying(),
+};
+const canFallBack = (cmd, { args, flags }) => cmd in MAC && !flags.search && !(cmd === "play" && args.length && !args[0].startsWith("spotify:"));
+
+// ---- account commands ----
+const NOTE_FREE = "Your Spotify account isn't Premium. Playback control (play, skip, volume, devices) won't work through the Web API; search, playlists and library will, and basic control on the Mac falls back to AppleScript.";
+const NOTE_UNKNOWN = "Spotify no longer tells apps the account type. If playback control needs Premium, I'll say so the first time Spotify refuses.";
+
+export function accountOf(me) {
+  const name = me.display_name ?? me.id;
+  if (me.product === "premium") return { name, product: me.product, premium: true };
+  if (me.product) return { name, product: me.product, premium: false, note: NOTE_FREE };
+  return { name, premium: null, note: NOTE_UNKNOWN };
+}
+async function withAccount(base, client) {
+  try { return { ...base, account: accountOf(await client.me()) }; } catch { return base; }
+}
+
+const ACCOUNT = {
+  async setup(_a, { store, promptClientId }) {
+    await store.setClientId(await promptClientId());
+    return ok({ redirect_uri: REDIRECT_URI, message: `Client ID saved. Make sure this exact Redirect URI is registered in your Spotify app: ${REDIRECT_URI}. Then run: jarvis-spotify login` });
+  },
+  async login(_a, { store, signIn, fetch, openUrl, client }) {
+    await signIn({ store, fetch, ...(openUrl && { openUrl }) });
+    return withAccount(ok({ message: "Signed in to Spotify." }), client);
+  },
+  async logout(_a, { store }) { await store.clear(); return ok({ message: "Signed out of Spotify." }); },
+  status: async (_a, { store, client }) => {
+    const st = await store.status();
+    return st?.signedIn === false ? st : withAccount(st, client);
+  },
+  help: async () => ({ help: HELP }),
+};
+
+export async function execute(argv, deps) {
+  const parsed = parseArgs(argv);
+  const { cmd } = parsed;
+  if (cmd in ACCOUNT) return ACCOUNT[cmd](parsed, deps);
+  if (!(cmd in API)) throw usage(`Unknown command "${cmd}". ${HELP}`);
+  try {
+    return await API[cmd](parsed, deps);
+  } catch (err) {
+    if (!(err instanceof SpotifyError) || !FALLBACK_CODES.has(err.code) || !canFallBack(cmd, parsed)) throw err;
+    return { ...(await MAC[cmd](parsed, deps)), via: "applescript", note: FALLBACK_NOTES[err.code] };
+  }
+}
+
+// run(argv, deps) → { code, line }. Never throws; the line is always redacted JSON.
+export async function run(argv, deps) {
+  let value;
+  let code = 0;
+  try {
+    value = await execute(argv, deps);
+  } catch (err) {
+    code = 1;
+    value = err instanceof SpotifyError ? { error: err.code, message: err.message, ...(err.retryAfter !== undefined && { retry_after: err.retryAfter }) } : { error: CODES.API, message: String(err?.message ?? err) };
+  }
+  return { code, line: JSON.stringify(deps.redact(value)) };
+}
+
+export async function defaultDeps() {
+  const [{ createKeychain, createTokenStore, signIn, promptClientId }, { redact }, { createSpotifyClient }, { mac }, { startDj }] = await Promise.all([
+    import("../spotify/auth.js"), import("../spotify/redact.js"), import("../spotify/client.js"), import("../spotify/mac.js"), import("../spotify/dj.js"),
+  ]);
+  const store = createTokenStore({ keychain: createKeychain(), fetch: globalThis.fetch });
+  return {
+    store, signIn, promptClientId, redact, mac, startDj, fetch: globalThis.fetch,
+    client: createSpotifyClient({ tokens: store, mac }),
+    openUrl: (url) => execFile("open", [url]),
+  };
+}
+
+const isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  const { code, line } = await run(process.argv.slice(2), await defaultDeps());
+  process.stdout.write(line + "\n");
+  process.exitCode = code;
+}

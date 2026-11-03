@@ -3,8 +3,14 @@
 // as chat.js: chat(message, sessionId, { onEvent, signal }) → reply text. Questions
 // and results from the city come back through Jarvis as unprompted messages (chat.on).
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadCorePrompt } from "city";
+
+// Jarvis's own tools (jarvis-spotify) live in jarvis/bin. Put it on the agents' PATH however
+// the process was started: launchd runs `node server/server.js` directly, not through jarvis-env.
+export const JARVIS_BIN = join(dirname(fileURLToPath(import.meta.url)), "..", "bin");
+export const withJarvisBin = (env) => ({ ...env, PATH: [JARVIS_BIN, ...String(env.PATH ?? "").split(delimiter).filter((p) => p && p !== JARVIS_BIN)].join(delimiter) });
 
 export function questionText(e) {
   const q = e.question;

@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { assertNoApiKey, createCity, createRunner, loadPolicy, sdkEnv } from "city";
-import { createCityChat } from "../server/city-chat.js";
+import { createCityChat, withJarvisBin } from "../server/city-chat.js";
 
 const prompt = process.argv.slice(2).join(" ").trim();
 if (!prompt) {
@@ -17,7 +17,7 @@ const verbose = process.env.JARVIS_VERBOSE === "1";
 const log = (line) => { if (verbose) console.error(`  · ${line}`); };
 const dataDir = process.env.JARVIS_DATA_DIR ?? join(homedir(), "Library/Application Support/Jarvis");
 const policy = loadPolicy();
-const env = await sdkEnv();
+const env = await sdkEnv(withJarvisBin(process.env));
 const runner = createRunner({ policy, env });
 const city = createCity({ runner, policy, log });
 const chat = createCityChat({ city, runner, dataDir, logger: log });
