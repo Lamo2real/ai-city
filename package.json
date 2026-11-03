@@ -1,12 +1,14 @@
 {
-  "name": "jarvis-os",
-  "version": "1.0.0",
+  "name": "ai-city",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Jarvis OS: local assistant HUD for Booqy",
-  "engines": { "node": ">=22" },
+  "description": "AI City: an agent organization (city/) with Jarvis as its voice and text front door (jarvis/)",
+  "engines": { "node": ">=24" },
+  "workspaces": ["jarvis", "city"],
   "scripts": {
-    "start": "node server/server.js",
-    "test": "node --test --test-force-exit test/"
+    "start": "npm start -w jarvis",
+    "test": "npm test --workspaces --if-present",
+    "policy:selftest": "python3 .claude/hooks/policy_gate.py --selftest"
   }
 }

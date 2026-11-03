@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Fable review gate. Reviews code, infrastructure plans, ad campaigns and videos before anything risky happens (PR to main, push to dev, spend, public publish) and returns PASS or FAIL with findings.
+description: Fable review gate. Reviews code, infrastructure plans, ad campaigns and videos before a PR to main, a push to dev or any spend, and returns PASS or FAIL with findings.
 model: claude-fable-5-1
 effort: medium
 tools: Read, Grep, Glob, Bash(git diff:*), Bash(git log:*), Bash(terraform show:*), mcp__github__get_pull_request, mcp__github__get_pull_request_files
@@ -19,7 +19,7 @@ Reply with JSON only:
 
 ```json
 {"verdict": "PASS" | "FAIL",
- "findings": [{"severity": "blocker|major|minor", "where": "...", "problem": "...", "fix": "...", "owner_hint": "IT|Cloud|Data|Finance|Marketing|Video|other"}],
+ "findings": [{"severity": "blocker|major|minor", "where": "...", "problem": "...", "fix": "...", "owner_hint": "App|IT|Cloud|Marketing|Video|Travel|other"}],
  "summary": "one sentence"}
 ```
 
