@@ -7,7 +7,7 @@ import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, beforeEach, test } from "node:test";
-import { RELAY_AUDIT, RELAY_PATH, RELAY_SERVICE, createServer } from "../server/server.js";
+import { RELAY_AUDIT, RELAY_PATH, RELAY_SERVICE, auditRelayOutcome, createServer } from "../server/server.js";
 import { startTailnetListener } from "../server/tailnet.js";
 
 const RELAY_TOKEN = "relay_token_for_tests_BBBBBBBBBBBBBBBBBBBBBBBB";
@@ -29,6 +29,7 @@ function call(port, path, { headers = {}, body, host = `127.0.0.1:${port}` } = {
 const relay = (port, message, token = RELAY_TOKEN) => call(port, RELAY_PATH, { headers: token === null ? {} : { Authorization: `Bearer ${token}` }, body: { message } });
 
 let app, port, chatCalls, gateCalls, pending;
+let confirmResult = () => ({ ok: true, reply: "Merged to main." });
 before(async () => {
   const keychain = { get: async (s) => (s === RELAY_SERVICE ? RELAY_TOKEN : null), set: async () => {}, remove: async () => {} };
   const gate = {
@@ -36,7 +37,7 @@ before(async () => {
     describe: () => (pending ? { repo: pending.repo, number: pending.number } : null),
     prompt: () => "Merge PR 12 of Lamo2real/ai-city to main? Say: I confirm.",
     cancel: (s) => { gateCalls.push(["cancel", s]); pending = undefined; },
-    confirm: async (s) => { gateCalls.push(["confirm", s]); pending = undefined; return { reply: "Merged to main." }; },
+    confirm: async (s) => { gateCalls.push(["confirm", s]); const item = pending; pending = undefined; return confirmResult(item); },
   };
   const talk = Object.assign(async (message, sessionId) => {
     chatCalls.push({ message, sessionId });
@@ -47,10 +48,10 @@ before(async () => {
   port = app.address().port;
 });
 after(() => app.close());
-beforeEach(() => { chatCalls = []; gateCalls = []; pending = undefined; rmSync(auditFile, { force: true }); });
+beforeEach(() => { chatCalls = []; gateCalls = []; pending = undefined; confirmResult = () => ({ ok: true, reply: "Merged to main." }); rmSync(auditFile, { force: true }); });
 
 test("the owner can confirm a pending merge to main from Telegram, like the HUD, and it is audited", async () => {
-  pending = { id: "m1", repo: "Lamo2real/ai-city", number: 12 };
+  pending = { id: "m1", repo: "Lamo2real/ai-city", number: 12, head: "abc1234def" };
   const res = await relay(port, "I confirm");
   assert.equal(res.status, 200);
   assert.equal(res.json.reply, "Merged to main.");
@@ -62,6 +63,34 @@ test("the owner can confirm a pending merge to main from Telegram, like the HUD,
   assert.deepEqual(entry.merge, { repo: "Lamo2real/ai-city", number: 12 });
   assert.match(entry.who, /allowlisted Telegram account/);
   assert.ok(!Number.isNaN(Date.parse(entry.ts)));
+  const outcome = audit()[1];
+  assert.equal(outcome.kind, "merge_outcome");
+  assert.equal(outcome.outcome, "merged");
+  assert.deepEqual(outcome.merge, { repo: "Lamo2real/ai-city", number: 12, head: "abc1234def" }, "merged at the PR head SHA the gate required");
+});
+
+test("a Telegram confirmation GitHub refuses is audited as failed, with the reason", async () => {
+  pending = { id: "m6", repo: "Lamo2real/ai-city", number: 17, head: "fff0000" };
+  confirmResult = () => ({ ok: false, reply: "I could not merge it, sir. Nothing was merged." });
+  const res = await relay(port, "I confirm");
+  assert.match(res.json.reply, /could not merge/);
+  const [confirm, outcome] = audit();
+  assert.equal(confirm.kind, "merge_confirm");
+  assert.equal(outcome.outcome, "failed");
+  assert.match(outcome.reason, /GitHub refused/);
+  assert.equal(outcome.merge.number, 17);
+});
+
+test("a confirmation that finds nothing valid to merge (expired) is audited as refused", async () => {
+  pending = { id: "m7", repo: "Lamo2real/ai-city", number: 18, head: "aaa1111" };
+  confirmResult = () => null; // the gate's window had expired by the time it ran
+  await relay(port, "I confirm");
+  const outcome = audit()[1];
+  assert.equal(outcome.outcome, "refused");
+  assert.match(outcome.reason, /expired/);
+  auditRelayOutcome(dir, undefined, null);
+  assert.equal(audit()[2].outcome, "refused");
+  assert.equal(audit()[2].merge, undefined);
 });
 
 test("a cancel from Telegram is audited too", async () => {

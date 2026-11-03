@@ -42,8 +42,16 @@ case "$TELEGRAM_OWNER_ID" in
 esac
 unset value current
 
+# OpenClaw substitutes ${VARS} in config values but not in keys, so the owner-only tool policy key
+# (tools.toolsBySender."channel:telegram:<id>") is filled in here, from the ID checked above, into a
+# git-ignored runtime copy next to openclaw.json (relative paths still resolve). Tokens stay ${ENV} references.
+RUNTIME_CONFIG="${OPENCLAW_RUNTIME_CONFIG:-$HERE/openclaw.runtime.json}"
+( umask 077; sed "s/channel:telegram:\${TELEGRAM_OWNER_ID}/channel:telegram:$TELEGRAM_OWNER_ID/" "$OPENCLAW_CONFIG_PATH" > "$RUNTIME_CONFIG" )
+grep -q "channel:telegram:$TELEGRAM_OWNER_ID\"" "$RUNTIME_CONFIG" || { echo "gateway: could not write the owner tool policy into $RUNTIME_CONFIG" >&2; exit 1; }
+chmod 600 "$OPENCLAW_CONFIG_PATH" "$RUNTIME_CONFIG"
+export OPENCLAW_CONFIG_PATH="$RUNTIME_CONFIG"
+
 mkdir -p "$OPENCLAW_STATE_DIR" && chmod 700 "$OPENCLAW_STATE_DIR"
-chmod 600 "$OPENCLAW_CONFIG_PATH"
 cd "$HERE"
 [ $# -gt 0 ] || set -- gateway
 exec npx openclaw "$@"

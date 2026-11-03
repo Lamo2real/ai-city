@@ -28,6 +28,13 @@ for (const name of CONFIGS) {
     assert.match(c.plugins.entries["jarvis-relay"].config.server, /^http:\/\/127\.0\.0\.1:\d+$/);
   });
 
+  test(`${name}: defence in depth: only the owner's Telegram ID may use ask_jarvis at all`, () => {
+    assert.deepEqual(load(name).tools.toolsBySender, {
+      "*": { deny: ["ask_jarvis"] },
+      "channel:telegram:${TELEGRAM_OWNER_ID}": {},
+    });
+  });
+
   test(`${name}: gateway on loopback with token auth; no discovery, Control UI or public exposure`, () => {
     const c = load(name);
     assert.equal(c.gateway.bind, "loopback");

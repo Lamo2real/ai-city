@@ -35,6 +35,13 @@
       "exec", "process", "read", "write", "edit", "apply_patch", "browser", "canvas", "cron", "gateway", "image", "nodes", "sessions_spawn", "sessions_send", "openclaw", "plugins",
     ],
     sessions: { visibility: "self" },
+    // Defence in depth on top of the Telegram allowlist: only the owner may use ask_jarvis at all.
+    // bin/gateway writes the real numeric ID into this key in openclaw.runtime.json (OpenClaw substitutes
+    // ${VARS} in values, not in keys). If it ever stays unresolved, the owner is denied too: fails closed.
+    toolsBySender: {
+      "*": { deny: ["ask_jarvis"] },
+      "channel:telegram:${TELEGRAM_OWNER_ID}": {},
+    },
     elevated: { enabled: false },
   },
 

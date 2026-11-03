@@ -22,6 +22,29 @@ export const RELAY_SERVICE = "jarvis.openclaw-relay";
 const RELAY_SESSION = "owner"; // the shared conversation, like the HUD, voice and the phone
 export const RELAY_AUDIT = "telegram-audit.jsonl";
 
+// The outcome of a merge confirmed from Telegram, as its own audit line: merged (at the PR head SHA the
+// gate required), failed (GitHub refused it or the branch moved), or refused (nothing valid was pending,
+// e.g. the confirmation window had expired).
+export function auditRelayOutcome(dataDir, item, result) {
+  const outcome = !item || result == null ? "refused" : result.ok ? "merged" : "failed";
+  const entry = {
+    ts: new Date().toISOString(), via: "telegram", who: "owner (allowlisted Telegram account)", kind: "merge_outcome", outcome,
+    ...(item && { merge: { repo: item.repo, number: item.number, head: item.head } }),
+    ...(outcome === "refused" && { reason: "no merge was awaiting confirmation (none requested, or it expired)" }),
+    ...(outcome === "failed" && { reason: "GitHub refused the merge or the branch changed after the confirmation" }),
+  };
+  writeAudit(dataDir, entry);
+}
+
+function writeAudit(dataDir, entry) {
+  try {
+    mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+    appendFileSync(join(dataDir, RELAY_AUDIT), `${JSON.stringify(entry)}\n`, { mode: 0o600 });
+  } catch (err) {
+    log(`telegram audit failed: ${err.message}`);
+  }
+}
+
 // Anything token-shaped the owner pastes into a chat stays out of the audit file: known token prefixes
 // (GitHub, Slack, OpenAI/Anthropic-style keys), Telegram bot tokens, Bearer values and long random strings.
 const TOKEN_PATTERNS = [/\b(?:ghp|gho|ghu|ghs|ghr|github_pat|xox[abprs]|sk|sk-ant|AKIA)[-_][A-Za-z0-9_-]{8,}/g, /\b\d{6,12}:[A-Za-z0-9_-]{30,}\b/g, /Bearer\s+\S+/gi, /\b[A-Za-z0-9+/_-]{32,}={0,2}/g];
@@ -33,12 +56,7 @@ export function auditRelay(dataDir, message, pending) {
   const text = message.trim();
   const kind = pending && isConfirmPhrase(text) ? "merge_confirm" : pending && /^\s*(cancel|avbryt)[.!]?\s*$/i.test(text) ? "merge_cancel" : "message";
   const entry = { ts: new Date().toISOString(), via: "telegram", who: "owner (allowlisted Telegram account)", kind, ...(pending && kind !== "message" && { merge: { repo: pending.repo, number: pending.number } }), text: redactTokens(scrubSecrets(text)).slice(0, 500) };
-  try {
-    mkdirSync(dataDir, { recursive: true, mode: 0o700 });
-    appendFileSync(join(dataDir, RELAY_AUDIT), `${JSON.stringify(entry)}\n`, { mode: 0o600 });
-  } catch (err) {
-    log(`telegram audit failed: ${err.message}`);
-  }
+  writeAudit(dataDir, entry);
 }
 import { LOGIN_PAGE, createPhoneAccess, inSubnet, startPhoneListener } from "./phone.js";
 import { createStateSource } from "./state.js";
@@ -447,6 +465,16 @@ export function createServer({ booqyDir, dataDir, port, getState, chat, speak = 
     logger: log,
   });
   const relayToken = createTokenCheck({ keychain, service: RELAY_SERVICE, logger: log });
+  // The merge gate as the relay sees it: the same gate, but every confirmation's outcome is audited too.
+  const relayGate = {
+    ...mergeGate,
+    async confirm(sessionId, id) {
+      const item = mergeGate.current(sessionId);
+      const result = await mergeGate.confirm(sessionId, id);
+      auditRelayOutcome(dataDir, item, result);
+      return result;
+    },
+  };
 
   // The OpenClaw relay: Telegram direct messages from the owner's own allowlisted account only (the
   // allowlist is enforced by OpenClaw, see jarvis/openclaw/openclaw.json). By the owner's decision it has
@@ -462,7 +490,7 @@ export function createServer({ booqyDir, dataDir, port, getState, chat, speak = 
     }
     const message = body?.message;
     if (typeof message === "string" && message.trim() && message.length <= MAX_MESSAGE) auditRelay(dataDir, message, mergeGate.current(RELAY_SESSION));
-    return handleChat(req, res, { chat: talk, speak, gate: mergeGate, phone: false, parsed: { message, sessionId: RELAY_SESSION, voice: false } });
+    return handleChat(req, res, { chat: talk, speak, gate: relayGate, phone: false, parsed: { message, sessionId: RELAY_SESSION, voice: false } });
   }
 
   async function route(req, res, phone) {

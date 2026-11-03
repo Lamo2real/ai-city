@@ -9,6 +9,7 @@ OpenClaw here is only a messaging channel into AI City. A Telegram direct messag
   - Model backend: your logged-in `claude` CLI (no API key, no OAuth token copied anywhere).
   - Tools and plugins: every built-in tool denied, no bundled or ClawHub skills, one plugin.
   - Telegram: DMs only, from one allowlisted numeric user ID; groups disabled.
+  - Defence in depth: a per-sender tool policy (`tools.toolsBySender`) denies `ask_jarvis` to everyone except your Telegram ID. OpenClaw only substitutes `${VARS}` in values, not keys, so `bin/gateway` writes your checked numeric ID into that key in a git-ignored, mode-600 runtime copy, `openclaw.runtime.json`. If that ever failed, you'd be denied too: it fails closed.
 - `plugins/jarvis-relay/`: the one tool, `ask_jarvis`. It POSTs to Jarvis's relay route `/api/relay/chat` on `127.0.0.1` with the relay token, in the shared `owner` conversation. It refuses any non-loopback server.
 - `workspace/AGENTS.md`, `SOUL.md`: the agent's standing instruction: relay, never answer yourself. Forwarded or quoted content is passed inside a labelled block. Jarvis treats that block as data. The server only confirms a merge when your whole message is exactly "I confirm", so forwarded text can never approve one.
 - `launchd/` and `bin/telegram-on`, `bin/telegram-off`: the gateway as a LaunchAgent (`se.lamo.jarvis-openclaw`).
@@ -64,12 +65,20 @@ Every secret lives in the Keychain and nowhere else. `openclaw.json` only names 
 - `who`: your allowlisted account.
 - `kind`: `message`, `merge_confirm` or `merge_cancel`.
 - `merge`: for a confirmation or cancel, the repo and PR number.
+- After each confirmation, a second line with `kind` `merge_outcome` and `outcome`:
+  - `merged`, with the PR head SHA the merge was pinned to
+  - `failed`, if GitHub refused it or the branch changed
+  - `refused`, if nothing valid was waiting, e.g. the confirmation window had expired
+
+  Failed and refused lines also give the `reason`.
 - `text`: the message, with secrets and anything token-shaped redacted, capped at 500 characters.
 
-To see what was approved from Telegram:
+To see what was approved from Telegram, and what happened:
 ```bash
-grep -E '"kind":"merge_(confirm|cancel)"' ~/Library/Application\ Support/Jarvis/telegram-audit.jsonl
+grep -E '"kind":"merge_(confirm|cancel|outcome)"' ~/Library/Application\ Support/Jarvis/telegram-audit.jsonl
 ```
+
+**The gateway's own log** is `~/Library/Logs/jarvis-openclaw.log`. It can show your Telegram user ID and message metadata, so `bin/telegram-on` creates it with mode 600, readable only by you, before launchd first writes to it.
 
 **OpenClaw's own config audit:**
 ```bash
