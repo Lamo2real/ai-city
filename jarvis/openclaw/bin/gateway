@@ -1,0 +1,22 @@
+#!/bin/sh
+# Starts the OpenClaw gateway with only what it needs: the gateway token from Keychain
+# item jarvis.openclaw-gateway. No Claude OAuth token, no API key ever reaches OpenClaw;
+# its Claude CLI backend uses the `claude` login on this Mac by itself.
+# Usage: jarvis/openclaw/bin/gateway [gateway|security audit --deep|channels add ...|pairing ...]
+set -e
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN
+export OPENCLAW_CONFIG_PATH="$HERE/openclaw.json"
+export OPENCLAW_STATE_DIR="${OPENCLAW_STATE_DIR:-$HOME/.jarvis/openclaw}"
+if [ -z "$OPENCLAW_GATEWAY_TOKEN" ]; then
+  OPENCLAW_GATEWAY_TOKEN="$(security find-generic-password -s jarvis.openclaw-gateway -w 2>/dev/null)" || {
+    echo "gateway: Keychain item jarvis.openclaw-gateway is missing. Create it: security add-generic-password -s jarvis.openclaw-gateway -a jarvis -w \"\$(openssl rand -hex 32)\"" >&2
+    exit 1
+  }
+  export OPENCLAW_GATEWAY_TOKEN
+fi
+mkdir -p "$OPENCLAW_STATE_DIR" && chmod 700 "$OPENCLAW_STATE_DIR"
+chmod 600 "$OPENCLAW_CONFIG_PATH"
+cd "$HERE"
+[ $# -gt 0 ] || set -- gateway
+exec npx openclaw "$@"
