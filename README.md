@@ -77,7 +77,7 @@ Everything runs on the owner's Claude subscription through the logged-in `claude
 npm start
 ```
 
-Then open http://localhost:7777, press the chat button and type, or press the microphone and talk. The city button opens the **City View**: an isometric voxel city of the agents, drawn from the registry and the ledger (HQ in the centre, one building per department, hired workers walking in). Click an agent or a building for its panel, answer questions in the bottom-right inbox, double-click a building to zoom in, Esc to zoom out. The DEMO button (top-left) shows a busy fake city when the runtime is idle; `?demo=1&view=city` opens it directly. Both go to the same Jarvis conversation. The CLI stays open while the city works on something you asked for, prints questions and results as they come, and takes your answers on stdin.
+Then open http://localhost:7777, press the chat button and type, or press the microphone and talk. The city button opens the **City View**: an isometric voxel city of the agents, drawn from the registry and the ledger (HQ in the centre, one building per department, hired workers walking in). Click an agent or a building for its panel, answer questions in the bottom-right inbox, double-click a building to zoom in, Esc to zoom out. Both go to the same Jarvis conversation. The CLI stays open while the city works on something you asked for, prints questions and results as they come, and takes your answers on stdin.
 
 | Variable | Meaning |
 |---|---|

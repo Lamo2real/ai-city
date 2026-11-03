@@ -390,4 +390,9 @@ test("the HUD has no demo mode, no fake data and no canned replies", () => {
   const hud = readFileSync(new URL("../hud/index.html", import.meta.url), "utf8");
   assert.match(hud, /catch\(e\)\{ showOffline\(\); \}/, "a failed /state.json load shows the offline state");
   assert.match(hud, /Can't reach Jarvis/);
+  // The owner's instructions must not point at a demo either. MORNING_REPORT.md is a dated record and is exempt.
+  for (const doc of ["../../README.md", "../README.md", "../SPEC.md"]) {
+    const url = new URL(doc, import.meta.url);
+    if (existsSync(url)) assert.doesNotMatch(readFileSync(url, "utf8"), /demo/i, doc);
+  }
 });
