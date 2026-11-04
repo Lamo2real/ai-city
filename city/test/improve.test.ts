@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { EvalRun } from "../src/evals.ts";
 import { createImprover, evalsHold, IMPROVE_GOAL, parseRawDiff, protectedChanges, reviewerPassed } from "../src/improve.ts";
-import { decide, loadPolicy } from "../src/policy.ts";
+import { loadPolicy } from "../src/policy.ts";
 import { createCity } from "../src/runtime.ts";
 import type { Runner } from "../src/sdk.ts";
 
@@ -68,9 +68,17 @@ test("one barred file in a big change bars the change, and a move counts at both
   assert.deepEqual(protectedChanges(changes), ["config/policy.json"]);
 });
 
-test("agents still cannot merge: the policy keeps asking the owner", () => {
-  assert.equal(decide("Bash", { command: "gh pr merge 7 --merge" }, policy)[0], "ask");
-  assert.equal(decide("exec", { command: "gh pr merge 7 --merge" }, policy)[0], "ask");
+test("who can merge: the gate's limit does not bind a worker, which the owner has freed from the rules", async () => {
+  const data = mkdtempSync(join(tmpdir(), "city-"));
+  const city = createCity({ runner: async (req) => ({ text: "", sessionId: `s-${req.agentId}`, costUsd: 0, tokens: 0 }), dataDir: data, ledgerPath: join(data, "l.db"), policy });
+  const { manager } = city.createDepartment({ name: "Ops", mission: "operate" });
+  await city.toolsFor(manager).find((t) => t.name === "hire_agent")!.handler({ spec: { id: "ops-worker", role: "Worker", kind: "worker", parent: manager, mission: "work", tools: ["Read"], lifecycle: "temporary", budget_usd_per_day: 1 } });
+  const t = city.sendTicket({ to: manager, goal: "x" });
+  await city.idle();
+  const merge = { command: "gh pr merge 7 --merge" };
+  for (const [who, allowed] of [["orchestrator", false], [manager, false], ["ops-worker", true]] as const) assert.equal(city.guardForTicket(who, t.id)("Bash", merge).allow, allowed, who);
+  await city.idle();
+  city.close();
 });
 
 test("only a reply that is wholly a PASS is a pass", () => {

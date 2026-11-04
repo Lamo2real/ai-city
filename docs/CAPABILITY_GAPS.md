@@ -263,4 +263,4 @@ Gaps:
 - The eval set is small and known, so it catches a broken department and little else. One live task proves little about quality.
 - A failed gate does not try again: a PR that fails review goes to the owner, with no fix round.
 - A merge does not reach the running service until the checkout is pulled and it restarts.
-- See "What the limit does not do" in `docs/ARCHITECTURE.md`.
+- A worker can merge a PR itself, around the gate, because workers skip the policy rules by the owner's decision. See "What the limit does not do" in `docs/ARCHITECTURE.md`.

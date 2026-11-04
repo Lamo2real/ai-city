@@ -1,7 +1,8 @@
 // The self-improvement gate. A weekly ticket may end with a PR; this merges it only when, checked here at one
 // commit, it stays inside what the loop may change, CI passed, the Reviewer passed and the evals did not get worse.
 // Everything else goes to the owner as a question. Nothing an agent says is taken for any of this: it only names the PR.
-// An agent still cannot merge: `gh pr merge` stays an "ask" in the policy, and this is runtime code, not a tool.
+// This is runtime code, not a tool. It limits what the loop merges by itself and cannot stop a worker that merges
+// on its own: `gh pr merge` is an "ask" for core agents and managers, and by the owner's decision workers skip the rules.
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
