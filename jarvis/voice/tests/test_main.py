@@ -22,6 +22,7 @@ def test_main_refuses_a_placeholder_voice(monkeypatch, tmp_path, capsys):
         pipeline.main()
 
 
+@pytest.mark.skipif("CI" in os.environ, reason="downloads Whisper, Kokoro and Piper, about 2 GB")
 def test_main_reaches_a_running_pipeline(tmp_path):
     config = tmp_path / "voice.json"
     real = json.loads((Path(__file__).parents[3] / "config" / "voice.json").read_text())
