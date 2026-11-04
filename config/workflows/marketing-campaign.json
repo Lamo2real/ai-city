@@ -1,0 +1,58 @@
+{
+  "name": "marketing-campaign",
+  "description": "Research, strategy, content, the owner's approval, publishing, analytics.",
+  "inputs": [
+    "goal"
+  ],
+  "steps": [
+    {
+      "id": "research",
+      "department": "Marketing",
+      "goal": "Research the audience and competitors for {{goal}}.",
+      "complexity": "standard"
+    },
+    {
+      "id": "strategy",
+      "department": "Marketing",
+      "goal": "Write the strategy for {{goal}} from the research.",
+      "depends_on": [
+        "research"
+      ],
+      "complexity": "standard"
+    },
+    {
+      "id": "content",
+      "department": "Marketing",
+      "goal": "Produce the content for {{goal}}. Campaigns stay paused or draft.",
+      "depends_on": [
+        "strategy"
+      ],
+      "complexity": "standard"
+    },
+    {
+      "id": "approve",
+      "approval": "Publish the {{goal}} campaign? The content is ready.",
+      "depends_on": [
+        "content"
+      ]
+    },
+    {
+      "id": "publish",
+      "department": "Marketing",
+      "goal": "Publish {{goal}} as approved.",
+      "depends_on": [
+        "approve"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "analytics",
+      "department": "Marketing",
+      "goal": "Report how {{goal}} performed against its goal.",
+      "depends_on": [
+        "publish"
+      ],
+      "complexity": "simple"
+    }
+  ]
+}

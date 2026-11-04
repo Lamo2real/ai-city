@@ -4,7 +4,8 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { assertNoApiKey, createCity, createRunner, loadPolicy, sdkEnv } from "city";
+import { existsSync } from "node:fs";
+import { OPENCLAW_BIN, assertNoApiKey, createCity, createOpenClawRunner, createRunner, loadPolicy, sdkEnv } from "city";
 import { createCityChat, withJarvisBin } from "../server/city-chat.js";
 
 const prompt = process.argv.slice(2).join(" ").trim();
@@ -19,7 +20,8 @@ const dataDir = process.env.JARVIS_DATA_DIR ?? join(homedir(), "Library/Applicat
 const policy = loadPolicy();
 const env = await sdkEnv(withJarvisBin(process.env));
 const runner = createRunner({ policy, env });
-const city = createCity({ runner, policy, log });
+const openclawRunner = existsSync(OPENCLAW_BIN) ? createOpenClawRunner({ policy, env, dataDir: process.env.JARVIS_HOME ?? join(homedir(), ".jarvis") }) : undefined;
+const city = createCity({ runner, openclawRunner, policy, log });
 const chat = createCityChat({ city, runner, dataDir, logger: log });
 const SESSION = "owner"; // the same conversation as the HUD and the voice pipeline
 

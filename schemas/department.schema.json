@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DepartmentInput",
+  "description": "What create_department receives.",
+  "type": "object",
+  "required": [
+    "name",
+    "mission"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 60
+    },
+    "mission": {
+      "type": "string",
+      "maxLength": 600
+    },
+    "responsibilities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "model": {
+      "enum": [
+        "claude-opus-5-5",
+        "claude-sonnet-5-5",
+        "claude-haiku-5-5"
+      ],
+      "description": "The manager's model; default from policy.models.complex"
+    },
+    "skills": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "autonomy": {
+      "enum": [
+        "read_only",
+        "standard",
+        "supervised"
+      ],
+      "default": "standard"
+    },
+    "force": {
+      "type": "boolean",
+      "description": "Create it even though an existing department overlaps"
+    }
+  }
+}

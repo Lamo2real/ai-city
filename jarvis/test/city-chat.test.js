@@ -30,7 +30,7 @@ const runner = async (req) => {
     req.onText?.(reply.slice(0, 5));
     req.onText?.(reply.slice(5));
     if (/forward/.test(req.prompt)) await req.tools.find((t) => t.name === "send_ticket").handler({ ticket: { to: "orchestrator", goal: req.prompt } });
-    return { text: reply, sessionId: req.resume ?? `sdk-${turns.length}`, costUsd: 0 };
+    return { text: reply, sessionId: req.resume ?? `sdk-${turns.length}`, costUsd: 0.01 };
   }
   return { text: req.agentId === "secretary" ? "**Done:** the thing." : "", sessionId: `sdk-${req.agentId}`, costUsd: 0 };
 };
@@ -65,11 +65,12 @@ test("typed and spoken turns share one Jarvis session and memory", async () => {
   await chat("and times two?", "hud");
   assert.equal(turns.length, 2);
   assert.equal(turns[0].resume, undefined);
+  assert.ok(city.ledger.costReport().by_agent.jarvis, "Jarvis's own turns count in the costs");
   assert.equal(turns[1].resume, "sdk-1", "the second turn resumes the first turn's session");
   assert.equal(turns[1].agentId, "jarvis");
   assert.equal(turns[1].model, "claude-haiku-5-5");
   assert.ok(turns[1].allowedTools.includes("mcp__jarvis__send_ticket"));
-  assert.equal(turns[1].tools.length, 7);
+  assert.deepEqual(turns[1].tools.map((t) => t.name).sort(), ["agent_status", "ask_agent", "ask_user", "city_status", "recall", "remember", "send_ticket"], "Jarvis carries only the tools its prompt lists");
   await chat("hello from the terminal", "cli");
   assert.equal(turns[2].resume, undefined, "another conversation has its own session");
 });
@@ -93,6 +94,7 @@ test("questions and results from the city come back as Jarvis messages, pushed t
   assert.equal(res.statusCode, 200);
   assert.match(res.headers["content-type"], /text\/event-stream/);
 
+  const said = () => pushed.filter((p) => p.type === "jarvis"); // the stream also carries city events
   reply = "On it, sir.";
   await chat("please forward this to the city", "hud");
   const ticket = city.openTickets()[0];
@@ -100,19 +102,19 @@ test("questions and results from the city come back as Jarvis messages, pushed t
   reply = "The orchestrator asks: which repo, sir?";
   const ask = city.toolsFor("orchestrator").find((t) => t.name === "ask_user").handler;
   await ask({ question: { ticket_id: ticket.id, questions: [{ text: "Which repo?", default: "a new one" }] } });
-  await waitFor(() => turns.some((t) => t.agentId === "jarvis" && /^\[question /.test(t.prompt)) && pushed.at(-1)?.text === "The orchestrator asks: which repo, sir?", "the question turn and its pushed reply");
+  await waitFor(() => turns.some((t) => t.agentId === "jarvis" && /^\[question /.test(t.prompt)) && said().at(-1)?.text === "The orchestrator asks: which repo, sir?", "the question turn and its pushed reply");
   const q = turns.findLast((t) => t.agentId === "jarvis");
   assert.match(q.prompt, /^\[question q-[0-9a-f]+ from orchestrator \(agent orchestrator\) on ticket t-/);
   assert.match(q.prompt, /Which repo\? Default: a new one\./);
   assert.equal(q.resume, "sdk-1", "asked in the conversation that sent the ticket");
-  assert.deepEqual(pushed.at(-1), { type: "jarvis", sessionId: "hud", text: "The orchestrator asks: which repo, sir?", audio: Buffer.from("spoken:The orchestrator asks: which repo, sir?").toString("base64"), audioType: "audio/mpeg" });
+  assert.deepEqual(said().at(-1), { type: "jarvis", sessionId: "hud", text: "The orchestrator asks: which repo, sir?", audio: Buffer.from("spoken:The orchestrator asks: which repo, sir?").toString("base64"), audioType: "audio/mpeg" });
 
   reply = "All done, sir.";
   await city.toolsFor("orchestrator").find((t) => t.name === "report").handler({ ticket_id: ticket.id, status: "done", summary: "built", artifacts: [] });
   await city.idle();
-  await waitFor(() => pushed.at(-1)?.text === "All done, sir.", "the result turn and its pushed reply");
+  await waitFor(() => said().at(-1)?.text === "All done, sir.", "the result turn and its pushed reply");
   assert.match(turns.findLast((t) => t.agentId === "jarvis").prompt, /^\[result for ticket t-[0-9a-f]+, done\] \*\*Done:\*\* the thing\./);
-  assert.equal(pushed.at(-1).text, "All done, sir.");
+  assert.equal(said().at(-1).text, "All done, sir.");
   es.destroy();
 });
 
@@ -137,12 +139,24 @@ test("chat.idle waits for relayed turns, so a CLI does not exit before Jarvis ha
   assert.equal(settled, true);
 });
 
+test("one agent's status: a bad id is a 404, and a secret in its work is scrubbed", async () => {
+  assert.equal((await call({ path: "/api/city/agent?id=Bad%20Name" })).status, 404);
+  assert.equal((await call({ path: "/api/city/agent?id=nobody" })).status, 404);
+  const secret = `ghp_${"a".repeat(36)}`;
+  city.ledger.putTicket({ id: "t-secret", created_at: new Date().toISOString(), updated_at: new Date().toISOString(), from: "jarvis", to: "secretary", kind: "task", goal: `use ${secret}`, status: "in_review" });
+  const r = await call({ path: "/api/city/agent?id=secretary" });
+  assert.equal(r.status, 200);
+  assert.ok(JSON.parse(r.text).current.some((t) => t.id === "t-secret"));
+  assert.ok(!r.text.includes(secret));
+  city.ledger.updateTicket("t-secret", { status: "cancelled" });
+});
+
 test("the City View gets a snapshot, an agent's audit tail, and talks back through the bus", async () => {
   const snap = await call({ path: "/api/city" });
   assert.equal(snap.status, 200);
   const s = JSON.parse(snap.text);
   assert.ok(Array.isArray(s.agents) && s.agents.some((a) => a.id === "orchestrator"));
-  assert.deepEqual(Object.keys(s).sort(), ["agents", "caps", "questions", "spend", "tickets", "usage"]);
+  assert.deepEqual(Object.keys(s).sort(), ["activities", "agents", "caps", "city", "department_agents", "departments", "parked", "questions", "spend", "tickets", "usage"]);
   assert.equal((await call({ path: "/api/city/audit?agent=Bad%20Name" })).status, 400);
   assert.equal((await call({ path: "/api/city/audit?agent=orchestrator" })).status, 200);
   const noAt = await call({ method: "POST", path: "/api/city/instruct", body: { text: "hello" } });
