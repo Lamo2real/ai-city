@@ -5,8 +5,8 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { SafariError, mapOsaError } from "../safari/errors.js";
 
-const VALUE_FLAGS = new Set(["tab", "selector", "timeout", "spend-ticket"]);
-const HELP = "Commands: windows, tabs, open <url> [--new-window|--new-tab], switch <window> <tab>, close <window> <tab>, close-window <window>, navigate <url>, back, forward, reload, read [--tab w:t], html [--selector css], js <code|->, click <css>, fill <css> <value|->, submit <css form>, wait <css> [--timeout s]. Page commands take --tab window:tab (default: front tab). click/submit/js on payment pages need --spend-ticket <id>.";
+const VALUE_FLAGS = new Set(["tab", "selector", "timeout", "spend-ticket", "amount"]);
+const HELP = "Commands: windows, tabs, open <url> [--new-window|--new-tab], switch <window> <tab>, close <window> <tab>, close-window <window>, navigate <url>, back, forward, reload, read [--tab w:t], html [--selector css], js <code|->, click <css>, fill <css> <value|->, submit <css form>, wait <css> [--timeout s]. Page commands take --tab window:tab (default: front tab). click/submit/js on payment pages need --spend-ticket <id> --amount <n>.";
 
 const usage = (message) => new SafariError("USAGE", message);
 
@@ -59,14 +59,14 @@ const COMMANDS = {
   html: ({ flags }, { safari }) => safari.html(tabOf(flags), flags.selector),
   async js({ args, flags }, deps) {
     need(args, 1, "code (or - for stdin)");
-    return deps.safari.js(tabOf(flags), await valueOf(args[0], deps), { spendTicket: flags["spend-ticket"] });
+    return deps.safari.js(tabOf(flags), await valueOf(args[0], deps), { spendTicket: flags["spend-ticket"], amount: flags.amount });
   },
-  click: ({ args, flags }, { safari }) => (need(args, 1, "a CSS selector"), safari.click(tabOf(flags), args[0], { spendTicket: flags["spend-ticket"] })),
+  click: ({ args, flags }, { safari }) => (need(args, 1, "a CSS selector"), safari.click(tabOf(flags), args[0], { spendTicket: flags["spend-ticket"], amount: flags.amount })),
   async fill({ args, flags }, deps) {
     need(args, 2, "a CSS selector and a value (or -)");
     return deps.safari.fill(tabOf(flags), args[0], await valueOf(args[1], deps));
   },
-  submit: ({ args, flags }, { safari }) => (need(args, 1, "a form selector"), safari.submit(tabOf(flags), args[0], { spendTicket: flags["spend-ticket"] })),
+  submit: ({ args, flags }, { safari }) => (need(args, 1, "a form selector"), safari.submit(tabOf(flags), args[0], { spendTicket: flags["spend-ticket"], amount: flags.amount })),
   wait({ args, flags }, { safari }) {
     need(args, 1, "a CSS selector");
     const t = flags.timeout === undefined ? 10 : Number(flags.timeout);

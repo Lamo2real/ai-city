@@ -25,8 +25,8 @@ test("every command reaches the right method with the right arguments", async ()
     [["navigate", "a.test", "--tab", "2:1"], ["navigate", { window: 2, index: 1 }, "a.test"]],
     [["back"], ["history", { window: 1, index: 0 }, "back"]], [["forward"], ["history", { window: 1, index: 0 }, "forward"]], [["reload"], ["history", { window: 1, index: 0 }, "reload"]],
     [["read", "--tab", "1:2"], ["read", { window: 1, index: 2 }]], [["html", "--selector", "main"], ["html", { window: 1, index: 0 }, "main"]],
-    [["click", "#b", "--spend-ticket", "t-1"], ["click", { window: 1, index: 0 }, "#b", { spendTicket: "t-1" }]],
-    [["submit", "form"], ["submit", { window: 1, index: 0 }, "form", { spendTicket: undefined }]],
+    [["click", "#b", "--spend-ticket", "t-1", "--amount", "12.5"], ["click", { window: 1, index: 0 }, "#b", { spendTicket: "t-1", amount: "12.5" }]],
+    [["submit", "form"], ["submit", { window: 1, index: 0 }, "form", { spendTicket: undefined, amount: undefined }]],
     [["wait", "#x", "--timeout", "3"], ["wait", { window: 1, index: 0 }, "#x", 3]],
   ];
   for (const [argv, expected] of cases) {

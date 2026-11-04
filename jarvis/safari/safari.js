@@ -45,10 +45,10 @@ export function createSafari({ mac, audit, spend, sleep = (ms) => new Promise((r
   // Payment gate for click / submit / js. Returns { url, spendTicket? } or throws SPEND_NEEDS_APPROVAL.
   // A payment page is judged by its card inputs and URL; a click also by the button's text, a submit by the form's action.
   // Using a valid approval spends it (spend.authorize records it), so a retry needs a new one.
-  async function gate(tab, spendTicket, action, selector) {
+  async function gate(tab, spendTicket, action, selector, amount) {
     const probe = await page(tab, pageJs.probe(action === "js" ? undefined : selector));
     if (!isPaymentPage(probe, action)) return { url: probe.url };
-    const verdict = spendTicket ? spend(spendTicket, probe.url) : { ok: false, reason: null };
+    const verdict = spendTicket ? spend(spendTicket, probe.url, amount) : { ok: false, reason: null };
     if (verdict.ok) return { url: probe.url, spendTicket };
     const msg = verdict.reason ? `${MESSAGES.SPEND_NEEDS_APPROVAL} I can't use that ticket: ${verdict.reason}.` : MESSAGES.SPEND_NEEDS_APPROVAL;
     throw Object.assign(new SafariError("SPEND_NEEDS_APPROVAL", msg), { url: probe.url, spend_ticket: spendTicket });
@@ -89,21 +89,21 @@ export function createSafari({ mac, audit, spend, sleep = (ms) => new Promise((r
       return { url: p.url, truncated: p.truncated, content: wrapContent(p.html) };
     }),
 
-    js: (tab, code, { spendTicket } = {}) => opened(() =>
+    js: (tab, code, { spendTicket, amount } = {}) => opened(() =>
       audited({ action: "js", selector: null }, async () => {
         if (writesSensitiveField(code)) throw new SafariError("PASSWORD_FIELD", MESSAGES.PASSWORD_FIELD);
         const bypass = guardBypass(code);
         if (bypass) throw new SafariError("PASSWORD_FIELD", `${MESSAGES.PASSWORD_FIELD} (I won't run code that touches ${bypass}.)`);
-        const g = await gate(tab, spendTicket, "js");
+        const g = await gate(tab, spendTicket, "js", undefined, amount);
         let p = await page(tab, pageJs.js(code)).catch((e) => (e.code === "EVAL_BLOCKED" ? null : Promise.reject(e)));
         if (p === null) p = { url: g.url, value: JSON.stringify(await mac.runJs(tab.window, tab.index, pageJs.rawJs(code))), raw: true };
         const text = p.jsError ? `Error: ${p.jsError}` : p.value;
         return { url: p.url ?? g.url, content: wrapContent(text), ...(p.truncated && { truncated: true }), ...(p.raw && { note: "The page blocks eval, so this is Safari's plain-text result." }), spend_ticket: g.spendTicket };
       })),
 
-    click: (tab, selector, { spendTicket } = {}) => opened(() =>
+    click: (tab, selector, { spendTicket, amount } = {}) => opened(() =>
       audited({ action: "click", selector }, async () => {
-        const g = await gate(tab, spendTicket, "click", selector);
+        const g = await gate(tab, spendTicket, "click", selector, amount);
         const p = await page(tab, pageJs.click(selector));
         return { ok: true, url: p.url, submits: p.submits, spend_ticket: g.spendTicket };
       }, (out) => out.submits || out.spend_ticket)),
@@ -114,9 +114,9 @@ export function createSafari({ mac, audit, spend, sleep = (ms) => new Promise((r
         return { ok: true, url: p.url };
       })),
 
-    submit: (tab, selector, { spendTicket } = {}) => opened(() =>
+    submit: (tab, selector, { spendTicket, amount } = {}) => opened(() =>
       audited({ action: "submit", selector }, async () => {
-        const g = await gate(tab, spendTicket, "submit", selector);
+        const g = await gate(tab, spendTicket, "submit", selector, amount);
         const p = await page(tab, pageJs.submit(selector));
         return { ok: true, url: p.url ?? g.url, spend_ticket: g.spendTicket };
       })),

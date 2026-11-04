@@ -140,13 +140,19 @@ test("spend approvals: an ordinary finished orchestrator ticket, a wrong origin,
     ["no-approval", url, /incomplete/], ["expired", url, /expired/], ["too-long", url, /too long/], ["missing", url, /doesn't exist/],
     ["approved", "https://evil.test/checkout", /different site/], ["approved", "https://shop.test.evil.com/checkout", /different site/], ["approved", "http://shop.test/checkout", /different site/],
   ]) {
-    const v = r.authorize(id, page);
+    const v = r.authorize(id, page, 10);
     assert.equal(v.ok, false, `${id} ${page}`);
     assert.match(v.reason, why, `${id} ${page}`);
   }
   assert.throws(() => statSync(r.usedPath), "refusals spend nothing");
-  assert.equal(r.authorize("approved", url).ok, true);
-  assert.match(r.authorize("approved", url).reason, /already used/);
+  for (const [amt, why] of [[undefined, /need the amount/], ["", /need the amount/], ["abc", /need the amount/], [0, /need the amount/], [-1, /need the amount/], [20.01, /more than/], ["999", /more than/]]) {
+    const v = r.authorize("approved", url, amt);
+    assert.equal(v.ok, false, String(amt));
+    assert.match(v.reason, why, String(amt));
+  }
+  assert.throws(() => statSync(r.usedPath), "amount refusals spend nothing");
+  assert.equal(r.authorize("approved", url, "20").ok, true);
+  assert.match(r.authorize("approved", url, 5).reason, /already used/);
   assert.equal(statSync(r.usedPath).mode & 0o777, 0o600);
   assert.ok(JSON.parse(readFileSync(r.usedPath, "utf8")).used.approved);
 });
@@ -156,9 +162,9 @@ test("through the gate: a payment click or submit with a valid approval goes onc
   r0.add("approved", { approval: r0.ok() });
   r0.close();
   const r = rig({ page: { ...SHOP, submit: { url: "https://shop.test/checkout" } }, spend: r0.authorize });
-  assert.equal((await r.safari.submit(TAB, "form", { spendTicket: "approved" })).ok, true);
+  assert.equal((await r.safari.submit(TAB, "form", { spendTicket: "approved", amount: 12 })).ok, true);
   assert.equal(r.lines().at(-1).spend_ticket, "approved");
-  await assert.rejects(r.safari.submit(TAB, "form", { spendTicket: "approved" }), (e) => e.code === "SPEND_NEEDS_APPROVAL" && /already used/.test(e.message));
+  await assert.rejects(r.safari.submit(TAB, "form", { spendTicket: "approved", amount: 12 }), (e) => e.code === "SPEND_NEEDS_APPROVAL" && /already used/.test(e.message));
 });
 
 test("non-payment pages need no ticket; plain clicks aren't audited but submitting ones are", async () => {

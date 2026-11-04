@@ -48,7 +48,7 @@ function consume(path, id, at) {
 
 export function createSpendCheck({ ledgerPath = LEDGER_PATH, usedPath = USED_PATH, now = Date.now } = {}) {
   // → { ok: true } (and the ticket is now spent) or { ok: false, reason }.
-  return function authorize(ticketId, pageUrl) {
+  return function authorize(ticketId, pageUrl, amount) {
     const found = readTicket(ticketId, ledgerPath);
     if (!found) return { ok: false, reason: "that ticket doesn't exist" };
     const { ticket } = found;
@@ -63,6 +63,9 @@ export function createSpendCheck({ ledgerPath = LEDGER_PATH, usedPath = USED_PAT
     if (!Number.isFinite(created) || expires - created > MAX_WINDOW_MS) return { ok: false, reason: "that approval is valid for too long" };
     const origin = originOf(pageUrl);
     if (!origin || origin !== a.origin) return { ok: false, reason: "that approval is for a different site" };
+    const n = typeof amount === "string" && amount.trim() !== "" ? Number(amount) : amount;
+    if (typeof n !== "number" || !Number.isFinite(n) || n <= 0) return { ok: false, reason: "I need the amount with --amount" };
+    if (!Number.isFinite(a.max_amount) || n > a.max_amount) return { ok: false, reason: "that amount is more than the approval allows" };
     if (!consume(usedPath, String(ticketId), new Date(now()).toISOString())) return { ok: false, reason: "that approval was already used" };
     return { ok: true, approval: a };
   };

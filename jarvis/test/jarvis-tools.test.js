@@ -38,6 +38,7 @@ for (const file of files) {
 
 test("jarvis keeps jarvis-spotify and its prompt no longer mentions osascript", () => {
   assert.ok(toolsOf("jarvis.md").includes("Bash(jarvis-spotify:*)"));
+  assert.ok(toolsOf("jarvis.md").includes("Bash(jarvis-safari:*)"));
   assert.doesNotMatch(readFileSync(join(DIR, "jarvis.md"), "utf8"), /osascript/i);
 });
 
