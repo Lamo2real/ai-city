@@ -1,0 +1,152 @@
+[
+  {
+    "name": "Claude Code",
+    "category": "development",
+    "check": {
+      "command": [
+        "claude",
+        "auth",
+        "status",
+        "--text"
+      ]
+    }
+  },
+  {
+    "name": "OpenClaw gateway",
+    "category": "development",
+    "check": {
+      "port": 18789
+    },
+    "note": "Only needed for Telegram and scheduled automations; workers run without it."
+  },
+  {
+    "name": "GitHub CLI",
+    "category": "development",
+    "check": {
+      "command": [
+        "gh",
+        "auth",
+        "status"
+      ]
+    }
+  },
+  {
+    "name": "Git",
+    "category": "development",
+    "check": {
+      "command": [
+        "git",
+        "--version"
+      ]
+    }
+  },
+  {
+    "name": "Docker",
+    "category": "development",
+    "check": {
+      "command": [
+        "docker",
+        "info"
+      ]
+    },
+    "note": "Also what OpenClaw sandboxing would need."
+  },
+  {
+    "name": "VS Code",
+    "category": "development",
+    "check": {
+      "bin": "code"
+    }
+  },
+  {
+    "name": "draw.io",
+    "category": "development",
+    "check": {
+      "mcp": "draw.io"
+    }
+  },
+  {
+    "name": "AWS CLI",
+    "category": "cloud",
+    "check": {
+      "command": [
+        "aws",
+        "sts",
+        "get-caller-identity"
+      ]
+    }
+  },
+  {
+    "name": "Terraform",
+    "category": "cloud",
+    "check": {
+      "command": [
+        "terraform",
+        "version"
+      ]
+    }
+  },
+  {
+    "name": "Stripe",
+    "category": "business",
+    "check": {
+      "mcp": "Stripe"
+    }
+  },
+  {
+    "name": "Meta Ads",
+    "category": "marketing",
+    "check": {
+      "mcp": "meta-ads"
+    }
+  },
+  {
+    "name": "Gmail",
+    "category": "productivity",
+    "check": {
+      "mcp": "Gmail"
+    }
+  },
+  {
+    "name": "Google Calendar",
+    "category": "productivity",
+    "check": {
+      "mcp": "Google Calendar"
+    }
+  },
+  {
+    "name": "Google Drive",
+    "category": "productivity",
+    "check": {
+      "mcp": "Google Drive"
+    }
+  },
+  {
+    "name": "Slack",
+    "category": "productivity",
+    "check": {
+      "mcp": "Slack"
+    }
+  },
+  {
+    "name": "Telegram",
+    "category": "productivity",
+    "check": {
+      "keychain": "jarvis.openclaw-telegram"
+    }
+  },
+  {
+    "name": "Spotify",
+    "category": "creative",
+    "check": {
+      "keychain": "jarvis.spotify"
+    }
+  },
+  {
+    "name": "Cartesia voice",
+    "category": "creative",
+    "check": {
+      "keychain": "jarvis.cartesia"
+    }
+  }
+]

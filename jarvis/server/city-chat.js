@@ -43,7 +43,7 @@ export function createCityChat({ city, runner, dataDir, logger = () => {} }) {
     let result;
     try {
       result = await runner({
-        agentId: "jarvis", systemPrompt: prompt.body, model: prompt.model, effort: prompt.effort, allowedTools: prompt.tools, tools: city.toolsFor("jarvis"),
+        agentId: "jarvis", systemPrompt: prompt.body, model: prompt.model, effort: prompt.effort, allowedTools: prompt.tools, tools: city.toolsFor("jarvis").filter((t) => prompt.tools.includes(`mcp__jarvis__${t.name}`)),
         prompt: message, resume: sessions[sessionId], signal,
         onText: (text) => onEvent?.({ type: "text", text }),
         onTool: (name, input) => onEvent?.({ type: "tool", name, input }),
@@ -56,6 +56,7 @@ export function createCityChat({ city, runner, dataDir, logger = () => {} }) {
       return turn(message, sessionId, { onEvent, signal });
     }
     onEvent?.({ type: "flush" });
+    city.recordJarvisTurn(result, prompt.model);
     if (result.sessionId) remember(sessionId, result.sessionId);
     for (const t of city.openTickets()) if (!before.has(t.id)) owners.set(t.id, sessionId);
     return result.text.trim();
@@ -84,6 +85,7 @@ export function createCityChat({ city, runner, dataDir, logger = () => {} }) {
   city.on((e) => {
     if (e.type === "question") relay(questionText(e), e.ticket_id);
     else if (e.type === "result") relay(resultText(e), e.ticket_id);
+    else if (e.type === "tickets.parked") relay(`[${e.ids.length} open tickets had gone stale while the city was down, so they were parked, not resumed. The owner can resume or cancel them in the City view's inbox. Tell the owner in one sentence.]`, e.ids[0]);
     else if (e.type === "log") logger(`city: ${e.text}`);
   });
   return chat;

@@ -1,0 +1,49 @@
+#!/usr/bin/env node
+// Tells the running city that something happened. Schedules call this, so checking costs no model call:
+// only an event that actually happened reaches a manager, and the same event twice is one ticket.
+//   city-event emit <source> <type> <summary> [key]
+//   city-event briefing | watch-github | watch-failures
+import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+
+const base = process.env.JARVIS_URL ?? `http://127.0.0.1:${process.env.JARVIS_PORT ?? 7777}`;
+const config = JSON.parse(readFileSync(process.env.CITY_AUTOMATIONS ?? join(dirname(fileURLToPath(import.meta.url)), "..", "..", "config", "automations.json"), "utf8"));
+const today = new Date().toISOString().slice(0, 10);
+
+async function call(path, body) {
+  const res = await fetch(`${base}${path}`, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  if (!res.ok) throw new Error(`${path}: ${res.status}`);
+  return res.json();
+}
+const send = async (event) => console.log(JSON.stringify({ type: event.type, ...(await call("/api/city/events", event)) }));
+
+const commands = {
+  async emit([source, type, summary, key]) {
+    if (!source || !type || !summary) throw new Error("usage: city-event emit <source> <type> <summary> [key]");
+    await send({ source, type, summary, idempotency_key: key });
+  },
+  async briefing() {
+    const [health, costs] = await Promise.all([call("/api/city/health"), call("/api/city/costs")]);
+    await send({ source: "schedule", type: "briefing.daily", summary: `Daily briefing for ${today}`, data: { health, costs: { today: costs.today, estimated: true } }, idempotency_key: `briefing-${today}` });
+  },
+  async "watch-github"() {
+    for (const repo of config.github_repos ?? []) {
+      const { stdout } = await promisify(execFile)("gh", ["run", "list", "-R", repo, "--limit", "20", "--json", "databaseId,conclusion,name,headBranch,url,updatedAt"], { timeout: 30_000 });
+      const dayAgo = Date.now() - 86_400_000;
+      for (const r of JSON.parse(stdout)) {
+        if (r.conclusion === "failure" && Date.parse(r.updatedAt) > dayAgo) await send({ source: "github", type: "github.run_failed", summary: `${r.name} failed on ${r.headBranch} in ${repo}`, data: r, idempotency_key: `gh-${repo}-${r.databaseId}` });
+      }
+    }
+  },
+  async "watch-failures"() {
+    const { failed_today: n } = await call("/api/city/health");
+    if (n > 0) await send({ source: "city", type: "city.tickets_failed", summary: `${n} tickets failed today`, data: { failed_today: n }, idempotency_key: `failed-${today}-${n}` });
+  },
+};
+
+const [name, ...args] = process.argv.slice(2);
+if (!commands[name]) { console.error(`city-event: unknown command ${name ?? "(none)"}. One of: ${Object.keys(commands).join(", ")}`); process.exit(2); }
+commands[name](args).catch((err) => { console.error(`city-event: ${err.message}`); process.exit(1); });
