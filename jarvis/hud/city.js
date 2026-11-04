@@ -1,6 +1,6 @@
 // The City View: a small game world of the agents, drawn pixel by pixel on a canvas from city-state.js.
 // All of the art is drawn here in code. Every person on screen is a real agent; only the scenery moves on its own.
-import { BUILDING_H, COST_NOTE, CORE, INTEGRATION_MEANS, MODEL_NAME, TILE, VISUALS, ageText, agentPanel, agentStatus, applyLive, applySnapshot, assignSlots, checkText, cityMessage, courierFor, departmentNames, departmentPanel, deptColor, deptOf, doingWords, estUsd, gateStatus, hashOf, homeSpot, identity, initialState, integrationGroups, layout, parkedRows, placement, propFor, reduce, relTime, residents, seatRows, seatSpot, stockholmTime, topBar, traceLines, usdRows, visitAllowed, visualState, walkRoute, workforceGroups } from "./city-state.js";
+import { BUILDING_H, COST_NOTE, CORE, INTEGRATION_MEANS, MODEL_NAME, TILE, VISUALS, ageText, agentPanel, agentStatus, applyLive, applySnapshot, assignSlots, checkText, cityMessage, courierFor, departmentNames, departmentPanel, deptColor, deptOf, doingWords, estUsd, gateStatus, hashOf, homeSpot, identity, initialState, integrationGroups, layout, parkedRows, placement, walksOut, propFor, reduce, relTime, residents, seatRows, seatSpot, stockholmTime, topBar, traceLines, usdRows, visitAllowed, visualState, walkRoute, workforceGroups } from "./city-state.js";
 
 const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 const INK = "#1d1c36";
@@ -273,6 +273,8 @@ function sign(g, text, cx, y, maxW) {
 // Each department's own colours, by its slot, so twelve offices look like twelve offices.
 const ROOFS = [["#c0533f", "#d96c50", "#9c3f30"], ["#3f7fa8", "#5499c2", "#2f6387"], ["#3f8f6a", "#55a97f", "#2f7052"], ["#b5823a", "#d09c4c", "#8e642a"], ["#7f5aa8", "#9a74c2", "#634587"], ["#b84f78", "#d26a92", "#923c5e"], ["#4a6fb0", "#6288c8", "#37558c"], ["#8d9440", "#a8ae52", "#6e7430"], ["#b0663a", "#cb7f4e", "#8c4f2c"], ["#3f9a9a", "#55b4b4", "#2f7878"], ["#a84848", "#c25e5e", "#863636"], ["#5f7a8a", "#7894a4", "#485e6c"]];
 const WALLS = ["#e6d3ae", "#d9c6c0", "#cfd3c0", "#e2c8a8"];
+// A window around a seat: the cell's width, from above the figure's head to just under the desk.
+const windowRect = (p, b) => { const pitch = (b.w * TILE - 8) / 4; return { x: Math.round(p.x - pitch / 2) + 1, y: p.y - 22, w: Math.round(pitch) - 2, h: 28, pitch }; };
 function office(g, b) {
   const X = b.x * TILE, Y = b.y * TILE, W = b.w * TILE, H = b.h * TILE, r = rng(b.dept);
   const [roof, light, dark] = ROOFS[b.slot % ROOFS.length], wall = WALLS[hashOf(b.dept) % WALLS.length];
@@ -292,7 +294,8 @@ function office(g, b) {
   stallRoof(g, X + W / 2 - 16, by + 39, 32, roof, "#f3e6cc");
   sign(g, b.dept, X + W / 2, by + 27, W - 26);
   // The terrace: a seat for everyone, with a lamp and planters at its edges.
-  for (let s = 0; s < seatRows(b) * 4; s++) { const p = seatSpot(b, s); R(g, p.x - 8, p.y + 2, 16, 2, "rgba(20,18,40,.28)"); g.drawImage(desk("none"), p.x - 12, p.y - 11); }
+  // The glass front: a dark pane behind each seat's desk. The lit glow and the mullions and sill are drawn live, around the figure.
+  for (let s = 0; s < seatRows(b) * 4; s++) { const p = seatSpot(b, s), q = windowRect(p, b); R(g, q.x - 1, q.y - 1, q.w + 2, q.h + 2, INK); R(g, q.x, q.y, q.w, q.h, "#3a4660"); R(g, p.x - 8, p.y + 2, 16, 2, "rgba(20,18,40,.28)"); g.drawImage(desk("none"), p.x - 12, p.y - 11); }
   lamp(g, X + 1, Y + BUILDING_H * TILE + 8); lamp(g, X + W - 1, Y + BUILDING_H * TILE + 8);
   if (r() > 0.5) flowers(g, X + W - 18, Y + H - 12, "#d2699e");
 }
@@ -402,6 +405,8 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
   let homes = new Map();
   let effects = [], parcels = [];
   const cam = { x: 0, y: 0, wantX: 0, wantY: 0, zoom: 2, userMoved: false };
+  const walked = new Set(); // ids that already walked home for good
+  const winBox = document.createElement("div"); winBox.id = "citywindows"; winBox.hidden = true; winBox.setAttribute("aria-hidden", "true"); root.append(winBox);
   let selected = null, hover = null, lastVisit = 0, hiddenHomes = 0;
 
   const visible = () => root.offsetParent !== null && !document.hidden;
@@ -450,10 +455,15 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
       p.seated = to.seated;
       if (p.key === to.key) { if (!p.move && !p.route) { p.x = to.x; p.y = to.y; } else if (p.route) p.route[p.route.length - 1] = to; else if (p.move) p.move.to = to; continue; } // a new layout only shifts them
       p.key = to.key;
+      const walk = to.key === "home" && walksOut(state, id, walked);
       if (still) { p.x = to.x; p.y = to.y; p.move = null; p.route = null; continue; }
-      if (to.key === "home") { p.move = null; p.route = walkRoute(world, p, to).slice(); }
+      if (walk) { p.move = null; p.route = walkRoute(world, p, to).slice(); }
+      else if (to.key === "home") { p.x = to.x; p.y = to.y; p.move = null; p.route = null; } // any other move home is instant
       else dashTo(p, to);
     }
+    const lit = [];
+    for (const [d, m] of seats) for (const id of m.keys()) { const i = el("i"); i.dataset.lit = id; i.dataset.dept = d; lit.push(i); }
+    winBox.replaceChildren(...lit);
     refreshVisuals();
     root.dataset.people = String(people.size);
   }
@@ -706,6 +716,9 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
     for (const p of people.values()) if (!p.move && !p.route && p.key === "home") occupied.add(Math.floor((homes.get(p.id) ?? 0) / 2));
     for (const i of occupied) { const hh = world.homes.houses[i]; if (hh) { const win = houseWindows(hh); R(ctx, win.x - ox, win.y - oy, win.w, win.h, "#ffdf94"); R(ctx, win.x - ox, win.y - oy, win.w, 2, "#ffefc0"); } }
     if (hiddenHomes) label(`+${hiddenHomes} MORE IN WORKFORCE`, world.homes.x * TILE + 60, (world.homes.y + world.homes.h) * TILE - 12);
+    // Lit glass behind the desks: one window per occupied seat.
+    const litWin = [];
+    for (const [d, m] of seats) { const b = world.buildings.find((x) => x.dept === d); if (!b) continue; for (const seat of m.values()) { const q = windowRect(seatSpot(b, seat), b); litWin.push(q); R(ctx, q.x - ox, q.y - oy, q.w, q.h, "#ffdf94"); R(ctx, q.x - ox, q.y - oy, q.w, 4, "#ffefc0"); } }
     // Everyone, back to front.
     const order = [...people.values()].sort((a, b) => a.y - b.y);
     for (const p of order) drawPerson(p, now, f);
@@ -715,8 +728,9 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
       R(ctx, Math.round(ax - cam.x) - 3, Math.round(ay - cam.y) + 12, 6, 2, "rgba(20,18,40,.35)");
       R(ctx, x - 4, y - 4, 8, 7, INK); R(ctx, x - 3, y - 3, 6, 5, p.kind === "ticket" ? "#f4c63c" : "#49ad7c"); R(ctx, x - 1, y - 3, 2, 5, "#fff6e0");
     }
-    // Every name when zoomed well in, cut to the width of a seat; the marks stay on top of them.
-    if (cam.zoom >= 3) for (const p of order) if (p.id !== selected && p.id !== hover && !CORE.has(p.id)) label(fit(p.id, 30), p.x, p.y + 4);
+    // The mullions and sill sit in front of the figures; every occupied window keeps a name plate cut to its width.
+    for (const q of litWin) { R(ctx, q.x - ox, q.y - oy, 1, q.h, INK); R(ctx, q.x + q.w - 1 - ox, q.y - oy, 1, q.h, INK); R(ctx, q.x + Math.floor(q.w / 2) - ox, q.y - oy, 1, 6, INK); R(ctx, q.x - ox, q.y - oy, q.w, 1, INK); R(ctx, q.x - 1 - ox, q.y + q.h - oy, q.w + 2, 2, "#8c7a66"); }
+    for (const p of order) if (p.key.startsWith("desk") && !p.move && p.id !== selected && p.id !== hover) label(fit(p.id, Math.round((world.buildings[0] ? (world.buildings[0].w * TILE - 8) / 4 : 34) - 8)), p.x, p.y + 8);
     for (const p of order) drawBubble(p, f);
     for (const e of effects) R(ctx, e.x - cam.x, e.y - cam.y, e.s, e.s, e.c);
     // The one being looked at gets an arrow and its name; so does whoever the mouse is on, and the core keep name plates.
