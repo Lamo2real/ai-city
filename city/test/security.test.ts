@@ -120,13 +120,14 @@ test("an OpenClaw worker's ticket waits for its answer, then ends with the run t
       await req.tools.find((x) => x.name === "ask_user")!.handler({ question: { ticket_id: t.id, asked_by: req.agentId, path: "p", blocking: true, questions: [{ text: "which?", options: ["a", "b"], default: "a" }] } });
       return { text: "I asked.", sessionId: "o1", costUsd: 0, tokens: 0 };
     }
+    assert.match(req.prompt, /work this continues: ticket t-[\w-]+\. Its goal: do the special thing[\s\S]*Answer to your question/, "a fresh run gets the original assignment with the answer");
     return { text: "Used a, all done.", sessionId: `o${runs}`, costUsd: 0, tokens: 0 };
   };
   const manager: Runner = async (req) => ({ text: req.prompt.includes("[question from") ? "I cannot tell." : "", sessionId: `s-${req.agentId}`, costUsd: 0, tokens: 0 });
   const city = createCity({ runner: manager, openclawRunner, dataDir: dir(), ledgerPath: ":memory:", policy: basePolicy() });
   const { manager: m } = city.createDepartment({ name: "Ops5", mission: "work" });
   await hireWorker(city, m, "oc-w", { executor: "openclaw" });
-  const t = await tool(city, m, "send_ticket")({ ticket: { to: "oc-w", goal: "do" } }) as { id: string };
+  const t = await tool(city, m, "send_ticket")({ ticket: { to: "oc-w", goal: "do the special thing" } }) as { id: string };
   await city.idle();
   assert.equal(city.ledger.getTicket(t.id)?.status, "waiting_on_owner", "not finished by the run that only asked");
   const q = city.ledger.openQuestions().find((o) => o.question.asked_by === "oc-w")!;

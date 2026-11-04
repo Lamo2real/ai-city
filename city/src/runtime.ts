@@ -439,8 +439,9 @@ export function createCity(opts: CityOptions) {
     const remembered = t.kind === "direct_instruction" || target.id === "secretary" || target.id === "reviewer" ? "" : memory.contextFor(t.goal, visibility(target, t));
     const label = t.kind === "direct_instruction" ? `[direct instruction from ${t.from}${t.cc?.length ? `, cc ${t.cc.join(", ")}` : ""}]` : `[ticket from ${t.from}]`;
     // An OpenClaw run cannot be resumed, so a follow-up carries what the agent already said.
-    const earlier = target.executor === "openclaw" && t.parent_id ? ledger.getTicket(t.parent_id)?.result?.summary : undefined;
-    deliver(t.to, `${note}${remembered}${handoffs(t)}${earlier ? `[Earlier on this work you reported: ${earlier}]\n` : ""}${label} ${JSON.stringify(t)}`, t)
+    const parent = target.executor === "openclaw" && t.parent_id ? ledger.getTicket(t.parent_id) : undefined;
+    const earlier = parent ? `[This run starts fresh, so here is the work this continues: ticket ${parent.id}. Its goal: ${parent.goal}${parent.acceptance_criteria?.length ? `\nAcceptance: ${parent.acceptance_criteria.join("; ")}` : ""}${parent.result?.summary ? `\nEarlier you reported: ${parent.result.summary}` : ""}\nCarry on with it now. Your final message is your report on ${parent.id}.]\n` : "";
+    deliver(t.to, `${note}${remembered}${handoffs(t)}${earlier}${label} ${JSON.stringify(t)}`, t)
       .then((r) => {
         // An OpenClaw worker's final message is its report.
         // Not while it waits on a question: the run that gets the answer finishes the ticket it asked about.
