@@ -10,6 +10,7 @@ import { createChat, scrubSecrets } from "./chat.js";
 import { createCityChat, withJarvisBin } from "./city-chat.js";
 import { createTranscriber, isWav, parseWake } from "./listen.js";
 import { createLiveSession, liveAvailable } from "./live.js";
+import { createMailGate, spokenForm } from "./mail-gate.js";
 import { createMergeGate, isConfirmPhrase } from "./merge.js";
 import { FILLERS, allFillers, fillerLanguage, sentenceSplitter, toolFiller } from "./progress.js";
 import { createKeychain } from "./keychain.js";
@@ -142,7 +143,7 @@ async function reply(res, text, voice, speak, gate, sessionId, phone = false) {
   const out = { reply: text, confirm: phone ? null : gate.describe(sessionId) };
   if (voice === true) {
     try {
-      Object.assign(out, await speak(text));
+      Object.assign(out, await speak(spokenForm(text)));
     } catch (err) {
       log(`voice failed: ${err.message}`);
     }
@@ -187,7 +188,7 @@ async function handleListen(req, res, { transcribe }) {
 }
 
 // `parsed` is a body a restricted channel (the OpenClaw relay) has already read and checked.
-async function handleChat(req, res, { chat, speak, gate, phone, parsed }) {
+async function handleChat(req, res, { chat, speak, gate, phone, parsed, mail, channel = phone ? "lan" : "hud" }) {
   let body = parsed;
   try {
     body ??= JSON.parse(await readBody(req));
@@ -209,11 +210,15 @@ async function handleChat(req, res, { chat, speak, gate, phone, parsed }) {
     }
   }
 
+  // An email to a business contact is approved only by the owner's own words, matched here.
+  const mailTurn = mail?.intercept(message, channel);
+  if (mailTurn?.reply) return reply(res, mailTurn.reply, voice, speak, gate, sessionId, phone);
+
   const started = Date.now();
   const before = gate.current(sessionId)?.id;
   let text;
   try {
-    text = await chat(message.trim(), sessionId);
+    text = await chat(mailTurn?.forward ?? message.trim(), sessionId);
   } catch (err) {
     log(`chat failed: ${err.message}: ${(err.detail ?? "").slice(0, 300)}`);
     return sendJson(res, 502, { error: "Jarvis could not get an answer from Claude. See ~/Library/Logs/jarvis.log." });
@@ -225,6 +230,9 @@ async function handleChat(req, res, { chat, speak, gate, phone, parsed }) {
     if (phone) gate.cancel(sessionId);
     text = phone ? PHONE_MERGE : gate.prompt(sessionId);
   }
+  // The owner hears the server's own summary of a held or approved email, not the model's description of it.
+  const mailNote = [mail?.announce(), mailTurn?.note].filter(Boolean).join(" ");
+  if (mailNote) text = `${text}\n\n${mailNote}`;
   return reply(res, text, voice, speak, gate, sessionId, phone);
 }
 
@@ -238,7 +246,7 @@ const pick = (list) => list[Math.floor(Math.random() * list.length)];
 // As /api/chat, but one JSON line per event, so speech can start before the reply is done:
 // filler (a progress line), sentence (part of the reply), then done or error.
 // `parsed` is a body the phone bridge has already read and checked.
-async function handleChatStream(req, res, { chat, speak, gate, phone, firstWaitMs = FIRST_WAIT_MS, parsed }) {
+async function handleChatStream(req, res, { chat, speak, gate, phone, firstWaitMs = FIRST_WAIT_MS, parsed, mail, channel = phone ? "lan" : "hud" }) {
   let body = parsed;
   try {
     body ??= JSON.parse(await readBody(req));
@@ -268,7 +276,7 @@ async function handleChatStream(req, res, { chat, speak, gate, phone, firstWaitM
       let audio = null;
       if (voice === true) {
         try {
-          audio = await (type === "filler" ? cachedSpeech(text, speak) : speak(text));
+          audio = await (type === "filler" ? cachedSpeech(text, speak) : speak(spokenForm(text)));
         } catch (err) {
           log(`voice failed: ${err.message}`);
         }
@@ -295,6 +303,12 @@ async function handleChatStream(req, res, { chat, speak, gate, phone, firstWaitM
     }
   }
 
+  const mailTurn = mail?.intercept(message, channel);
+  if (mailTurn?.reply) {
+    say("sentence", mailTurn.reply);
+    return finish(mailTurn.reply);
+  }
+
   const lines = FILLERS[fillerLanguage(message)];
   const started = Date.now();
   const before = gate.current(sessionId)?.id;
@@ -314,7 +328,7 @@ async function handleChatStream(req, res, { chat, speak, gate, phone, firstWaitM
 
   let text;
   try {
-    text = await chat(message.trim(), sessionId, { onEvent, signal: cancel.signal });
+    text = await chat(mailTurn?.forward ?? message.trim(), sessionId, { onEvent, signal: cancel.signal });
     splitter.flush();
   } catch (err) {
     clearInterval(still);
@@ -338,6 +352,12 @@ async function handleChatStream(req, res, { chat, speak, gate, phone, firstWaitM
     text = phone ? PHONE_MERGE : gate.prompt(sessionId);
     say("sentence", text);
   } else if (!spoken && text) say("sentence", text);
+  // The owner hears the server's own summary of a held or approved email, not the model's description of it.
+  const mailNote = [mail?.announce(), mailTurn?.note].filter(Boolean).join(" ");
+  if (mailNote) {
+    say("sentence", mailNote);
+    text = `${text}\n\n${mailNote}`;
+  }
   return finish(text);
 }
 
@@ -386,19 +406,30 @@ async function handleLogin(req, res, access) {
 
 // What the city says unprompted (questions, results) reaches every open HUD as server-sent events,
 // and so does everything that moves in the city (hires, tickets, questions, reviews, cost) for the City View.
-function createEventStream(talk, speak) {
+// Agents write free text (goals, summaries, questions) and the HUD shows it, so every string leaving for the HUD is scrubbed here.
+export function scrubDeep(value) {
+  if (typeof value === "string") return scrubSecrets(value);
+  if (Array.isArray(value)) return value.map(scrubDeep);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, scrubDeep(v)]));
+  return value;
+}
+
+function createEventStream(talk, speak, mail) {
   const clients = new Set();
   const listeners = new Set(); // The phone bridge: Jarvis's words only, no audio, no city events.
   talk.city?.on((event) => {
     if (event.type === "log") return;
-    for (const res of clients) res.write(`data: ${JSON.stringify({ type: "city", event })}\n\n`);
+    for (const res of clients) res.write(`data: ${JSON.stringify({ type: "city", event: scrubDeep(event) })}\n\n`);
   });
   talk.on?.(async ({ sessionId, text }) => {
     const event = { type: "jarvis", sessionId, text: scrubSecrets(text) };
+    // An unprompted turn may have held an email: the owner hears the server's summary of it too.
+    const mailNote = mail?.announce();
+    if (mailNote) event.text = `${event.text}\n\n${mailNote}`;
     for (const fn of listeners) fn({ sessionId, text: event.text });
     if (voiceBySession.get(sessionId)) {
       try {
-        Object.assign(event, await speak(event.text));
+        Object.assign(event, await speak(spokenForm(event.text)));
       } catch (err) {
         log(`voice failed: ${err.message}`);
       }
@@ -422,7 +453,7 @@ function createEventStream(talk, speak) {
 // talks back through the bus (an @mention direct instruction, an answer to a question).
 async function handleCity(req, res, city, path) {
   if (!city) return sendJson(res, 404, { error: "the city backend is not running" });
-  if (req.method === "GET" && path === "/api/city") return sendJson(res, 200, city.snapshot());
+  if (req.method === "GET" && path === "/api/city") return sendJson(res, 200, scrubDeep(city.snapshot()));
   if (req.method === "GET" && path === "/api/city/audit") {
     const agent = new URL(req.url, "http://localhost").searchParams.get("agent") ?? "";
     return /^[a-z][a-z0-9-]{0,40}$/.test(agent) ? sendJson(res, 200, city.auditTail(agent)) : sendJson(res, 400, { error: "bad agent" });
@@ -450,18 +481,19 @@ async function handleCity(req, res, city, path) {
   return sendJson(res, 404, { error: "not found" });
 }
 
-export function createServer({ booqyDir, dataDir, port, getState, chat, speak = synthesize, transcribe, gate, firstWaitMs, startLive = createLiveSession, keychain = createKeychain() }) {
+export function createServer({ booqyDir, dataDir, port, getState, chat, speak = synthesize, transcribe, gate, firstWaitMs, startLive = createLiveSession, keychain = createKeychain(), mailGateOptions = {} }) {
   const state = getState ?? createStateSource({ booqyDir, logger: log });
   const mergeGate = gate ?? createMergeGate({ dataDir, logger: log });
   const talk = chat ?? createChat({ booqyDir, dataDir, gate: mergeGate, logger: log });
   const hear = transcribe ?? createTranscriber({ dataDir });
   const access = createPhoneAccess({ dataDir });
-  const events = createEventStream(talk, speak);
+  const mailGate = createMailGate({ dataDir, keychain, logger: log, ...mailGateOptions });
+  const events = createEventStream(talk, speak, mailGate);
   const appApi = createAppApi({
     keychain,
     events,
     // No merge confirmation from the phone, and the phone speaks, so no audio.
-    chatStream: (req, res, parsed) => handleChatStream(req, res, { chat: talk, speak, gate: mergeGate, phone: true, firstWaitMs, parsed }),
+    chatStream: (req, res, parsed) => handleChatStream(req, res, { chat: talk, speak, gate: mergeGate, phone: true, firstWaitMs, parsed, mail: mailGate, channel: "app" }),
     logger: log,
   });
   const relayToken = createTokenCheck({ keychain, service: RELAY_SERVICE, logger: log });
@@ -490,13 +522,13 @@ export function createServer({ booqyDir, dataDir, port, getState, chat, speak = 
     }
     const message = body?.message;
     if (typeof message === "string" && message.trim() && message.length <= MAX_MESSAGE) auditRelay(dataDir, message, mergeGate.current(RELAY_SESSION));
-    return handleChat(req, res, { chat: talk, speak, gate: relayGate, phone: false, parsed: { message, sessionId: RELAY_SESSION, voice: false } });
+    return handleChat(req, res, { chat: talk, speak, gate: relayGate, phone: false, mail: mailGate, channel: "telegram", parsed: { message, sessionId: RELAY_SESSION, voice: false } });
   }
 
   async function route(req, res, phone) {
     const path = new URL(req.url, "http://localhost").pathname;
-    if (req.method === "POST" && path === "/api/chat") return await handleChat(req, res, { chat: talk, speak, gate: mergeGate, phone });
-    if (req.method === "POST" && path === "/api/chat/stream") return await handleChatStream(req, res, { chat: talk, speak, gate: mergeGate, phone, firstWaitMs });
+    if (req.method === "POST" && path === "/api/chat") return await handleChat(req, res, { chat: talk, speak, gate: mergeGate, phone, mail: mailGate });
+    if (req.method === "POST" && path === "/api/chat/stream") return await handleChatStream(req, res, { chat: talk, speak, gate: mergeGate, phone, firstWaitMs, mail: mailGate });
     // The LAN route is plain HTTP without a microphone, so live voice is not offered there.
     if (req.method === "POST" && path === "/api/live/session") return phone ? sendJson(res, 403, { error: "forbidden" }) : await handleLiveSession(req, res, { startLive });
     if (req.method === "POST" && path === "/api/warm") {
@@ -507,6 +539,12 @@ export function createServer({ booqyDir, dataDir, port, getState, chat, speak = 
     if (req.method === "GET" && path === "/api/live/status") return sendJson(res, 200, { available: !phone && liveAvailable() });
     if (req.method === "GET" && path === "/api/events") return events(req, res);
     if (path.startsWith("/api/city")) return await handleCity(req, res, talk.city, path);
+    // Read-only: what is waiting for this session, so another tab or Telegram-started merge shows up. Confirming is still POST /api/confirm only.
+    if (req.method === "GET" && path === "/api/confirm/pending") {
+      const sessionId = new URL(req.url, "http://localhost").searchParams.get("sessionId");
+      if (typeof sessionId !== "string" || !SESSION_ID.test(sessionId)) return sendJson(res, 400, { error: "bad sessionId" });
+      return sendJson(res, 200, { confirm: phone ? null : mergeGate.describe(sessionId) });
+    }
     if (req.method === "POST" && path === "/api/confirm") return await handleConfirm(req, res, { gate: mergeGate, speak });
     if (req.method === "POST" && path === "/api/listen") return await handleListen(req, res, { transcribe: hear });
     if (req.method !== "GET" && req.method !== "HEAD") return sendJson(res, 405, { error: "method not allowed" });
@@ -534,6 +572,8 @@ export function createServer({ booqyDir, dataDir, port, getState, chat, speak = 
       const localPort = server.address().port ?? port;
       if (!allowedRequest(req, [`localhost:${localPort}`, `127.0.0.1:${localPort}`])) return sendJson(res, 403, { error: "forbidden" });
       if (req.method === "POST" && new URL(req.url, "http://localhost").pathname === RELAY_PATH) return await handleRelay(req, res);
+      // jarvis-mail's approval endpoints exist on this listener only, never on the tailnet or the LAN.
+      if (new URL(req.url, "http://localhost").pathname.startsWith("/api/mail/")) return await mailGate.handle(req, res);
       return await route(req, res, false);
     } catch (err) {
       fail(res, err);
@@ -572,6 +612,7 @@ export function createServer({ booqyDir, dataDir, port, getState, chat, speak = 
       fail(res, err);
     }
   };
+  server.mailGate = mailGate;
   return server;
 }
 
