@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The OpenClaw gateway (Telegram → Jarvis). It runs bin/gateway, which reads every secret from the
+     Keychain at start: this plist holds none. Loopback only; Telegram is reached by outbound polling. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>se.lamo.jarvis-openclaw</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>exec __ROOT__/bin/gateway</string>
+  </array>
+  <key>WorkingDirectory</key><string>__ROOT__</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>__HOME__/Library/Logs/jarvis-openclaw.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/jarvis-openclaw.log</string>
+</dict>
+</plist>
