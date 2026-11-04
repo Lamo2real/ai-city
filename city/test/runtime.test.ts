@@ -416,3 +416,12 @@ test("an existing install's core rows are refreshed from the prompts: old tools 
   assert.ok(!jarvisTurn.allowedTools.some((t) => /osascript/.test(t)));
   city.close();
 });
+
+test("snapshot carries the caps from the loaded policy, not a copy", () => {
+  const custom = { ...policy, caps: { ...policy.caps, max_concurrent_agents: 7, max_workers_per_manager: 3, daily_spend_usd_per_department: 12.5, max_review_rounds: 4 } };
+  const c = createCity({ runner: fakeRunner({}).runner, dataDir: dir(), ledgerPath: ":memory:", policy: custom });
+  assert.deepEqual(c.snapshot().caps, { max_concurrent_agents: 7, max_workers_per_manager: 3, daily_spend_usd_per_department: 12.5, max_review_rounds: 4 });
+  const real = createCity({ runner: fakeRunner({}).runner, dataDir: dir(), ledgerPath: ":memory:", policy });
+  assert.equal(real.snapshot().caps.max_concurrent_agents, policy.caps.max_concurrent_agents);
+  c.close(); real.close();
+});

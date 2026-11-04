@@ -216,6 +216,32 @@
   #status{display:none;flex-direction:column;gap:12px;overflow-y:auto;min-height:0;overscroll-behavior:contain}
   body.view-status #status{display:flex}
   #status .panel{flex:none;overflow:visible}
+  /* Status: AI City board by default, the Booqy dashboard behind a second tab */
+  #status [hidden]{display:none!important}
+  #status .tabs{display:flex;gap:8px;flex:none}
+  #status .tabs button{min-height:40px;padding:0 16px;border:1px solid var(--line);background:rgba(0,0,0,.4);color:var(--txt);font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:.18em;cursor:pointer}
+  #status .tabs button[aria-selected=true]{border-color:var(--o);color:#fff;box-shadow:inset 0 0 8px rgba(255,106,26,.6)}
+  #status .tabs button:focus-visible{outline:2px solid var(--o2);outline-offset:2px}
+  #booqytab,#aicity{display:flex;flex-direction:column;gap:12px;flex:none}
+  #aicity h3{font-family:Orbitron,sans-serif;font-weight:500;font-size:10px;letter-spacing:.22em;color:var(--o2);margin-bottom:8px}
+  #aicity .err{color:#fff;background:var(--bad);padding:6px 10px;font-size:12px}
+  #aicity .mute{color:var(--mute);font-size:12px}
+  #ailimits .strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:10px}
+  #ailimits .lim{border:1px solid var(--line);padding:6px 8px;display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--mute)}
+  #ailimits .lim b{font-family:Orbitron,sans-serif;font-size:14px;color:var(--txt)}
+  #ailimits .lim.over,#ailimits .dept.over{border-color:var(--bad)}
+  #ailimits .lim.over b,#ailimits .dept.over .amt{color:var(--bad)}
+  #ailimits .dept{font-size:12px;padding:4px 0}
+  #ailimits .dept .top2{display:flex;justify-content:space-between;gap:8px}
+  #ailimits .dept .bar i.over{background:var(--bad);box-shadow:0 0 8px var(--bad)}
+  #ailimits .overtag{color:#fff;background:var(--bad);font-size:10px;letter-spacing:.12em;padding:0 5px;margin-left:6px}
+  #aicity .grp{margin-bottom:8px}#aicity .grp h4{font-size:10px;letter-spacing:.2em;color:var(--o2);margin:6px 0 2px}
+  #aicity .item{padding:5px 0;border-bottom:1px dashed rgba(255,106,26,.15);font-size:12px;display:flex;flex-wrap:wrap;gap:2px 10px}
+  #aicity .item .goal{flex-basis:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--txt)}
+  #aicity .item .meta{color:var(--mute)}
+  #aicity .tag{font-size:10px;letter-spacing:.12em;padding:0 6px;border:1px solid var(--dim);color:var(--mute)}
+  #aicity .tag.stale{border-color:var(--bad);color:var(--bad)}
+  #aicity .core h4{color:var(--mute)}
   #status .top{flex-wrap:wrap;gap:6px 16px;padding:10px 16px}
   #status .top .meta{flex-wrap:wrap;gap:4px 14px;white-space:normal}
   #status .gauges{height:auto;flex-wrap:wrap;gap:8px}
@@ -321,6 +347,12 @@
       <aside class="cityui" id="citypanel" role="dialog" aria-label="Details" hidden></aside>
       <nav id="citylist" class="srlist" aria-label="Buildings and agents (keyboard)"></nav>
     </section>
+    <div id="aicity" role="tabpanel" aria-label="AI City status">
+      <div class="err" id="aierr" role="alert" hidden></div>
+      <section class="panel"><h3>LIMITS</h3><div id="ailimits"></div></section>
+      <section class="panel"><h3>TICKETS</h3><div id="aitickets"></div></section>
+      <section class="panel"><h3>AGENTS</h3><div id="aiagents"></div></section>
+    </div>
     <aside class="panel" id="inbox" tabindex="-1" aria-label="Needs you">
       <header><h3>NEEDS YOU</h3><button type="button" class="x" id="inboxclose" aria-label="Close Needs you">×</button></header>
       <div class="err" id="inboxerr" role="alert" hidden></div>
@@ -422,7 +454,12 @@ function add(cls, text){ const d=document.createElement("div"); d.className="msg
   log.appendChild(d); log.scrollTop=log.scrollHeight; }
 /* Everything but the core lives in a view you open yourself. */
 const grid=$("grid"), statusSide=document.createElement("aside"); statusSide.id="status"; grid.append(statusSide);
-for(const c of [".top",".left",".right",".bl",".bc",".br"]) statusSide.append(document.querySelector(".panel"+c));
+const booqyTab=document.createElement("div"); booqyTab.id="booqytab"; booqyTab.setAttribute("role","tabpanel"); booqyTab.hidden=true;
+for(const c of [".top",".left",".right",".bl",".bc",".br"]) booqyTab.append(document.querySelector(".panel"+c));
+const tabs=document.createElement("div"); tabs.className="tabs"; tabs.setAttribute("role","tablist"); tabs.setAttribute("aria-label","Status");
+for(const [key,label] of [["aicity","AI CITY"],["booqy","BOOQY"]]){ const b=document.createElement("button"); b.type="button"; b.id="tab-"+key; b.setAttribute("role","tab"); b.textContent=label; b.onclick=()=>statusTab(key); tabs.append(b); }
+function statusTab(key){ $("aicity").hidden=key!=="aicity"; booqyTab.hidden=key!=="booqy"; for(const b of tabs.children) b.setAttribute("aria-selected",String(b.id==="tab-"+key)); }
+statusSide.append(tabs,$("aicity"),booqyTab); statusTab("aicity");
 grid.append($("city"),talk,$("inbox"));
 $("dock").insertBefore($("mic"),$("statusbtn")); $("dock").insertBefore($("voice"),$("statusbtn"));
 let view="";
@@ -496,14 +533,15 @@ async function speak(text,b64,type){ if(live){ liveSay(text); return; } if(!voic
 
 /* ---------- merge to main: the server decides; this only shows what it asks ---------- */
 const MERGE_ARM_MS=800; // the one control that merges to main stays disabled this long after it appears
-let confirmCard=null, confirmData=null, confirmTimer=null, confirmAct=null;
+let confirmCard=null, confirmData=null, confirmTimer=null, confirmAct=null, confirmSeq=0; const goneIds=new Set(); // goneIds: confirmations already acted on, cancelled or expired; a late poll must not bring them back
 const inboxNote=t=>{ $("inboxnote").textContent=t||""; };
-function clearConfirm(){ const had=!!confirmData; confirmCard?.remove(); confirmCard=null; confirmData=null; confirmAct=null; clearInterval(confirmTimer);
+window.jarvisConfirm=()=>confirmData; // the inbox module reads this when it starts, in case the card appeared before it was loaded
+function clearConfirm(){ const had=!!confirmData; if(had) goneIds.add(confirmData.id); confirmCard?.remove(); confirmCard=null; confirmData=null; confirmAct=null; clearInterval(confirmTimer);
   if(had) document.dispatchEvent(new CustomEvent("jarvis-confirm",{detail:null})); }
 function syncConfirm(c){
   if(!c){ clearConfirm(); return; }
-  if(confirmData?.id===c.id) return;
-  clearConfirm(); confirmData=c; c.expiresAt=Date.now()+c.expiresInMs; inboxNote(""); setView("inbox"); add("sys","Merge confirmation waiting in Needs you.");
+  if(confirmData?.id===c.id||goneIds.has(c.id)) return;
+  clearConfirm(); confirmSeq++; confirmData=c; c.expiresAt=Date.now()+c.expiresInMs; inboxNote(""); setView("inbox"); add("sys","Merge confirmation waiting in Needs you.");
   const card=document.createElement("div"); card.className="confirm"; card.setAttribute("role","alertdialog");
   const head=document.createElement("b"); head.textContent="MERGE TO MAIN · PRODUCTION";
   const name=document.createElement("div"); const link=document.createElement("a"); link.textContent=c.repo.split("/").pop()+"#"+c.number; link.target="_blank"; link.rel="noopener";
@@ -524,6 +562,13 @@ function syncConfirm(c){
   card.append(head,name,facts,btns,hint); $("inboxmerge").appendChild(card); confirmCard=card; setTimeout(()=>{ if(confirmCard===card&&!no.disabled) go.disabled=false; },MERGE_ARM_MS); tick(); confirmTimer=setInterval(tick,1000);
   document.dispatchEvent(new CustomEvent("jarvis-confirm",{detail:c}));
 }
+
+/* A merge asked for somewhere else (Telegram, another tab) shows up here too: read-only GET, on load, every 5 s while visible, and on focus.
+   Confirming still goes only through POST /api/confirm. */
+async function pollPending(){ if(document.hidden) return; const seq=confirmSeq;
+  try{ const r=await fetch("./api/confirm/pending?sessionId="+encodeURIComponent(sessionId)); if(!r.ok) return; const j=await r.json();
+    if(seq!==confirmSeq) return; /* something newer happened while this was in flight */ syncConfirm(j.confirm||null); }catch(e){} }
+pollPending(); setInterval(pollPending,5000); window.addEventListener("focus",pollPending); document.addEventListener("visibilitychange",pollPending);
 
 /* One turn at a time. A new message or talking over Jarvis cancels the one in progress. */
 let activeTurn=null, turnSeq=0;
@@ -765,8 +810,15 @@ function drawWave(now){
 }
 
 /* The city speaks through Jarvis without being asked: questions from agents, results when work is done. */
-try{ const es=new EventSource("./api/events"); es.onmessage=e=>{ const j=JSON.parse(e.data); if(j.type!=="jarvis"||j.sessionId!==sessionId) return;
-  add("j",j.text); if(j.audio||speakTurn||voiceOn){ speakTurn=true; enqueueSpeech(j.text,j.audio,j.audioType); } }; }catch(e){}
+document.addEventListener("jarvis-sse",e=>{ const j=e.detail; if(j?.type!=="jarvis"||j.sessionId!==sessionId) return;
+  add("j",j.text); if(j.audio||speakTurn||voiceOn){ speakTurn=true; enqueueSpeech(j.text,j.audio,j.audioType); } });
+/* The ONE event stream of the page. Everything else listens to these document events:
+   jarvis-sse (detail = the parsed message), jarvis-sse-open, jarvis-sse-error. Started after the modules have subscribed. */
+document.addEventListener("DOMContentLoaded",()=>{ try{ const es=new EventSource("./api/events");
+  es.onmessage=e=>{ let j; try{ j=JSON.parse(e.data); }catch(err){ return; } document.dispatchEvent(new CustomEvent("jarvis-sse",{detail:j})); };
+  es.onerror=()=>document.dispatchEvent(new Event("jarvis-sse-error")); es.onopen=()=>document.dispatchEvent(new Event("jarvis-sse-open")); }catch(e){} });
+/* One /api/city request is shared by whoever asks in the same moment (the board, the inbox, the city after a reconnect). */
+window.jarvisSnapshot=(()=>{ let p=null; return ()=>{ p??=fetch("./api/city").finally(()=>setTimeout(()=>{ p=null; },0)); return p.then(r=>r.clone()); }; })();
 fetch("./api/warm",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId})}).catch(()=>{});
 (async()=>{ try{ liveOk=(await (await fetch("./api/live/status")).json()).available===true; }catch(e){} setState("off"); add("sys","Jarvis online. Say Jarvis, press the microphone, or open the chat to type.");
   try{ const p=await navigator.permissions.query({name:"microphone"});
@@ -783,7 +835,7 @@ $("cmdin").addEventListener("keydown",e=>{ if(e.key==="Enter") $("cmdbtn").click
    Nothing is ever sent without an explicit click on a button. */
 import { applySnapshot, reduce, initialState, inboxItems } from "./city-state.js";
 const $ = (id) => document.getElementById(id);
-let state = initialState(), confirm = null, es = null, streamLost = false, shownSig = null;
+let state = initialState(), confirm = null, streamLost = false, shownSig = null;
 const drafts = new Map(), sentIds = new Set(), notes = new Map(); // per-question: typed text, already sent, last message
 const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 const error = (t) => { $("inboxerr").textContent = t ?? ""; $("inboxerr").hidden = !t; };
@@ -845,9 +897,8 @@ function render() {
 }
 
 async function load() {
-  es?.close();
   try {
-    const r = await fetch("./api/city");
+    const r = await window.jarvisSnapshot();
     const snap = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(snap.error || `server error ${r.status}`);
     state = applySnapshot(state, snap); error(null);
@@ -856,16 +907,102 @@ async function load() {
     error(`Can't reach Jarvis (${err.message === "Failed to fetch" ? "no connection" : err.message}). Questions may be missing.`);
   }
   render();
-  try {
-    es = new EventSource("./api/events"); es.inbox = true;
-    es.onmessage = (m) => { try { const j = JSON.parse(m.data); if (j.type === "city" && /^question\./.test(j.event?.type ?? "")) { state = reduce(state, j.event, Date.now()); render(); } } catch { /* a bad event is ignored */ } };
-    es.onerror = () => { streamLost = true; error("Live updates from Jarvis stopped. Reconnecting…"); };
-    // Back after a drop: events may have been missed, so start again from a fresh snapshot.
-    es.onopen = () => { if (streamLost) { streamLost = false; error(null); load(); } };
-  } catch { error("Live updates from Jarvis are not available."); }
 }
+// The one shared stream; a reconnect after a drop starts again from a fresh snapshot.
+document.addEventListener("jarvis-sse", (ev) => { const j = ev.detail; if (j?.type === "city" && /^question\./.test(j.event?.type ?? "")) { state = reduce(state, j.event, Date.now()); render(); } });
+document.addEventListener("jarvis-sse-error", () => { streamLost = true; error("Live updates from Jarvis stopped. Reconnecting…"); });
+document.addEventListener("jarvis-sse-open", () => { if (streamLost) { streamLost = false; error(null); load(); } });
 document.addEventListener("jarvis-confirm", (ev) => { confirm = ev.detail; render(); });
+confirm = window.jarvisConfirm?.() ?? null;
 $("cityopeninbox").onclick = () => window.setView("inbox", true);
+load();
+</script>
+<script type="module">
+/* Status board: limits, tickets and agents of the AI City, from GET /api/city and the shared event stream. Text goes in with textContent. */
+import { applySnapshot, reduce, initialState, limits, ticketGroups, agentRows, relTime, ageText } from "./city-state.js";
+const $ = (id) => document.getElementById(id);
+const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+let state = initialState(), streamLost = false, timer = null, costTimer = null;
+const STATUS_NAME = { open: "Open", in_progress: "In progress", in_review: "In review", waiting_on_owner: "Waiting on you" };
+const fmtUsd = (v) => `$${Number(v).toFixed(2)}`;
+const lim = (label, value, over = false) => { const d = mk("div", over ? "lim over" : "lim"); d.append(mk("span", "", label), mk("b", "", value)); return d; };
+
+function renderLimits() {
+  const L = limits(state), box = $("ailimits"), parts = [];
+  const of = (n, max) => (max === null ? `${n} / —` : `${n} / ${max}`);
+  const strip = mk("div", "strip");
+  strip.append(lim("AGENTS ACTIVE", of(L.agents.active, L.agents.max), L.agents.max !== null && L.agents.active >= L.agents.max), lim("WORKERS PER MANAGER (MOST)", of(L.workersPerManager.largest, L.workersPerManager.max), L.workersPerManager.max !== null && L.workersPerManager.largest >= L.workersPerManager.max));
+  if (L.usage) { const u = lim("USAGE TODAY", `${L.usage.turns} turns · ${Number(L.usage.tokens).toLocaleString("en-US")} tokens`); u.append(mk("span", "", `${fmtUsd(L.usage.usd)} (SDK cost estimate)`)); strip.append(u); } else strip.append(lim("USAGE TODAY", "—"));
+  parts.push(strip);
+  if (!L.known) parts.push(mk("div", "mute", "The server did not send its limits, so none are shown."));
+  const h = mk("h4", "", "SPEND TODAY PER DEPARTMENT" + (L.departments[0]?.cap != null ? ` (cap ${fmtUsd(L.departments[0].cap)} each)` : "")); h.style.cssText = "font-size:10px;letter-spacing:.2em;color:var(--o2);margin:4px 0";
+  parts.push(h);
+  if (!L.departments.length) parts.push(mk("div", "mute", "No spend recorded today."));
+  for (const d of L.departments) {
+    const row = mk("div", d.over ? "dept over" : "dept"), top = mk("div", "top2"), amt = mk("span", "amt", fmtUsd(d.usd));
+    const name = mk("span", "", d.dept); if (d.over) name.append(mk("span", "overtag", "OVER CAP"));
+    top.append(name, amt); row.append(top);
+    if (d.pct !== null) { const bar = mk("div", "bar"); const i = mk("i", d.over ? "over" : ""); i.style.width = `${d.pct}%`; bar.append(i); row.append(bar); }
+    parts.push(row);
+  }
+  box.replaceChildren(...parts);
+}
+function renderTickets(now) {
+  const parts = [];
+  for (const g of ticketGroups(state, now)) {
+    if (!g.tickets.length) continue;
+    const grp = mk("div", "grp"); grp.append(mk("h4", "", `${STATUS_NAME[g.status] ?? g.status} (${g.tickets.length})`));
+    for (const t of g.tickets) {
+      const it = mk("div", "item"); it.dataset.ticket = t.id;
+      it.append(mk("span", "", t.to), mk("span", "meta", ageText(t.ageMs)));
+      if (t.stale) it.append(mk("span", "tag stale", "stale"));
+      const goal = mk("span", "goal", t.goal); goal.title = t.goal; it.append(goal);
+      grp.append(it);
+    }
+    parts.push(grp);
+  }
+  if (!parts.length) parts.push(mk("div", "mute", "No open tickets."));
+  $("aitickets").replaceChildren(...parts);
+}
+function renderAgents(now) {
+  const rows = agentRows(state, now);
+  const item = (r) => {
+    const it = mk("div", "item"); it.dataset.agent = r.id;
+    it.append(mk("b", "", r.id), mk("span", "meta", r.role), mk("span", "tag", r.state), mk("span", "meta", `${r.modelName} · ${r.department} · ${relTime(r.lastActiveMs)}`));
+    const goal = mk("span", "goal", r.goal ?? "no current ticket"); if (r.goal) goal.title = r.goal; else goal.style.color = "var(--mute)";
+    it.append(goal); return it;
+  };
+  const parts = [];
+  if (rows.others.length) parts.push(...rows.others.map(item)); else parts.push(mk("div", "mute", "No agents hired yet."));
+  if (rows.core.length) { const g = mk("div", "grp core"); g.append(mk("h4", "", "CORE"), ...rows.core.map(item)); parts.push(g); }
+  $("aiagents").replaceChildren(...parts);
+}
+function render() { const now = Date.now(); renderLimits(); renderTickets(now); renderAgents(now); }
+const soon = () => { clearTimeout(timer); timer = setTimeout(render, 150); };
+const error = (t) => { $("aierr").textContent = t ?? ""; $("aierr").hidden = !t; };
+
+async function load() {
+  try {
+    const r = await window.jarvisSnapshot();
+    const snap = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(snap.error || `server error ${r.status}`);
+    state = applySnapshot(state, snap); error(null);
+  } catch (err) {
+    state = applySnapshot(state, { agents: [], tickets: [], questions: [], usage: null, spend: {} });
+    error(`Can't reach Jarvis (${err.message === "Failed to fetch" ? "no connection" : err.message}). Nothing is shown until it answers.`);
+  }
+  render();
+}
+document.addEventListener("jarvis-sse", (ev) => {
+  const j = ev.detail; if (j?.type !== "city") return;
+  try { state = reduce(state, j.event, Date.now()); } catch { return; }
+  soon();
+  // Spend per department only comes with a snapshot: refresh it a few seconds after money moves.
+  if (j.event?.type === "cost.update") { clearTimeout(costTimer); costTimer = setTimeout(load, 5000); }
+});
+document.addEventListener("jarvis-sse-error", () => { streamLost = true; error("Live updates from Jarvis stopped. Reconnecting…"); });
+document.addEventListener("jarvis-sse-open", () => { if (streamLost) { streamLost = false; error(null); load(); } });
+setInterval(render, 30000); // ages and "last active" move on
 load();
 </script>
 </body>

@@ -1,7 +1,7 @@
 // Events in, scene state out: the City View's reducer and panel mappings, with no DOM and no three.js.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { inboxItems, agentPanel, agentStatus, applySnapshot, departmentPanel, initialState, layout, propFor, reduce, topBar } from "../hud/city-state.js";
+import { agentRows, ageText, inboxItems, limits, relTime, ticketGroups, agentPanel, agentStatus, applySnapshot, departmentPanel, initialState, layout, propFor, reduce, topBar } from "../hud/city-state.js";
 import { cityEvent, citySnapshot } from "./fixtures/city.js";
 
 const T0 = 1_000_000;
@@ -119,4 +119,68 @@ test("inboxItems lists a live merge first, then open questions oldest first; exp
   assert.deepEqual(inboxItems(s, null, T0).map((i) => i.id), ["q-fx2"]);
   assert.deepEqual(inboxItems(initialState(T0), null, T0), []);
   assert.deepEqual(inboxItems(undefined, undefined, T0), []);
+});
+
+// ---- Status board ----
+const H = 3600 * 1000;
+test("applySnapshot keeps the caps the server sent, and null when it sent none", () => {
+  assert.deepEqual(applySnapshot(initialState(T0), citySnapshot(T0), T0).caps, citySnapshot(T0).caps);
+  assert.equal(applySnapshot(initialState(T0), { agents: [] }, T0).caps, null);
+});
+
+test("limits counts active non-core agents, the largest team, and flags a department over its cap", () => {
+  const snap = { ...citySnapshot(T0), spend: { App: 0.91, Marketing: 7.5 } };
+  snap.agents.push({ ...snap.agents.find((a) => a.id === "ios-dev"), id: "old", state: "retired" });
+  const L = limits(applySnapshot(initialState(T0), snap, T0));
+  assert.deepEqual(L.agents, { active: 9, max: 10 }, "core and retired agents are not counted");
+  assert.deepEqual(L.workersPerManager, { largest: 2, max: 4 });
+  assert.deepEqual(L.departments.map((d) => [d.dept, d.over]), [["App", false], ["Marketing", true]]);
+  assert.equal(L.departments[1].pct, 100);
+  assert.equal(Math.round(L.departments[0].pct), 18);
+  assert.deepEqual(L.usage, { turns: 31, tokens: 184200, usd: 1.73 });
+  assert.equal(L.known, true);
+});
+
+test("limits never invent a cap the server did not send", () => {
+  const L = limits(applySnapshot(initialState(T0), { agents: [], spend: { App: 99 }, usage: null }, T0));
+  assert.equal(L.known, false);
+  assert.equal(L.agents.max, null);
+  assert.equal(L.departments[0].over, false);
+  assert.equal(L.departments[0].pct, null);
+  assert.equal(L.usage, null);
+});
+
+test("ticketGroups groups by status in a fixed order, oldest first, and tags stale after two hours", () => {
+  const t = (id, status, createdAgo, updatedAgo) => ({ id, from: "x", to: "ios-dev", kind: "task", goal: id, status, created_at: new Date(T0 - createdAgo).toISOString(), updated_at: new Date(T0 - updatedAgo).toISOString() });
+  const s = applySnapshot(initialState(T0), { agents: [], tickets: [t("a", "in_progress", H, 60_000), t("b", "in_progress", 5 * H, 3 * H), t("c", "open", 10_000, 10_000), t("d", "waiting_on_owner", H, 2 * H), t("e", "in_review", H, 2 * H + 1)] }, T0);
+  const g = ticketGroups(s, T0);
+  assert.deepEqual(g.map((x) => x.status), ["open", "in_progress", "in_review", "waiting_on_owner"]);
+  assert.deepEqual(g[1].tickets.map((x) => x.id), ["b", "a"], "oldest first");
+  assert.deepEqual(g.flatMap((x) => x.tickets).filter((x) => x.stale).map((x) => x.id), ["b", "e"], "exactly 2 h is not stale yet");
+  assert.equal(g[1].tickets[0].ageMs, 5 * H);
+  assert.equal(ticketGroups(initialState(T0), T0).every((x) => x.tickets.length === 0), true);
+});
+
+test("agentRows hides retired agents, splits out the core, and carries the current ticket and last-active age", () => {
+  const snap = citySnapshot(T0);
+  snap.agents.find((a) => a.id === "py-dev").state = "retired";
+  snap.agents.find((a) => a.id === "ios-dev").last_active_at = new Date(T0 - 5 * 60_000).toISOString();
+  const r = agentRows(applySnapshot(initialState(T0), snap, T0), T0);
+  assert.deepEqual(r.core.map((x) => x.id), ["jarvis", "orchestrator", "secretary", "reviewer"]);
+  assert.ok(!r.others.some((x) => x.id === "py-dev"));
+  const ios = r.others.find((x) => x.id === "ios-dev");
+  assert.equal(ios.goal, "Build the habit tracker screen");
+  assert.equal(ios.department, "App");
+  assert.equal(ios.modelName, "Sonnet");
+  assert.equal(relTime(ios.lastActiveMs), "5 min ago");
+  assert.equal(r.others.find((x) => x.id === "app-manager").goal, null);
+});
+
+test("relative times", () => {
+  assert.equal(relTime(null), "—");
+  assert.equal(relTime(20_000), "just now");
+  assert.equal(relTime(2 * H), "2 h ago");
+  assert.equal(relTime(50 * H), "2 d ago");
+  assert.equal(ageText(90 * 60_000), "1 h");
+  assert.equal(ageText(null), "—");
 });
