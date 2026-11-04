@@ -523,8 +523,7 @@ test("spend_approval: only the orchestrator can send one, to Jarvis, valid for a
   city.answer("q-own", "yes");
   assert.equal(city.ledger.getQuestion("q-own")!.answered_by, "owner");
   assert.equal((await send("orchestrator", { ...base, approval: approval({ question_id: "q-own" }) })).status, "done");
-  await city.idle(); // the relayed direct_instruction dispatched a turn; let it finish before the db closes
-  city.close();
+  await city.close(); // the relayed direct_instruction dispatched a turn: close() waits for it before the db closes
 });
 
 test("snapshot carries the caps from the loaded policy, not a copy", () => {

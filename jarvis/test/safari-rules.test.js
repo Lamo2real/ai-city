@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import vm from "node:vm";
 import { createSafari, normalizeUrl } from "../safari/safari.js";
-import { pageJs, isPaymentPage, writesSensitiveField, guardBypass, wrapContent } from "../safari/page.js";
+import { pageJs, isPaymentPage, writesSensitiveField, readsCookies, guardBypass, wrapContent } from "../safari/page.js";
 import { createAudit } from "../safari/audit.js";
 import { createSpendCheck } from "../safari/spend.js";
 
@@ -51,6 +51,30 @@ test("js that writes into a password or code field is refused before anything ru
   ]) await assert.rejects(r.safari.js(TAB, code), { code: "PASSWORD_FIELD" });
   assert.equal(r.runs.length, 0);
   assert.equal(writesSensitiveField(`document.querySelector("input[type=password]").value`), false); // reading is fine
+});
+
+test("js that reads document.cookie is refused before anything runs; ordinary scripts and cookie-banner work still run", async () => {
+  const r = rig();
+  for (const code of [
+    `document.cookie`,
+    `document.cookie.split("; ").length`,
+    `JSON.stringify(document . cookie)`,
+    `document["cookie"]`,
+    `const c = window.document.cookie; c`,
+    `document.cookie += "x"`,
+    `const { cookie } = document; cookie`,
+    `cookieStore.getAll()`,
+  ]) await assert.rejects(r.safari.js(TAB, code), { code: "COOKIE_READ", message: "I don't read cookies, sir: they can hold your logins." }, code);
+  assert.equal(r.runs.length, 0, "nothing reached the page");
+  assert.ok(r.lines().every((l) => l.result === "refused:COOKIE_READ"));
+  // a normal script still goes through to the page
+  const ok = rig({ page: { js: { url: "https://a.test/", value: '"hello"' } } });
+  const out = await ok.safari.js(TAB, `document.querySelector(".cookie-banner button").click(); document.title`);
+  assert.equal(ok.runs.filter((m) => m === "js").length, 1);
+  assert.match(out.content, /hello/);
+  // not reads, or not cookies
+  for (const code of [`document.title`, `document.querySelector(".cookie-banner button").click()`, `document.cookie = "seen=1"`, `document.querySelectorAll("a").length`])
+    assert.equal(readsCookies(code), false, code);
 });
 
 function domRig(extra = {}) {

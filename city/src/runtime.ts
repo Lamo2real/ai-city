@@ -1439,7 +1439,15 @@ export function createCity(opts: CityOptions) {
     findAgent,
     checkMerges,
     resumeCapBlocked,
-    close: () => { closed = true; clearInterval(mergeTimer); if (capTimer) clearInterval(capTimer); ledger.close(); },
+    // Stops new follow-ups and the timers, then closes the ledger. A turn still running (or the follow-up it queues)
+    // keeps using the ledger, so the database closes only once that work has ended: awaiting close() makes teardown deterministic.
+    close: (): Promise<void> => {
+      closed = true;
+      clearInterval(mergeTimer);
+      if (capTimer) clearInterval(capTimer);
+      if (!running.size) { ledger.close(); return Promise.resolve(); }
+      return idle().then(() => ledger.close());
+    },
   };
 }
 
