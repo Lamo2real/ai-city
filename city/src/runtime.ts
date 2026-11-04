@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { z } from "zod";
-import { AGENTS_DIR, SKILLS_DIR, WORKER_TOOLS, listSkills, loadCorePrompt, parsePrompt, readSkill, renderTemplate, skillsIndex, type AgentPrompt } from "./agents.ts";
+import { AGENTS_DIR, OPENCLAW_CAPABILITIES, SKILLS_DIR, WORKER_TOOLS, listSkills, loadCorePrompt, parsePrompt, readSkill, renderTemplate, skillsIndex, type AgentPrompt } from "./agents.ts";
 import { findOverlap, managerId, type Department } from "./departments.ts";
 import { canMove, type WorkerState } from "./lifecycle.ts";
 import { createMemory, type MemoryScope, type Visibility } from "./memory.ts";
@@ -124,7 +124,7 @@ const TERMINAL = new Set<Ticket["status"]>(["done", "failed", "cancelled"]);
 const AUTO_APPROVE_WORD = /^\s*(approve|approved|yes|ok|okay|go ahead)\s*[.!]?\s*$/i; // the whole answer: "okay, deny it" is not a yes
 const SHELL_TOOLS = /^(Bash|bash|exec|process)$/;
 const FILE_TOOLS = /^(Write|Edit|MultiEdit|NotebookEdit|write|edit|apply_patch)$/;
-// The city's own controls are not an agent's to use. shortcut: text match, so an encoded command or a script file gets past it on the SDK path; OpenClaw runs also have an OS sandbox, give SDK workers one too.
+// The city's own controls are not an agent's to use. shortcut: text match, so an encoded command or a script file gets past it.
 const CITY_INTERNALS = /\/api\/city\b|\bledger\.db\b|\baudit\.jsonl\b|openclaw-plugin|policy_gate\.py|config\/policy\.json/;
 const newId = (prefix: string) => `${prefix}-${randomUUID().slice(0, 8)}`;
 
@@ -684,7 +684,6 @@ export function createCity(opts: CityOptions) {
     if (spec.executor === "openclaw" && !opts.openclawRunner) throw new Error("the openclaw executor is not available in this runtime");
     if (spec.executor === "openclaw" && spec.kind !== "worker") throw new Error("only workers run on openclaw; managers plan and delegate on a Claude Code session");
     if (spec.capabilities?.length && spec.executor !== "openclaw") throw new Error("capabilities need executor openclaw");
-    if (spec.capabilities?.includes("browser") && spec.capabilities.some((c) => c !== "browser" && c !== "web")) throw new Error("a browser worker cannot also have shell, desktop or files, because a web page could steer it: hire two workers and hand results over");
     if (spec.kind === "worker") {
       const idle = ledger.children(by).find((c) => c.kind === "worker" && c.role.toLowerCase() === spec.role.toLowerCase() && !ledger.inbox(c.id).some((t) => t.to === c.id));
       if (idle) throw new Error(`${idle.id} has the same role and nothing to do; send it the ticket instead of hiring`);
@@ -694,6 +693,9 @@ export function createCity(opts: CityOptions) {
     // shortcut: tools are not checked against a per-department allowlist, policy.json has none yet; add one when departments get scopes.
     const model = spec.model ?? policy.models?.[spec.complexity ?? "standard"] ?? "claude-sonnet-5-5";
     if (spec.kind === "worker") spec.tools = [...new Set([...WORKER_TOOLS, ...spec.tools])];
+    // By the owner's decision workers have no OS sandbox and full tools. The policy rules still apply to each call.
+    // Browser only when asked for, because browser runs take turns: their ports are fixed.
+    if (spec.executor === "openclaw") spec.capabilities = [...new Set([...OPENCLAW_CAPABILITIES, ...(spec.capabilities ?? [])])];
     const text = spec.kind === "manager"
       ? renderTemplate("manager", { id: spec.id, department, mission: spec.mission, model, tools_summary: spec.tools.join(", ") }, agentsDir)
       : renderTemplate("worker", { id: spec.id, specialty: spec.role, parent: by, tools: spec.tools.join(", ") }, agentsDir);

@@ -7,7 +7,8 @@ import { fileURLToPath } from "node:url";
 export const AGENTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "agents");
 
 // Every worker can report to its sender and ask (its manager answers first), whatever its spec lists.
-export const WORKER_TOOLS = ["mcp__jarvis__report", "mcp__jarvis__ask_user", "mcp__jarvis__remember", "mcp__jarvis__recall", "mcp__jarvis__read_skill"];
+export const OPENCLAW_CAPABILITIES = ["shell", "files", "web", "desktop"];
+export const WORKER_TOOLS = ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "WebSearch", "mcp__jarvis__report", "mcp__jarvis__ask_user", "mcp__jarvis__remember", "mcp__jarvis__recall", "mcp__jarvis__read_skill"];
 
 export interface AgentPrompt {
   name: string;
