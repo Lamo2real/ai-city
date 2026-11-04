@@ -391,3 +391,40 @@ test("a later report that corrects a ticket's status goes through; a repeat is i
   assert.equal(city.ledger.getTicket(t.id)?.result?.summary, "actually done");
   city.close();
 });
+
+test("an existing install's core rows are refreshed from the prompts: old tools like osascript are dropped", async () => {
+  const ledgerPath = join(dir(), "ledger.db");
+  const first = createCity({ runner: fakeRunner({}).runner, dataDir: dir(), ledgerPath, policy });
+  first.ledger.updateAgent("jarvis", { tools: ["mcp__jarvis__send_ticket", "Bash(osascript:*)"], session_id: "sess-keep", total_cost_usd: 1.25 }); // what an old release stored
+  first.close();
+
+  const { runner, calls } = fakeRunner({
+    // A ticket to Jarvis makes the runtime run a Jarvis turn through the fake runner.
+    orchestrator: async (req) => {
+      if (req.prompt.startsWith("[ticket from jarvis]")) await use(req, "send_ticket", { ticket: { to: "jarvis", goal: "tell the owner" } });
+    },
+  });
+  const city = createCity({ runner, dataDir: dir(), ledgerPath, policy });
+  // The refresh replaces the tools, never the conversation or the spend.
+  assert.equal(city.agent("jarvis").session_id, "sess-keep", "session_id survives the boot refresh");
+  assert.equal(city.agent("jarvis").total_cost_usd, 1.25, "total_cost_usd survives the boot refresh");
+  city.sendTicket({ to: "orchestrator", goal: "anything" });
+  await city.idle();
+
+  const prompt = city.promptOf("jarvis");
+  assert.ok(!city.agent("jarvis").tools.some((t) => /osascript/.test(t)), "the stored row is refreshed");
+  const jarvisTurn = calls.find((c) => c.agentId === "jarvis");
+  assert.ok(jarvisTurn, "Jarvis got a turn");
+  assert.deepEqual(jarvisTurn.allowedTools, prompt.tools);
+  assert.ok(!jarvisTurn.allowedTools.some((t) => /osascript/.test(t)));
+  city.close();
+});
+
+test("snapshot carries the caps from the loaded policy, not a copy", () => {
+  const custom = { ...policy, caps: { ...policy.caps, max_concurrent_agents: 7, max_workers_per_manager: 3, daily_spend_usd_per_department: 12.5, max_review_rounds: 4 } };
+  const c = createCity({ runner: fakeRunner({}).runner, dataDir: dir(), ledgerPath: ":memory:", policy: custom });
+  assert.deepEqual(c.snapshot().caps, { max_concurrent_agents: 7, max_workers_per_manager: 3, daily_spend_usd_per_department: 12.5, max_review_rounds: 4 });
+  const real = createCity({ runner: fakeRunner({}).runner, dataDir: dir(), ledgerPath: ":memory:", policy });
+  assert.equal(real.snapshot().caps.max_concurrent_agents, policy.caps.max_concurrent_agents);
+  c.close(); real.close();
+});

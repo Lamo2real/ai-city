@@ -81,7 +81,10 @@ export function createCity(opts: CityOptions) {
   for (const { name, parent } of CORE) {
     const p = loadCorePrompt(name, agentsDir);
     prompts.set(name, p);
-    if (!ledger.getAgent(name)) {
+    if (ledger.getAgent(name)) {
+      // The prompt files are the source of truth for core agents: an old install must not keep tools a later release removed.
+      ledger.updateAgent(name, { tools: p.tools, model: p.model, effort: p.effort });
+    } else {
       ledger.putAgent({ id: name, role: p.name, kind: "core", parent, model: p.model, effort: p.effort, tools: p.tools, lifecycle: "persistent", state: "active", session_id: null, created_at: now(), last_active_at: now(), total_cost_usd: 0 });
     }
   }
@@ -143,8 +146,9 @@ export function createCity(opts: CityOptions) {
     log(`${agentId}: turn (${text.slice(0, 80).replace(/\s+/g, " ")})`);
     const result = await opts.runner({
       agentId, systemPrompt: p.body, model: a.model, effort: (a.effort as AgentPrompt["effort"]) ?? p.effort,
-      // The prompt's own tools (report, ask_user, …) plus what the spec granted (Bash, Write, …).
-      allowedTools: [...new Set([...p.tools, ...a.tools])], tools: toolsFor(agentId), prompt: text, resume: a.session_id, cwd: cwdFor(ticket), onText,
+      // Core agents get exactly their prompt's tools. Hired agents get the prompt's own tools (report, ask_user, …)
+      // plus what the spec granted (Bash, Write, …).
+      allowedTools: a.kind === "core" ? [...p.tools] : [...new Set([...p.tools, ...a.tools])], tools: toolsFor(agentId), prompt: text, resume: a.session_id, cwd: cwdFor(ticket), onText,
     });
     ledger.updateAgent(agentId, { session_id: result.sessionId, last_active_at: now() });
     const delta = ledger.recordTurn(agentId, ticket?.id ?? null, result.sessionId, result.costUsd, result.usage ?? {}, result.tokens ?? 0);
@@ -413,7 +417,9 @@ export function createCity(opts: CityOptions) {
     snapshot: () => {
       const agents = ledger.agents();
       const departments = [...new Set(agents.map((a) => a.department).filter((d): d is string => !!d))];
-      return { agents, tickets: ledger.ticketsByStatus("open", "in_progress", "in_review", "waiting_on_owner"), questions: ledger.openQuestions(), usage: ledger.usageToday(), spend: Object.fromEntries(departments.map((d) => [d, ledger.spendToday(d)])) };
+      return { agents, tickets: ledger.ticketsByStatus("open", "in_progress", "in_review", "waiting_on_owner"), questions: ledger.openQuestions(), usage: ledger.usageToday(), spend: Object.fromEntries(departments.map((d) => [d, ledger.spendToday(d)])),
+        // The limits the city enforces, read from the loaded policy each time so the HUD never hardcodes them.
+        caps: { max_concurrent_agents: policy.caps.max_concurrent_agents, max_workers_per_manager: policy.caps.max_workers_per_manager, daily_spend_usd_per_department: policy.caps.daily_spend_usd_per_department, max_review_rounds: policy.caps.max_review_rounds } };
     },
     // The last n things an agent did, from the policy gate's audit log.
     auditTail(agentId: string, n = 10): Array<{ ts: number; tool: string; decision: string; reason: string }> {

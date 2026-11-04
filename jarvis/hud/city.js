@@ -109,7 +109,9 @@ function makeCharacter(agent, dept) {
   return g;
 }
 
-export function mountCity(root, { fetchImpl = fetch, EventSourceImpl = EventSource } = {}) {
+// `events` is where the one shared stream is re-dispatched (jarvis-sse, jarvis-sse-open, jarvis-sse-error); tests can inject their own target.
+// `snapshotImpl` fetches /api/city; the page shares one in-flight request between its views.
+export function mountCity(root, { fetchImpl = fetch, events = document, snapshotImpl = globalThis.jarvisSnapshot } = {}) {
   const $ = (sel) => root.querySelector(sel);
   const canvas = $("canvas");
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance" });
@@ -345,8 +347,8 @@ export function mountCity(root, { fetchImpl = fetch, EventSourceImpl = EventSour
   function renderDom() {
     const t = topBar(state), d = daylight();
     $("#citytop").replaceChildren(
-      stat("AGENTS", `${t.agentsTotal} / ${t.agentsActive} active`), stat("TICKETS RUNNING", String(t.ticketsRunning)), stat("QUESTIONS", String(t.questionsWaiting)),
-      stat("USAGE TODAY, UTC",t.usage ? `${t.usage.turns} turns · ${Math.round(t.usage.tokens / 1000)}k tokens · $${fmt(t.usage.usd, 2)}` : "—"),
+      stat("AGENTS", `${t.agentsActive} active · ${t.agentsTotal} total`), stat("TICKETS RUNNING", String(t.ticketsRunning)), stat("QUESTIONS", String(t.questionsWaiting)),
+      stat("USAGE TODAY, UTC", t.usage ? `${t.usage.turns} turns · ${Math.round(t.usage.tokens / 1000)}k tokens · $${fmt(t.usage.usd, 2)}` : "—"),
       stat("STOCKHOLM", `${d.text} ${d.light > 0.5 ? "☀" : d.light > 0.2 ? "◐" : "☾"}`),
     );
     const list = $("#citydepts"); list.replaceChildren(el("h3", null, "Departments"));
@@ -365,14 +367,13 @@ export function mountCity(root, { fetchImpl = fetch, EventSourceImpl = EventSour
   }
 
   // Data: a snapshot, then events. If either is missing the view says so; it never fills the gap with made-up data.
-  let es = null, streamLost = false; // streamLost: the live stream dropped and has not come back yet
+  let streamLost = false; // streamLost: the live stream dropped and has not come back yet
   const problem = (text) => { const e = $("#cityerror"); e.textContent = text ?? ""; e.hidden = !text; };
   async function load() {
-    es?.close();
     for (const p of people.values()) scene.remove(p); people.clear();
     for (const b of buildings.values()) scene.remove(b); buildings.clear();
     try {
-      const r = await fetchImpl("./api/city");
+      const r = snapshotImpl ? await snapshotImpl() : await fetchImpl("./api/city");
       const snap = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(snap.error || `server error ${r.status}`);
       state = applySnapshot(state, snap);
@@ -382,14 +383,11 @@ export function mountCity(root, { fetchImpl = fetch, EventSourceImpl = EventSour
       problem(`Can't reach Jarvis (${err.message === "Failed to fetch" ? "no connection" : err.message}). Nothing is shown until it answers.`);
     }
     setupLayout();
-    try {
-      es = new EventSourceImpl("./api/events");
-      es.onmessage = (m) => { const j = JSON.parse(m.data); if (j.type === "city") onEvent(j.event); else if (j.type === "jarvis") onEvent({ type: "result", ticket_id: "", status: "done", summary: j.text }); };
-      es.onerror = () => { streamLost = true; problem("Live updates from Jarvis stopped. Reconnecting…"); };
-      // Back after a drop: events may have been missed, so start again from a fresh snapshot.
-      es.onopen = () => { if (streamLost) { streamLost = false; problem(null); load(); } };
-    } catch { problem("Live updates from Jarvis are not available."); }
   }
+  // The one shared stream. A drop is shown; on reconnect events may have been missed, so start again from a fresh snapshot.
+  events.addEventListener("jarvis-sse", (ev) => { const j = ev.detail; if (j?.type === "city") onEvent(j.event); else if (j?.type === "jarvis") onEvent({ type: "result", ticket_id: "", status: "done", summary: j.text }); });
+  events.addEventListener("jarvis-sse-error", () => { streamLost = true; problem("Live updates from Jarvis stopped. Reconnecting…"); });
+  events.addEventListener("jarvis-sse-open", () => { if (streamLost) { streamLost = false; problem(null); load(); } });
 
   // The frame loop: walks, bobs, status animations, camera tweens, day and night.
   let last = performance.now(), fpsN = 0, fpsT = last;

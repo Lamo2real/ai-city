@@ -9,6 +9,16 @@ import { createCity, loadPolicy } from "city";
 import { createCityChat, questionText, resultText } from "../server/city-chat.js";
 import { createServer } from "../server/server.js";
 
+// Waits for a condition instead of sleeping a fixed time (fixed sleeps were flaky on a busy machine).
+async function waitFor(condition, what = "condition", timeoutMs = 5000) {
+  const until = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() > until) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
+
 const dir = mkdtempSync(join(tmpdir(), "jarvis-city-"));
 const policy = loadPolicy();
 const turns = [];
@@ -90,7 +100,7 @@ test("questions and results from the city come back as Jarvis messages, pushed t
   reply = "The orchestrator asks: which repo, sir?";
   const ask = city.toolsFor("orchestrator").find((t) => t.name === "ask_user").handler;
   await ask({ question: { ticket_id: ticket.id, questions: [{ text: "Which repo?", default: "a new one" }] } });
-  await new Promise((r) => setTimeout(r, 50));
+  await waitFor(() => turns.some((t) => t.agentId === "jarvis" && /^\[question /.test(t.prompt)) && pushed.at(-1)?.text === "The orchestrator asks: which repo, sir?", "the question turn and its pushed reply");
   const q = turns.findLast((t) => t.agentId === "jarvis");
   assert.match(q.prompt, /^\[question q-[0-9a-f]+ from orchestrator \(agent orchestrator\) on ticket t-/);
   assert.match(q.prompt, /Which repo\? Default: a new one\./);
@@ -100,7 +110,7 @@ test("questions and results from the city come back as Jarvis messages, pushed t
   reply = "All done, sir.";
   await city.toolsFor("orchestrator").find((t) => t.name === "report").handler({ ticket_id: ticket.id, status: "done", summary: "built", artifacts: [] });
   await city.idle();
-  await new Promise((r) => setTimeout(r, 50));
+  await waitFor(() => pushed.at(-1)?.text === "All done, sir.", "the result turn and its pushed reply");
   assert.match(turns.findLast((t) => t.agentId === "jarvis").prompt, /^\[result for ticket t-[0-9a-f]+, done\] \*\*Done:\*\* the thing\./);
   assert.equal(pushed.at(-1).text, "All done, sir.");
   es.destroy();
@@ -132,7 +142,7 @@ test("the City View gets a snapshot, an agent's audit tail, and talks back throu
   assert.equal(snap.status, 200);
   const s = JSON.parse(snap.text);
   assert.ok(Array.isArray(s.agents) && s.agents.some((a) => a.id === "orchestrator"));
-  assert.deepEqual(Object.keys(s).sort(), ["agents", "questions", "spend", "tickets", "usage"]);
+  assert.deepEqual(Object.keys(s).sort(), ["agents", "caps", "questions", "spend", "tickets", "usage"]);
   assert.equal((await call({ path: "/api/city/audit?agent=Bad%20Name" })).status, 400);
   assert.equal((await call({ path: "/api/city/audit?agent=orchestrator" })).status, 200);
   const noAt = await call({ method: "POST", path: "/api/city/instruct", body: { text: "hello" } });
@@ -158,7 +168,7 @@ test("city events reach the HUD on the same event stream", async () => {
   await opened;
   city.sendTicket({ to: "secretary", goal: "a city event" });
   await city.idle();
-  await new Promise((r) => setTimeout(r, 50));
+  await waitFor(() => pushed.some((e) => e.type === "city" && e.event.type === "cost.update"), "the city events");
   const cityEvents = pushed.filter((e) => e.type === "city").map((e) => e.event.type);
   assert.ok(cityEvents.includes("ticket.status"), JSON.stringify(cityEvents));
   assert.ok(cityEvents.includes("cost.update"));
