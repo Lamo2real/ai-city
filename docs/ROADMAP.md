@@ -60,7 +60,7 @@ Run live on 2026-11-04 on scratch data (`JARVIS_HOME` in a temp folder, `JARVIS_
 
 ## Limits that do not change by building more
 
-- Docker is absent. Workers have no OS sandbox, by the owner's decision: a steered worker can reach anything the owner's account can, including credentials and the city's API.
+- Docker is absent. Workers have no OS sandbox and skip the policy rules, by the owner's decision: a steered worker can do anything the owner's account can, including using credentials, spending money and changing the city's own files. See `docs/ARCHITECTURE.md`.
 - Inbound webhooks need public exposure, which the owner has forbidden. Events come from schedules and a local POST.
 - Non-Anthropic providers are not used.
 - Lobster is not used: it is single-agent tool pipelines, and workflows here span departments.
