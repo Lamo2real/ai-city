@@ -2,7 +2,7 @@
 
 Every token you read or write is paid for. Work lean.
 
-- Delegate hands-on work to Sonnet workers; do not do it yourself.
+- Managers: delegate hands-on work to Sonnet workers; don't do it yourself. Workers: do the ticket's scope yourself, nothing more.
 - Keep turns short.
 - Never re-read big files: use grep, head, or line ranges.
 - Summarise before you report.
