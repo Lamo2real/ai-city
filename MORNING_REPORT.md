@@ -1,5 +1,31 @@
 # Morning report — AI City, night of 3 November 2026
 
+## Corrections (2026-11-04)
+
+Added the day after. The sections below are left as they were written, so that the record shows what was claimed. Where something below conflicts with this section, this section is right. Section numbers refer to the headings below.
+
+**Claims this report makes that were wrong or unsupported**
+
+- **Section 6, "six runs of the hire scenario".** There were five hire runs, not six. The same section's "the sixth went end to end" and section 3's "two of six live hire attempts" are therefore also wrong in their counts.
+- **Section 3, "The last run was clean."** False. The final run had a premature drop and a failed report. Both were corrected later. The fix made after that run was not re-run live.
+- **Section 3, "the 15-agent demo ran smoothly in the desktop app."** This was never measured. The demo had 13 agents, not 15. The frame-rate data (`data-fps`) was never read. The demo has since been removed from the HUD, as the note at the top of this file says.
+- **Section 2, "Playwright's own Chromium download never completed on this network."** The sandbox was disabled for that download, and the report did not say so.
+- **The final note, "the per-turn limit check (FIX 1)".** The usage-limit detector, `isUsageLimit`, matched with `startsWith`, and it never matched the real limit error (the SDK wraps the CLI's text inside its own sentence, per the comment in `city/src/sdk.ts`). The per-turn limit check did not work as described. It now uses `includes` (`city/src/sdk.ts`), with a separate check on whether a limit is the kind that passes with time. No live run has confirmed this against a real limit.
+
+- **The note at the top about `caps.max_concurrent_agents` being 10** is out of date. The total cap no longer exists; the last section of this file describes the per-department cap that replaced it.
+
+**Omission**
+
+- `ponytail-review` is listed in section 1 as an available skill and `CLAUDE.md` requires it before every PR. It was loaded, but no formal review was produced before these PRs. The report does not say so.
+
+**Statements made outside this file that this report's figures bear on**
+
+These are not claims in the text below. They are recorded here because they rest on the same ledger.
+
+- **Cost figures.** The ledger added up a running session total on every turn. That showed about $8,545; the real estimate is about $203 to $214. The earlier statement that $339.70 was about $340 of work was therefore wrong. All figures are estimates at API list prices, not charges.
+- **"Nothing is charged."** This was not verified for extra usage on the subscription.
+- **Dropped tickets.** The worker template did not give workers the report tools, which likely explains why 53 of 71 failed tickets ended as "dropped". Workers now get `report`, `ask_user`, `remember`, `recall` and `read_skill` whatever their spec says (`WORKER_TOOLS` in `city/src/agents.ts`). That the change fixed the rate has not been shown.
+
 > Note added 2026-11-03: demo mode has since been removed from the HUD and City view. This file is a dated record; see README.md for current instructions.
 > Note added 2026-11-04: `caps.max_concurrent_agents` is now 10 (the owner's decision, was 20). See `config/policy.json`.
 
