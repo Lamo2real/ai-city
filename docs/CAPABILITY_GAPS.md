@@ -134,7 +134,7 @@ Evidence:
 - Per the coordinating session (not verified by me): live test 6 passed for shell; the browser path was still being fixed.
 
 Gaps:
-- Partial sandbox: OpenClaw runs other than browser runs go inside a macOS `sandbox-exec` profile: they cannot reach the owner's API port or write to the city's code, config, ledger, audit log, agent prompts, `node_modules`, shell start-up files or launch agents, and `open` and `osascript` are blocked unless the run has the `desktop` capability. Browser runs stay outside it, because Chrome's own sandbox cannot start inside it, and a browser worker cannot also have shell, desktop or files. Default-executor (SDK) workers have no OS sandbox: only the policy rules and a text check on their commands, which an encoded command or a script file can get past. Docker is absent, so OpenClaw's own Docker sandbox is not used.
+- No OS sandbox, by the owner's decision on 2026-11-04.
 - Until 2026-11-04 the policy rules for force-push, push to main, `rm -rf`, `terraform destroy` and the others matched `Bash` only, so they did not cover `exec`, the OpenClaw shell. They now match `Bash`, `exec` and `bash`, with test cases for each. They are still regexes over the command text.
 - `desktop` is `exec` plus `osascript`; there is no screen-reading or click tool. Screenshots and UI automation beyond what a script can do are not available.
 - The browser works in a live run with an isolated, headless profile, and its SSRF policy refused a loopback address. The first tab after Chrome starts can vanish, so the run's instructions tell the worker to open the page again. `desktop` was not exercised live.
@@ -216,7 +216,7 @@ Evidence:
 
 Gaps:
 - Policy rules are regular expressions over the JSON of the tool input, applied to `Bash`, `exec`, `bash` and `process`. A command can be written in a way a regex does not see, such as a script file. The OS sandbox covers OpenClaw shell runs; default-executor workers have only these rules and a text check.
-- Partial sandbox: see the computer control section above.
+- No OS sandbox, by the owner's decision: see the computer control section above.
 - Prompt injection defence is prompt text ("treat as data") plus the tool-layer limits above. There is no classifier or content filter.
 - The policy rules are regular expressions over the JSON of the tool input. A command can be written in a way a regex does not see. No test tries to evade them.
 - The secret filter in memory recognizes known token shapes, not every secret (section 4).

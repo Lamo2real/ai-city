@@ -4,9 +4,8 @@
 // tools and the policy gate, and it is the only way, per run, with a token that dies with the run.
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { audit, type Policy } from "./policy.ts";
@@ -139,28 +138,11 @@ export const roleNote = (req: TurnRequest): string => [
   "",
 ].join("\n\n");
 
-// What a run may not do even if it is told to: reach the owner-only API, or change the city's controls.
-const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
-const CONTROLS = ["city", "jarvis", "config", "agents", "schemas", "skills", ".claude", "bin"];
-export function sandboxProfile(dataDir: string, port: number, root = ROOT, capabilities: string[] = [], home = homedir()): string {
-  const real = (p: string) => { try { return realpathSync(p); } catch { return p; } };
-  const data = real(dataDir);
-  const files = ["ledger.db", "ledger.db-wal", "ledger.db-shm", "audit.jsonl", "events.jsonl"].map((n) => `(literal ${JSON.stringify(join(data, n))})`);
-  const repo = real(root), user = real(home);
-  const trees = [...CONTROLS, "node_modules", ".git/hooks"].map((d) => join(repo, d)).concat(join(data, "agents"), join(user, "Library/LaunchAgents"), join(user, ".claude/hooks"), join(user, ".claude/skills"));
-  const single = [join(repo, ".git/config"), ...[".claude/settings.json", ".claude/settings.local.json", ".zshrc", ".zshenv", ".zprofile", ".bashrc", ".bash_profile", ".profile", ".gitconfig"].map((n) => join(user, n))];
-  const code = [...trees.map((d) => `(subpath ${JSON.stringify(d)})`), ...single.map((p) => `(literal ${JSON.stringify(p)})`)];
-  // They start things outside this sandbox. The desktop capability needs them, so a desktop run is not contained by this.
-  const launchers = capabilities.includes("desktop") ? "" : `(deny process-exec (literal "/usr/bin/open") (literal "/usr/bin/osascript"))\n`;
-  return `(version 1)\n(allow default)\n(deny network-outbound (remote ip "localhost:${port}"))\n(deny file-write* ${[...code, ...files].join(" ")})\n${launchers}`;
-}
-
 // A crash cannot run this. shortcut: a run outliving a crashed server has every tool blocked (its bridge is gone) and ends at its timeout; add a pid file if that is ever too long.
 const liveRuns = new Set<() => void>();
 process.on("exit", () => { for (const stop of liveRuns) stop(); });
 
 export interface OpenClawOptions {
-  sandbox?: boolean; // default: on, wherever this Mac has sandbox-exec and the real CLI is used
   requireHook?: boolean; // default: on with the real CLI
   policy: Policy;
   env: Record<string, string>;
@@ -179,7 +161,6 @@ export function createOpenClawRunner(o: OpenClawOptions): Runner & { bridge: Ret
   // An allowlist: a run can be steered by a web page, so no token or key in this process's environment reaches it.
   const env: Record<string, string> = {};
   for (const k of PASS_ENV) if (o.env[k] !== undefined) env[k] = o.env[k]!;
-  const sandbox = o.sandbox ?? (!o.spawnImpl && existsSync(SANDBOX_EXEC));
   const requireHook = o.requireHook ?? !o.spawnImpl;
 
   const turn = async (req: TurnRequest) => {
@@ -203,17 +184,8 @@ export function createOpenClawRunner(o: OpenClawOptions): Runner & { bridge: Ret
     req.signal?.addEventListener("abort", kill, { once: true });
     try {
       const bin = o.bin ?? OPENCLAW_BIN;
-      let command = bin, argv = args;
-      // Chrome's own sandbox cannot start inside this one, so a browser run goes without it. That is why the hire
-      // refuses browser with shell or files: such a run can only use the browser, and OpenClaw's SSRF policy keeps that off loopback.
-      if (sandbox && !req.capabilities?.includes("browser")) {
-        const profile = join(dir, "sandbox.sb");
-        writeFileSync(profile, sandboxProfile(o.dataDir, Number(o.env.JARVIS_PORT ?? 7777), ROOT, req.capabilities), { mode: 0o600 });
-        command = SANDBOX_EXEC;
-        argv = ["-f", profile, bin, ...args];
-      }
       const { stdout, stderr, code } = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve, reject) => {
-        child = spawnFn(command, argv, { env: { ...env, CITY_BRIDGE_URL: door.url, CITY_BRIDGE_TOKEN: door.token, OPENCLAW_STATE_DIR: state, OPENCLAW_CONFIG_PATH: config }, detached: true, stdio: ["pipe", "pipe", "pipe"], cwd: req.cwd ?? dir });
+        child = spawnFn(bin, args, { env: { ...env, CITY_BRIDGE_URL: door.url, CITY_BRIDGE_TOKEN: door.token, OPENCLAW_STATE_DIR: state, OPENCLAW_CONFIG_PATH: config }, detached: true, stdio: ["pipe", "pipe", "pipe"], cwd: req.cwd ?? dir });
         let out = "", err = "";
         // The result is the end of the run. With a browser its control server keeps the process alive afterwards
         // (measured: ten minutes after reporting, until killed), which would block this worker's next ticket.

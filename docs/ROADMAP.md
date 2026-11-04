@@ -29,10 +29,10 @@ This work, the game-style City view and Jarvis's direct line were merged to `mai
 2. **Decide what actually limits spend.** Today the department's daily budget is checked only when hiring, and `budget_usd` on a ticket and `budget_usd_per_day` on a spec are stored and unused. Read the two unmerged cost branches (list below) against the corrected figures before choosing, because both may have been motivated by the inflated number.
 3. **Done 2026-11-04: the chain is on `main`,** merged by the owner's decision (PRs #20 and #21).
 4. **Partly done 2026-11-04: outside MCP servers for city agents.** Jarvis has `personal-assistant`, confirmed with a live call, and the Reviewer no longer names GitHub tools it could not load. Still open: Meta Ads and Terraform for departments, which need the owner's sign-in and Docker.
-5. **Give default-executor workers an OS sandbox.** They have the policy rules and a text check only, so a steered worker with `Bash` can still reach the owner's API through a script file. This is the largest remaining security gap.
+5. **Dropped 2026-11-04 by the owner's decision:** workers have no OS sandbox, the `sandbox-exec` profile for OpenClaw runs was removed, and workers get full tools by default.
 6. **Verify a real provider limit on the OpenClaw path.** A fake CLI's limit message came back only as "process exited with code 1", so a real limit may fail that worker's ticket rather than pause the city. Its manager's next turn should pause. Record what a real limit does when one next occurs. Do not provoke one.
 7. **Owner decision: Gateway and schedules.** Start the Gateway, then enable schedules one at a time with `jarvis/bin/city-automations enable <id>`. Start with `failed-tickets` and `github-failures`, which make no model call unless something happened. The daily briefing costs one Sonnet turn a day.
-8. **Authenticate `POST /api/city/events` and `/api/city/answer` for local processes.** Cross-site requests are refused and the sandbox stops OpenClaw shell runs, but any other local process can still call them.
+8. **Dropped 2026-11-04 by the owner's decision:** `POST /api/city/events` and `/api/city/answer` stay open to local processes.
 9. **Done 2026-11-04: only a whole yes approves,** so "okay, deny it" is a denial, and approvals cannot be decided from the phone listener.
 10. **Make idle retirement real.** Read `idle_retire_minutes`, or remove the field. Enter or remove the `requested` and `paused` states.
 11. **Verify voice.** Run the audio checks in `jarvis/voice/README.md`, wire the offline fallback, pick the Cartesia voice id, and record the latency.
@@ -60,7 +60,7 @@ Run live on 2026-11-04 on scratch data (`JARVIS_HOME` in a temp folder, `JARVIS_
 
 ## Limits that do not change by building more
 
-- Docker is absent. OpenClaw runs other than browser runs go inside a macOS `sandbox-exec` profile: they cannot reach the owner's API port or write to the city's code, config, ledger, audit log, agent prompts, `node_modules`, shell start-up files or launch agents, and `open` and `osascript` are blocked unless the run has the `desktop` capability. Browser runs stay outside it, because Chrome's own sandbox cannot start inside it, and a browser worker cannot also have shell, desktop or files. Default-executor (SDK) workers have no OS sandbox: only the policy rules and a text check on their commands, which an encoded command or a script file can get past.
+- Docker is absent. Workers have no OS sandbox, by the owner's decision: a steered worker can reach anything the owner's account can, including credentials and the city's API.
 - Inbound webhooks need public exposure, which the owner has forbidden. Events come from schedules and a local POST.
 - Non-Anthropic providers are not used.
 - Lobster is not used: it is single-agent tool pipelines, and workflows here span departments.

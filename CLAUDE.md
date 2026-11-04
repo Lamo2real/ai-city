@@ -34,7 +34,8 @@ Read `BUILD_PLAN.md` for the current phase. Build one phase at a time and do not
 - Voice: `jarvis/voice/`, a Python 3.12 process managed with `uv` (Pipecat is Python-only): Silero VAD, smart-turn, streaming STT, Haiku, Cartesia Sonic TTS, Kokoro-MLX offline fallback. It is a client of the shared Jarvis session. Its audio path has never run (see `jarvis/voice/README.md`). See the `jarvis-voice-streaming` skill.
 - HUD and server: the existing Node app in `jarvis/server/` and `jarvis/hud/` on `127.0.0.1:7777`, with the City tab fed by `GET /api/city*` and a server-sent event stream.
 - Secrets: macOS Keychain only (`security find-generic-password -s jarvis.<name> -w`), loaded by `jarvis/bin/jarvis-env`. Never write secrets to files, logs or prompts.
-- Known limits: Docker is not installed; OpenClaw non-browser runs use a `sandbox-exec` profile and default-executor workers have no OS sandbox; no inbound webhooks (the owner forbids public exposure); Anthropic models only. Policy rules that name a shell tool match `Bash`, `exec`, `bash` and `process`; keep any new shell rule that way and add an `exec` case to both self-tests.
+- Known limits: Docker is not installed; no inbound webhooks (the owner forbids public exposure); Anthropic models only. Policy rules that name a shell tool match `Bash`, `exec`, `bash` and `process`; keep any new shell rule that way and add an `exec` case to both self-tests.
+- **Workers run free, by the owner's decision (2026-11-04):** no OS sandbox, full tools by default, and they may read credentials such as `.env`, `~/.ssh` and `~/.aws/credentials`. The policy rules and approvals still apply to each call.
 
 ## Repo layout
 

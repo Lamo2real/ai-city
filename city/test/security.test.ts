@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createMemory } from "../src/memory.ts";
-import { createBridge, sandboxProfile } from "../src/openclaw.ts";
+import { createBridge } from "../src/openclaw.ts";
 import { loadPolicy } from "../src/policy.ts";
 import { createCity } from "../src/runtime.ts";
 import { createGate, parseReset } from "../src/scheduler.ts";
@@ -311,22 +311,6 @@ test("a link inside an allowed root does not lead a worktree outside it", async 
   await assert.rejects(allocateWorkspace(join(dir(), "w"), "t-1", join(allowed, "link"), [allowed]), /outside the repos/);
   mkdirSync(join(allowed, "plain"));
   await assert.rejects(allocateWorkspace(join(dir(), "w"), "t-2", join(allowed, "plain"), [allowed]), /not the top of a git repository/);
-});
-
-test("the sandbox profile blocks the owner's API and the city's controls, and nothing else", () => {
-  const p = sandboxProfile("/data/home", 7777, "/repo");
-  assert.match(p, /\(allow default\)/);
-  assert.match(p, /deny network-outbound \(remote ip "localhost:7777"\)/);
-  for (const path of ["/repo/city", "/repo/config", "/repo/.claude", "/repo/agents"]) assert.ok(p.includes(`(subpath "${path}")`), path);
-  for (const path of ["/data/home/ledger.db", "/data/home/audit.jsonl"]) assert.ok(p.includes(`(literal "${path}")`), path);
-  assert.ok(!p.includes("worktrees"), "workers still write their own worktrees");
-});
-
-test("the sandbox also protects what would run later outside it, and blocks the launchers unless the run is a desktop one", () => {
-  const p = sandboxProfile("/data/home", 7777, "/repo", ["shell"], "/Users/o");
-  for (const s of ['(subpath "/repo/node_modules")', '(subpath "/repo/.git/hooks")', '(subpath "/data/home/agents")', '(subpath "/Users/o/Library/LaunchAgents")', '(literal "/Users/o/.claude/settings.json")', '(literal "/Users/o/.zshrc")']) assert.ok(p.includes(s), s);
-  assert.match(p, /deny process-exec \(literal "\/usr\/bin\/open"\)/);
-  assert.ok(!sandboxProfile("/data/home", 7777, "/repo", ["desktop"], "/Users/o").includes("process-exec"));
 });
 
 test("a late provider error does not turn a reported ticket into a failure, and a cancelled ticket cannot be reported done", async () => {
