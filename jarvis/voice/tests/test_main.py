@@ -39,7 +39,7 @@ def test_main_reaches_a_running_pipeline(tmp_path):
             os._exit(0)
 
         pipeline.keychain = lambda _: "not-a-real-key"
-        graph.real_transport = lambda: FakeAudioTransport(feed)
+        graph.real_transport = lambda _echo_cancellation: FakeAudioTransport(feed)
         fallback.OnlineProbe = lambda: (lambda: False)
         pipeline.main()
     """)

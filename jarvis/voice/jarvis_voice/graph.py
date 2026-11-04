@@ -257,7 +257,11 @@ def warm_whisper(model: str = MLXModel.LARGE_V3_TURBO) -> None:
     mlx_whisper.transcribe(np.zeros(16000, dtype=np.float32), path_or_hf_repo=model)
 
 
-def real_transport():
+def real_transport(echo_cancellation: bool = True):
+    if echo_cancellation:
+        from .voice_io import VoiceProcessingTransport
+
+        return VoiceProcessingTransport()
     from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
 
     return LocalAudioTransport(LocalAudioTransportParams(audio_in_enabled=True, audio_out_enabled=True))
