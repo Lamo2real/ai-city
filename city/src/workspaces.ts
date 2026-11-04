@@ -39,7 +39,7 @@ export async function releaseWorkspace(w: Workspace): Promise<{ removed: boolean
 }
 
 // "nothing": no commits to merge. "merged": it landed, or its branch is gone. A squash merge only shows through its PR.
-export async function branchState(w: Workspace): Promise<"nothing" | "merged" | "unmerged"> {
+export async function branchState(w: Pick<Workspace, "repo" | "branch" | "base">): Promise<"nothing" | "merged" | "unmerged"> {
   let head: string;
   try { head = await git(w.repo, "rev-parse", "--verify", "--quiet", `refs/heads/${w.branch}`); } catch { return "merged"; }
   if (w.base && head === w.base) return "nothing";

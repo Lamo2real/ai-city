@@ -216,23 +216,33 @@ export function createCity(opts: CityOptions) {
       }
     }
     freeWorkspace(ticket);
-    if (ticket?.workspace && ticket.status === "done") holdForMerge(id, ticket);
+    if (ticket?.status === "done" && workspaceOf(ticket)) holdForMerge(id, ticket);
     if (a.lifecycle === "temporary") releaseWorker(id);
     else setWorker(id, "idle");
   }
   // A worker whose branch has not landed stays at its station in the city. Set before the release, so it never appears to leave.
-  function holdForMerge(id: string, t: Ticket): void {
-    const w = t.workspace!;
-    ledger.updateAgent(id, { awaiting_merge: { branch: w.branch, repo: w.repo, ticket_id: t.id, since: now() } });
-    emit({ type: "worker.merge_waiting", id, branch: w.branch });
-    void checkMerge(id, w);
+  // A manager often allocates the workspace on its own ticket and sends the coding down as a sub-ticket, and
+  // models often leave parent_id out. The sender's ticket may already be closed, so this looks past open ones.
+  function workspaceOf(t: Ticket | undefined): Ticket["workspace"] {
+    for (let hops = 0; t && hops < 20; hops++) {
+      if (t.workspace) return t.workspace;
+      const from: string = t.from, sent: string = t.created_at, self: string = t.id;
+      t = t.parent_id ? ledger.getTicket(t.parent_id) : ledger.recentTicketsFor(from, 20).find((x) => x.id !== self && x.created_at <= sent);
+    }
+    return undefined;
   }
-  async function checkMerge(id: string, w: NonNullable<Ticket["workspace"]>): Promise<void> {
-    const a = ledger.getAgent(id);
-    if (closed || !a?.awaiting_merge) return;
+  function holdForMerge(id: string, t: Ticket): void {
+    const w = workspaceOf(t)!;
+    ledger.updateAgent(id, { awaiting_merge: { branch: w.branch, repo: w.repo, base: w.base, ticket_id: t.id, since: now() } });
+    emit({ type: "worker.merge_waiting", id, branch: w.branch });
+    void checkMerge(id);
+  }
+  async function checkMerge(id: string): Promise<void> {
+    const a = ledger.getAgent(id), w = a?.awaiting_merge;
+    if (closed || !w) return;
     const state = await branchState(w).catch(() => "unmerged" as const);
     if (closed) return;
-    const expired = Date.parse(a.awaiting_merge.since) + MERGE_WAIT_MS < Date.now();
+    const expired = Date.parse(w.since) + MERGE_WAIT_MS < Date.now();
     if (state !== "unmerged" || expired) {
       ledger.updateAgent(id, { awaiting_merge: null });
       emit({ type: "worker.merged", id, branch: w.branch });
@@ -241,7 +251,7 @@ export function createCity(opts: CityOptions) {
   // Checks every waiting worker, once a minute, only when any are waiting.
   async function checkMerges(): Promise<void> {
     const waiting = ledger.agents().filter((a) => a.awaiting_merge);
-    await Promise.all(waiting.map((a) => { const t = ledger.getTicket(a.awaiting_merge!.ticket_id); return t?.workspace ? checkMerge(a.id, t.workspace) : Promise.resolve(); }));
+    await Promise.all(waiting.map((a) => checkMerge(a.id)));
   }
   const mergeTimer = setInterval(() => { checkMerges().catch((err: Error) => log(`merge check: ${err.message}`)); }, 60_000);
   mergeTimer.unref();

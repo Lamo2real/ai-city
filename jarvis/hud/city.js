@@ -869,11 +869,17 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
   }
   let agentTimer = null;
   const agentSoon = () => { clearTimeout(agentTimer); agentTimer = setTimeout(() => refreshAgent(), 300); };
+  function whereWords(id) {
+    const tag = placement(state, id);
+    return tag.place === "home" ? "At home" : tag.place === "hq" ? "At HQ" : `At its desk in ${tag.dept}`;
+  }
   async function refreshAgent() {
     const mine = open;
     if (!mine?.agent || !visible()) return;
     const res = await readAgent(mine.agent);
     if (open !== mine || !state.agents[mine.agent]) return;
+    const where = panel.querySelector(".who .where");
+    if (where) where.textContent = whereWords(mine.agent);
     mine.live = res.data ?? mine.live;
     const sig = JSON.stringify([res, state.agents[mine.agent]?.worker_state, Object.values(state.tickets).filter((t) => t.to === mine.agent)]);
     if (sig === mine.sig) return; // nothing new: leave the reader's focus and place alone
@@ -893,8 +899,7 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
     const [icon] = newCanvas(17, 18); icon.setAttribute("aria-hidden", "true"); icon.className = "bub";
     line.append(icon, el("span", "words"));
     const badge = el("span", "badge", p.modelName); badge.style.background = p.modelColor;
-    const tag = placement(state, id);
-    who.append(portrait(a), (() => { const t = el("div"); t.append(el("div", "where", tag.place === "home" ? "At home" : tag.place === "hq" ? "At HQ" : `At its desk in ${tag.dept}`), badge); return t; })());
+    who.append(portrait(a), (() => { const t = el("div"); t.append(el("div", "where", whereWords(id)), badge); return t; })());
     box.append(who, line);
     const holder = el("div"); holder.dataset.live = "";
     box.append(holder);

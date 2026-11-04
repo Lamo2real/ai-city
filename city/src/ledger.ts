@@ -49,7 +49,7 @@ export interface AgentRow {
   idle_retire_minutes?: number;
   state: "active" | "retired";
   worker_state?: WorkerState;
-  awaiting_merge?: { branch: string; repo: string; ticket_id: string; since: string } | null; // released, but its branch is not merged yet
+  awaiting_merge?: { branch: string; repo: string; base: string; ticket_id: string; since: string } | null; // released, but its branch is not merged yet
   executor?: "sdk" | "openclaw";
   capabilities?: string[];
   session_id?: string | null;

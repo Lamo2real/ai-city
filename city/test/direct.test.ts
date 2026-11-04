@@ -159,6 +159,28 @@ test("a branch's state: no commits, unmerged, merged, deleted", async () => {
   assert.equal(await branchState(w), "merged");
 });
 
+test("a worker also waits when the workspace is on its manager's ticket and the model left parent_id out", async () => {
+  const r = repo();
+  const city = createCity({ runner: quiet, dataDir: dir(), ledgerPath: ":memory:", policy: basePolicy() });
+  const { manager } = city.createDepartment({ name: "IT", mission: "keep the systems running" });
+  await hireWorker(city, manager, "eng-1");
+  const w = await allocateWorkspace(join(dir(), "w"), "t-8", r.path, [tmpdir(), "/private/tmp", "/var/folders", "/private/var/folders"], "feat/z");
+  writeFileSync(join(w.path, "c.txt"), "c");
+  execFileSync("git", ["-C", w.path, "add", "-A"]);
+  execFileSync("git", ["-C", w.path, "commit", "-qm", "c"], { env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.test", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.test" } });
+  const parent = await tool(city, "orchestrator", "send_ticket")({ ticket: { to: manager, goal: "lead" } }) as { id: string };
+  city.ledger.updateTicket(parent.id, { workspace: w });
+  const t = await tool(city, manager, "send_ticket")({ ticket: { to: "eng-1", goal: "code" } }) as { id: string };
+  await tool(city, "eng-1", "report")({ ticket_id: t.id, status: "done", summary: "ok", artifacts: [] });
+  await city.idle();
+  await city.checkMerges();
+  assert.equal(city.agent("eng-1").awaiting_merge?.branch, "feat/z");
+  r.git("merge", "-q", "--no-ff", "-m", "merge", "feat/z");
+  await city.checkMerges();
+  assert.equal(city.agent("eng-1").awaiting_merge, null);
+  city.close();
+});
+
 test("a worker with an unmerged branch stays at its station after release, then leaves when it lands", async () => {
   const r = repo();
   const events: CityEvent[] = [];
