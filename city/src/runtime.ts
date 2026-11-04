@@ -147,8 +147,8 @@ export function createCity(opts: CityOptions) {
       allowedTools: [...new Set([...p.tools, ...a.tools])], tools: toolsFor(agentId), prompt: text, resume: a.session_id, cwd: cwdFor(ticket), onText,
     });
     ledger.updateAgent(agentId, { session_id: result.sessionId, last_active_at: now() });
-    ledger.addCost(agentId, ticket?.id ?? null, result.costUsd, result.tokens ?? 0);
-    emit({ type: "cost.update", agent: agentId, ticket_id: ticket?.id ?? null, usd: result.costUsd, tokens: result.tokens ?? 0, today: ledger.usageToday() });
+    const delta = ledger.recordTurn(agentId, ticket?.id ?? null, result.sessionId, result.costUsd, result.usage ?? {}, result.tokens ?? 0);
+    emit({ type: "cost.update", agent: agentId, ticket_id: ticket?.id ?? null, usd: delta, tokens: result.tokens ?? 0, today: ledger.usageToday() });
     return result;
   }
 

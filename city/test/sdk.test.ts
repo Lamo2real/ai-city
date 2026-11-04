@@ -29,7 +29,7 @@ test("a turn streams text, reports tool use, and returns the final text, session
   const text: string[] = [];
   const tools: string[] = [];
   const r = await runner({ agentId: "jarvis", systemPrompt: "You are Jarvis", model: "claude-haiku-5-5", effort: "low", allowedTools: ["mcp__jarvis__send_ticket"], tools: [{ name: "send_ticket", description: "d", schema: { ticket: z.record(z.string(), z.unknown()) }, handler: async () => ({ ok: true }) }], prompt: "what's 9+9", resume: "old", onText: (t) => text.push(t), onTool: (n) => tools.push(n) });
-  assert.deepEqual(r, { text: "eighteen", sessionId: "sess-1", costUsd: 0.002, tokens: 150 });
+  assert.deepEqual(r, { text: "eighteen", sessionId: "sess-1", costUsd: 0.002, tokens: 150, usage: { input: 120, output: 30, cacheRead: 0, cacheWrite: 0 } });
   assert.deepEqual(text, ["Math it is — ", "eighteen."]);
   assert.deepEqual(tools, ["mcp__jarvis__send_ticket"]);
   const { options } = captured[0];
@@ -79,4 +79,11 @@ test("an agent's session has only the built-in tools its prompt lists", async ()
   assert.deepEqual(captured[0].options.tools, ["Bash", "Read"]);
   await runner({ agentId: "orchestrator", systemPrompt: "", model: "claude-opus-5-5", effort: "medium", allowedTools: ["mcp__jarvis__hire_agent"], tools: [], prompt: "x" });
   assert.deepEqual(captured[1].options.tools, [], "the Orchestrator has no Agent, Bash or file tools: it hires");
+});
+
+test("tokens include the cache split", async () => {
+  const runner = createRunner({ policy, env: { PATH: "/bin" }, queryFn: fakeQuery([result({ usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 1000, cache_creation_input_tokens: 200 } })], []) });
+  const r = await runner({ agentId: "a", systemPrompt: "s", model: "claude-haiku-5-5", effort: "low", allowedTools: [], tools: [], prompt: "p" });
+  assert.deepEqual(r.usage, { input: 10, output: 5, cacheRead: 1000, cacheWrite: 200 });
+  assert.equal(r.tokens, 1215);
 });

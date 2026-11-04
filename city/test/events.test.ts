@@ -7,6 +7,9 @@ import { test } from "node:test";
 import { audit, auditPath, loadPolicy } from "../src/policy.ts";
 import { createCity, type CityEvent } from "../src/runtime.ts";
 import type { Runner, TurnRequest } from "../src/sdk.ts";
+// A real session's total_cost_usd is cumulative; the fakes mimic that.
+const totals = new Map<string, number>();
+const cum = (id: string) => { const v = (totals.get(id) ?? 0) + 0.01; totals.set(id, v); return v; };
 
 const policy = loadPolicy();
 const use = (req: TurnRequest, name: string, args: Record<string, unknown>) => req.tools.find((t) => t.name === name)!.handler(args);
@@ -29,7 +32,7 @@ test("a hire, a ticket, a question, a review and a report each show up as typed 
       const id = /on ticket (\S+)\]/.exec(req.prompt)![1];
       await use(req, "report", { ticket_id: city.ledger.getTicket(id)!.parent_id!, status: "done", summary: "all done", artifacts: ["PR #1"] });
     }
-    return { text: req.agentId === "reviewer" ? '{"verdict":"PASS","findings":[],"summary":"clean"}' : req.agentId === "secretary" ? "**Done:** built." : "", sessionId: `s-${req.agentId}`, costUsd: 0.01, tokens: 100 };
+    return { text: req.agentId === "reviewer" ? '{"verdict":"PASS","findings":[],"summary":"clean"}' : req.agentId === "secretary" ? "**Done:** built." : "", sessionId: `s-${req.agentId}`, costUsd: cum(req.agentId), tokens: 100 };
   };
   const city = createCity({ runner, dataDir: mkdtempSync(join(tmpdir(), "city-")), ledgerPath: ":memory:", policy });
   const events: CityEvent[] = [];
