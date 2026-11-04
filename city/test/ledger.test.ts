@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { openLedger, now, type Ticket } from "../src/ledger.ts";
 import { DatabaseSync } from "node:sqlite";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -138,6 +138,8 @@ test("raw_usd keeps the pre-migration values, the documented rollback restores t
   const lines: string[] = [];
   openLedger(path, (l) => lines.push(l)).close();
   assert.ok(existsSync(`${path}.pre-cost-v1.bak`));
+  assert.equal(statSync(`${path}.pre-cost-v1.bak`).mode & 0o777, 0o600);
+  assert.equal(statSync(path).mode & 0o777, 0o600);
   assert.ok(lines.some((l) => l.includes(".pre-cost-v1.bak")));
   const bak = new DatabaseSync(`${path}.pre-cost-v1.bak`);
   assert.deepEqual((bak.prepare("SELECT usd FROM costs ORDER BY id").all() as { usd: number }[]).map((x) => x.usd), [10, 12, 15, 2, 3]);
@@ -216,4 +218,11 @@ test("a turn costing over $20 logs a warning", () => {
   l.recordTurn("a", null, "s", 30);
   assert.ok(lines.some((x) => x.includes("warning") && x.includes("$25.00")));
   l.close();
+});
+
+test("a backup that cannot be written stops the open with a message naming the path", () => {
+  const { path, old } = oldLedger(); old.close();
+  writeFileSync(`${path}.pre-cost-v1.bak`, "stale");
+  assert.throws(() => openLedger(path), (e: Error) => e.message.includes(`${path}.pre-cost-v1.bak`) && /remove the stale/.test(e.message));
+  assert.deepEqual(usds(path), [10, 12, 15, 2, 3], "nothing was migrated");
 });

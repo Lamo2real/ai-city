@@ -2,7 +2,7 @@
 // survives a crash and the daemon can resume it. Rows keep the full JSON plus
 // the few columns we query on.
 import { DatabaseSync } from "node:sqlite";
-import { existsSync, mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
 export type TicketStatus = "open" | "in_progress" | "waiting_on_owner" | "in_review" | "done" | "failed" | "cancelled";
@@ -79,7 +79,10 @@ const LARGE_DELTA_USD = 20;
 // ROLLBACK of the cost migration (v1): the backfill keeps the pre-migration cumulative values in costs.raw_usd.
 //   UPDATE costs SET usd = raw_usd, estimated = 0 WHERE raw_usd IS NOT NULL; PRAGMA user_version = 0;
 // Rows written by recordTurn leave raw_usd NULL (so that statement never touches them). A file ledger is also
-// copied to <db>.pre-cost-v1.bak (VACUUM INTO) before its first migration.
+// copied to <db>.pre-cost-v1.bak (VACUUM INTO, mode 0600) before its first migration.
+// Roll back only before new turns are recorded, or delete rows with raw_usd IS NULL first.
+// If the backup can't be written, the ledger refuses to open (Jarvis won't start): free disk space or
+// remove the stale .bak (VACUUM INTO will not overwrite one).
 
 // costs.usd is the cost of ONE turn (a delta). costs.tokens = input + output + cache_read + cache_write
 // for new rows; for backfilled rows (estimated = 1) it is the legacy input+output value and the split is 0.
@@ -93,7 +96,11 @@ function migrate(db: DatabaseSync, path: string, log: (line: string) => void): v
   if (v < 1 && path !== ":memory:") {
     const rows = (db.prepare("SELECT COUNT(*) AS n FROM costs").get() as { n: number }).n;
     const bak = `${path}.pre-cost-v1.bak`;
-    if (rows > 0 && !existsSync(bak)) { db.exec(`VACUUM INTO '${bak.replace(/'/g, "''")}'`); log(`ledger: backed up to ${bak} before the cost migration`); }
+    if (rows > 0) {
+      try { db.exec(`VACUUM INTO '${bak.replace(/'/g, "''")}'`); chmodSync(bak, 0o600); }
+      catch (e) { throw new Error(`ledger: cannot write the pre-migration backup ${bak} (${(e as Error).message}); free disk space or remove the stale .bak, then restart`); }
+      log(`ledger: backed up to ${bak} before the cost migration`);
+    }
   }
   try { db.exec("ALTER TABLE costs ADD COLUMN tokens INTEGER NOT NULL DEFAULT 0"); } catch { /* already there */ }
   for (const c of COST_COLUMNS) { try { db.exec(`ALTER TABLE costs ADD COLUMN ${c} INTEGER NOT NULL DEFAULT 0`); } catch { /* already there */ } }
@@ -134,9 +141,10 @@ function migrate(db: DatabaseSync, path: string, log: (line: string) => void): v
 export const now = () => new Date().toISOString();
 
 export function openLedger(path: string, log: (line: string) => void = () => {}) {
-  if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
+  if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(path);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
+  if (path !== ":memory:") for (const f of [path, `${path}-wal`, `${path}-shm`]) { try { chmodSync(f, 0o600); } catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; } }
   db.exec(SCHEMA);
   migrate(db, path, log);
   const rows = <T>(sql: string, ...args: (string | number)[]) => db.prepare(sql).all(...args).map((r) => JSON.parse(String((r as { json: string }).json)) as T);

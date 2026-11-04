@@ -335,7 +335,7 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
     open = { dept: name };
     const d = departmentPanel(state, name);
     const box = showPanel(`${name === "HQ" ? "Headquarters" : `${name} department`}`, "department");
-    box.append(row("manager", d.manager ?? "—"), row("workers", d.workers.length ? d.workers.join(", ") : "—"), row("today's cost, UTC",d.todayUsd === null ? "—" : `$${fmt(d.todayUsd, 2)}`));
+    box.append(row("manager", d.manager ?? "—"), row("workers", d.workers.length ? d.workers.join(", ") : "—"), row("today's cost, UTC", d.todayUsd === null ? "—" : `$${fmt(d.todayUsd, 2)}`));
     box.append(el("h4", null, `Open tickets (${d.openTickets.length})`));
     const ul = el("ul", "tickets");
     if (!d.openTickets.length) ul.append(el("li", "mute", "—"));
