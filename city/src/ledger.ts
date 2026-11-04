@@ -197,7 +197,6 @@ export function openLedger(path: string, log: (line: string) => void = () => {})
       });
     },
     ticketsByStatus: (...statuses: TicketStatus[]) => rows<Ticket>(`SELECT json FROM tickets WHERE status IN (${statuses.map(() => "?").join(",")}) ORDER BY updated_at`, ...statuses),
-    ticketsTo: (to: string) => rows<Ticket>("SELECT json FROM tickets WHERE to_agent = ? ORDER BY updated_at", to),
     ticketsFrom: (from: string) => rows<Ticket>("SELECT json FROM tickets WHERE from_agent = ? ORDER BY updated_at", from),
     inbox: (agentId: string) => rows<Ticket>("SELECT json FROM tickets WHERE status IN ('open','in_progress') AND (to_agent = ? OR json LIKE ?) ORDER BY updated_at", agentId, `%"cc":[%"${agentId}"%`),
 
@@ -263,9 +262,6 @@ export function openLedger(path: string, log: (line: string) => void = () => {})
         this.addCost(agentId, ticketId, delta, tokens, usage, meta);
         return delta;
       });
-    },
-    agentSpendToday(agentId: string): number {
-      return (db.prepare("SELECT COALESCE(SUM(usd), 0) AS usd FROM costs WHERE agent_id = ? AND ts >= ?").get(agentId, now().slice(0, 10)) as { usd: number }).usd;
     },
     // Today's subscription usage: what the SDK reported per turn, summed.
     usageToday(): { usd: number; tokens: number; turns: number } {

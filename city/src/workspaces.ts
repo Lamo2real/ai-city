@@ -1,7 +1,7 @@
 // A git worktree per ticket, so engineering work in the same repo never collides and a failed
 // attempt is one folder to look at. The owner's checkout is never touched.
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
@@ -11,8 +11,10 @@ const git = async (cwd: string, ...args: string[]) => (await run("git", ["-C", c
 export interface Workspace { repo: string; path: string; branch: string; base: string }
 
 export async function allocateWorkspace(root: string, ticketId: string, repo: string, allowedRoots: string[], branch?: string): Promise<Workspace> {
-  const abs = resolve(repo);
-  if (!allowedRoots.some((r) => abs === r || abs.startsWith(r + sep))) throw new Error(`${abs} is outside the repos agents may work in (${allowedRoots.join(", ")})`);
+  // Real paths on both sides: a link inside an allowed root must not lead out of it.
+  const real = (p: string) => { try { return realpathSync(p); } catch { return resolve(p); } };
+  const abs = real(repo);
+  if (!allowedRoots.map(real).some((r) => abs === r || abs.startsWith(r + sep))) throw new Error(`${abs} is outside the repos agents may work in (${allowedRoots.join(", ")})`);
   if (!existsSync(join(abs, ".git"))) throw new Error(`${abs} is not the top of a git repository`);
   if (!/^[\w.-]+$/.test(ticketId)) throw new Error("bad ticket id");
   const name = branch ?? `city/${ticketId}`;

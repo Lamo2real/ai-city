@@ -73,6 +73,24 @@ test("the phone keeps its view, answers and instructions, and cannot run the org
   assert.equal(res.code, 200);
 });
 
+test("an approval cannot be decided from the phone; an ordinary answer can", async () => {
+  const post = async (body) => {
+    const req = Object.assign(new PassThrough(), { method: "POST", url: "/api/city/answer", headers: { "content-type": "application/json" } });
+    const res = { code: 0, setHeader() {}, writeHead(c) { this.code = c; return this; }, end() {} };
+    const done = handleCity(req, res, city, "/api/city/answer", true);
+    req.end(JSON.stringify(body));
+    await done;
+    return res.code;
+  };
+  const t = city.sendTicket({ to: "orchestrator", goal: "g" });
+  await city.idle();
+  city.ledger.updateTicket(t.id, { status: "in_progress" });
+  city.guardForTicket("orchestrator", t.id)("Bash", { command: "terraform destroy" });
+  const q = city.ledger.openQuestions().find((o) => o.question.asked_by === "orchestrator" && city.ledger.approvalByQuestion(o.id));
+  assert.equal(await post({ id: q.id, text: "approve" }), 403);
+  assert.equal(city.ledger.getQuestion(q.id).status, "open");
+});
+
 function recorder() {
   const seen = [];
   const http = createHttp((req, res) => {

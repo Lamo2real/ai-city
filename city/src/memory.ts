@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, scope TEXT NOT NULL, s
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(text, id UNINDEXED, tokenize = 'porter unicode61');
 `;
 const MAX_TEXT = 2000;
-const SECRET = /\b(sk-[a-z0-9-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b/;
+const SECRET = /\b(sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b|-----BEGIN [A-Z ]*PRIVATE KEY-----/;
 const words = (s: string) => new Set(s.toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) ?? []);
 export function overlap(a: string, b: string): number {
   const [x, y] = [words(a), words(b)];

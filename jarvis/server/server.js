@@ -525,6 +525,8 @@ export async function handleCity(req, res, city, path, phone = false) {
     }
     if (path === "/api/city/answer") {
       if (typeof body?.id !== "string" || typeof body?.text !== "string" || !body.text.trim() || body.text.length > MAX_MESSAGE) return sendJson(res, 400, { error: "bad answer" });
+      // Plain HTTP and a passcode are not enough to approve an action, as with merges.
+      if (phone && city.ledger.approvalByQuestion?.(body.id)) return sendJson(res, 403, { error: "approvals need the Mac" });
       return sendJson(res, 200, { ticket: city.answer(body.id, body.text.trim()) });
     }
   } catch (err) {

@@ -174,6 +174,30 @@ test("a run that printed its result but never exits is finished and killed, so t
   runner.bridge.close();
 });
 
+test("a shell run goes inside the OS sandbox and sees no secrets; a browser run stays outside it", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "oc-"));
+  const calls: Array<{ bin: string; args: string[]; env: Record<string, string> }> = [];
+  const inner = fakeSpawn({ status: "ok", final: "x" }, {});
+  const spawnImpl = ((bin: string, args: string[], opts: { env: Record<string, string> }) => { calls.push({ bin, args, env: opts.env }); return inner(bin, args, opts); }) as any;
+  const runner = createOpenClawRunner({ policy, env: { PATH: "/bin", GITHUB_PAT: "p", CARTESIA_API_KEY: "c", JARVIS_PORT: "7790" }, dataDir, bin: "/bin/openclaw", spawnImpl, sandbox: true });
+  await runner(base({ capabilities: ["shell"] }));
+  assert.equal(calls[0].bin, "/usr/bin/sandbox-exec");
+  assert.equal(calls[0].args[2], "/bin/openclaw");
+  assert.match(readFileSync(calls[0].args[1], "utf8"), /localhost:7790/);
+  assert.equal(calls[0].env.GITHUB_PAT, undefined);
+  assert.equal(calls[0].env.CARTESIA_API_KEY, undefined);
+  assert.equal(calls[0].env.PATH, "/bin");
+  await runner(base({ capabilities: ["browser"] }));
+  assert.equal(calls[1].bin, "/bin/openclaw");
+  runner.bridge.close();
+});
+
+test("a run whose policy hook never reported in has failed, whatever it says", async () => {
+  const runner = createOpenClawRunner({ policy, env: {}, dataDir: mkdtempSync(join(tmpdir(), "oc-")), bin: "/x", spawnImpl: fakeSpawn({ status: "ok", final: "all good" }, {}), requireHook: true });
+  await assert.rejects(runner(base()), /policy hook never loaded/);
+  runner.bridge.close();
+});
+
 test("browser runs take turns because their ports are fixed, and other runs do not wait for them", async () => {
   const dataDir = mkdtempSync(join(tmpdir(), "oc-"));
   const record: Parameters<typeof fakeSpawn>[1] = {};
@@ -201,6 +225,7 @@ test("in the city: an openclaw worker's final message is its report; managers ca
   await hire({ spec: { id: "web-dev", role: "Browser worker", kind: "worker", parent: manager, mission: "m", tools: ["Read"], lifecycle: "temporary", budget_usd_per_day: 1, executor: "openclaw", capabilities: ["browser"] } });
   await assert.rejects(city.toolsFor("orchestrator").find((t) => t.name === "hire_agent")!.handler({ spec: { id: "mgr-oc", role: "M", kind: "manager", parent: "orchestrator", department: "Z", mission: "m", tools: ["Read"], lifecycle: "persistent", budget_usd_per_day: 1, executor: "openclaw" } }), /only workers run on openclaw/);
   await assert.rejects(hire({ spec: { id: "bad-caps", role: "x", kind: "worker", parent: manager, mission: "m", tools: ["Read"], lifecycle: "temporary", budget_usd_per_day: 1, capabilities: ["shell"] } }), /capabilities need executor openclaw/);
+  await assert.rejects(hire({ spec: { id: "web-shell", role: "x", kind: "worker", parent: manager, mission: "m", tools: ["Read"], lifecycle: "temporary", budget_usd_per_day: 1, executor: "openclaw", capabilities: ["browser", "shell"] } }), /hire two workers/);
   const t = await city.toolsFor(manager).find((x) => x.name === "send_ticket")!.handler({ ticket: { to: "web-dev", goal: "book a table" } }) as { id: string };
   await city.idle();
   assert.equal(calls.length, 1);

@@ -74,7 +74,6 @@ test("recordTurn turns a cumulative session total into per-turn deltas, a new se
   assert.equal(l.recordTurn("m1", null, "s2", 0.5, { input: 1 }), 0.5); // new session
   assert.equal(l.recordTurn("m1", null, "s2", 0.2, { input: 1 }), 0.2); // a drop = reset
   assert.ok(Math.abs(l.spendToday("platform") - 3.7) < 1e-9);
-  assert.ok(Math.abs(l.agentSpendToday("m1") - 3.7) < 1e-9);
   assert.ok(Math.abs(l.getAgent("m1")!.total_cost_usd - 3.7) < 1e-9);
   l.close();
 });

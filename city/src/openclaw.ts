@@ -4,7 +4,7 @@
 // tools and the policy gate, and it is the only way, per run, with a token that dies with the run.
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,13 +74,15 @@ export function estimateUsd(model: string, u: Envelope["usage"] = {}, policy?: P
 // The loopback door a run comes back through. One server, a token per run.
 export function createBridge(policy?: Policy) {
   const grants = new Map<string, TurnRequest>();
+  const hooked = new Set<string>(); // runs whose plugin has reported in
+  const bearerOf = (req: { headers: { authorization?: string } }) => (req.headers.authorization ?? "").replace(/^Bearer /, "");
   let server: Server | null = null;
   let port = 0;
   async function ensure(): Promise<number> {
     if (server) return port;
     const s = createServer((req, res) => {
       const send = (status: number, value: unknown) => { res.writeHead(status, { "Content-Type": "application/json" }); res.end(JSON.stringify(value)); };
-      const grant = grants.get((req.headers.authorization ?? "").replace(/^Bearer /, ""));
+      const grant = grants.get(bearerOf(req));
       if (!grant) return send(403, { error: "no such run" });
       let size = 0;
       const chunks: Buffer[] = [];
@@ -89,7 +91,9 @@ export function createBridge(policy?: Policy) {
         try {
           const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}") as { tool?: string; params?: Record<string, unknown> };
           const path = new URL(req.url ?? "/", "http://x").pathname;
+          if (path === "/hello") { hooked.add(bearerOf(req)); return send(200, {}); }
           if (path === "/policy") {
+            hooked.add(bearerOf(req));
             const tool = String(body.tool ?? "");
             if (!capabilityAllows(tool, grant.capabilities)) {
               if (policy) audit(policy, tool, "deny", "not in this agent's capabilities", grant.agentId);
@@ -114,11 +118,11 @@ export function createBridge(policy?: Policy) {
     return port;
   }
   return {
-    async open(req: TurnRequest): Promise<{ url: string; token: string; close: () => void }> {
+    async open(req: TurnRequest): Promise<{ url: string; token: string; hookLoaded: () => boolean; close: () => void }> {
       const p = await ensure();
       const token = randomBytes(24).toString("hex");
       grants.set(token, req);
-      return { url: `http://127.0.0.1:${p}`, token, close: () => { grants.delete(token); } };
+      return { url: `http://127.0.0.1:${p}`, token, hookLoaded: () => hooked.has(token), close: () => { grants.delete(token); hooked.delete(token); } };
     },
     close() { server?.close(); server = null; grants.clear(); },
   };
@@ -134,7 +138,24 @@ export const roleNote = (req: TurnRequest): string => [
   "",
 ].join("\n\n");
 
+// What a run may not do even if it is told to: reach the owner-only API, or change the city's controls.
+const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
+const CONTROLS = ["city", "jarvis", "config", "agents", "schemas", "skills", ".claude", "bin"];
+export function sandboxProfile(dataDir: string, port: number, root = ROOT): string {
+  const real = (p: string) => { try { return realpathSync(p); } catch { return p; } };
+  const home = real(dataDir);
+  const files = ["ledger.db", "ledger.db-wal", "ledger.db-shm", "audit.jsonl", "events.jsonl"].map((n) => `(literal ${JSON.stringify(join(home, n))})`);
+  const code = CONTROLS.map((d) => `(subpath ${JSON.stringify(join(real(root), d))})`);
+  return `(version 1)\n(allow default)\n(deny network-outbound (remote ip "localhost:${port}"))\n(deny file-write* ${[...code, ...files].join(" ")})\n`;
+}
+
+// A crash cannot run this. shortcut: a run outliving a crashed server has every tool blocked (its bridge is gone) and ends at its timeout; add a pid file if that is ever too long.
+const liveRuns = new Set<() => void>();
+process.on("exit", () => { for (const stop of liveRuns) stop(); });
+
 export interface OpenClawOptions {
+  sandbox?: boolean; // default: on, wherever this Mac has sandbox-exec and the real CLI is used
+  requireHook?: boolean; // default: on with the real CLI
   policy: Policy;
   env: Record<string, string>;
   dataDir: string;
@@ -144,12 +165,16 @@ export interface OpenClawOptions {
   timeoutSeconds?: number;
 }
 
+const PASS_ENV = ["PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "SHELL", "TERM", "TZ", "JARVIS_HOME", "JARVIS_MODEL_CAP"];
 export function createOpenClawRunner(o: OpenClawOptions): Runner & { bridge: ReturnType<typeof createBridge> } {
   const bridge = createBridge(o.policy);
   const spawnFn = o.spawnImpl ?? spawn;
   // OpenClaw's Claude backend uses the `claude` login on this Mac by itself: no token or key ever goes in.
+  // An allowlist: a run can be steered by a web page, so no token or key in this process's environment reaches it.
   const env: Record<string, string> = {};
-  for (const [k, v] of Object.entries(o.env)) if (k !== "ANTHROPIC_API_KEY" && k !== "CLAUDE_CODE_OAUTH_TOKEN") env[k] = v;
+  for (const k of PASS_ENV) if (o.env[k] !== undefined) env[k] = o.env[k]!;
+  const sandbox = o.sandbox ?? (!o.spawnImpl && existsSync(SANDBOX_EXEC));
+  const requireHook = o.requireHook ?? !o.spawnImpl;
 
   const turn = async (req: TurnRequest) => {
     if (req.signal?.aborted) throw new Error("turn cancelled");
@@ -171,8 +196,18 @@ export function createOpenClawRunner(o: OpenClawOptions): Runner & { bridge: Ret
     const kill = () => { signal("SIGTERM"); setTimeout(() => signal("SIGKILL"), 5000).unref(); };
     req.signal?.addEventListener("abort", kill, { once: true });
     try {
+      const bin = o.bin ?? OPENCLAW_BIN;
+      let command = bin, argv = args;
+      // Chrome's own sandbox cannot start inside this one, so a browser run goes without it. That is why the hire
+      // refuses browser with shell or files: such a run can only use the browser, and OpenClaw's SSRF policy keeps that off loopback.
+      if (sandbox && !req.capabilities?.includes("browser")) {
+        const profile = join(dir, "sandbox.sb");
+        writeFileSync(profile, sandboxProfile(o.dataDir, Number(o.env.JARVIS_PORT ?? 7777)), { mode: 0o600 });
+        command = SANDBOX_EXEC;
+        argv = ["-f", profile, bin, ...args];
+      }
       const { stdout, stderr, code } = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve, reject) => {
-        child = spawnFn(o.bin ?? OPENCLAW_BIN, args, { env: { ...env, CITY_BRIDGE_URL: door.url, CITY_BRIDGE_TOKEN: door.token, OPENCLAW_STATE_DIR: state, OPENCLAW_CONFIG_PATH: config }, detached: true, stdio: ["pipe", "pipe", "pipe"], cwd: req.cwd ?? dir });
+        child = spawnFn(command, argv, { env: { ...env, CITY_BRIDGE_URL: door.url, CITY_BRIDGE_TOKEN: door.token, OPENCLAW_STATE_DIR: state, OPENCLAW_CONFIG_PATH: config }, detached: true, stdio: ["pipe", "pipe", "pipe"], cwd: req.cwd ?? dir });
         let out = "", err = "";
         // The result is the end of the run. With a browser its control server keeps the process alive afterwards
         // (measured: ten minutes after reporting, until killed), which would block this worker's next ticket.
@@ -181,8 +216,10 @@ export function createOpenClawRunner(o: OpenClawOptions): Runner & { bridge: Ret
           try { if (parseEnvelope(out).status) { resolve({ stdout: out, stderr: err, code: 0 }); kill(); } } catch { /* not all of it yet */ }
         });
         child.stderr!.on("data", (d) => { err += d; if (err.length > 200_000) err = err.slice(-100_000); });
-        child.on("error", reject);
-        child.on("close", (c) => resolve({ stdout: out, stderr: err, code: c }));
+        const stop = () => signal("SIGTERM");
+        liveRuns.add(stop);
+        child.on("error", (e) => { liveRuns.delete(stop); reject(e); });
+        child.on("close", (c) => { liveRuns.delete(stop); resolve({ stdout: out, stderr: err, code: c }); });
         child.stdin!.on("error", () => {});
         child.stdin!.end(message);
       });
@@ -197,6 +234,8 @@ export function createOpenClawRunner(o: OpenClawOptions): Runner & { bridge: Ret
         limit(stderr);
         throw new Error(`${req.agentId}: ${message}`);
       }
+      // Without the hook nothing in this run was gated. Say so, loudly, rather than pass its work on as if it had been.
+      if (requireHook && !door.hookLoaded()) throw new Error(`${req.agentId}: the policy hook never loaded in this run, so its actions were not checked. Treat its work as untrusted.`);
       const u = e.usage ?? {};
       const usage = { input: u.input ?? 0, output: u.output ?? 0, cacheRead: u.cacheRead ?? 0, cacheWrite: u.cacheWrite ?? 0 };
       return {
