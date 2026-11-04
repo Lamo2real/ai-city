@@ -1,7 +1,7 @@
 // The self-improvement gate. A weekly ticket may end with a PR; this merges it only when, checked here at one commit,
 // CI passed, the Reviewer passed and the evals did not get worse. By the owner's decision the city's rules and the
-// scoring may change this way, and such a change is named in what the owner is told and in the report. Only the two
-// things that decide CI's and the Reviewer's verdicts are barred: a PR must not be able to rewrite its own judges.
+// scoring may change this way, and such a change is named in what the owner is told and in the report. Only what
+// decides CI's and the Reviewer's verdicts is barred: a PR must not be able to rewrite its own judges.
 // Nothing an agent says is taken for any of this: it only names the PR.
 // This is runtime code, not a tool. `gh pr merge` stays an "ask" for core agents and managers; by the owner's decision workers skip the rules.
 import { execFile } from "node:child_process";
@@ -19,8 +19,19 @@ const MAX_DIFF = 200_000; // the Reviewer must read all of it, so a bigger chang
 const GIVE_UP_MS = 48 * 3_600_000;
 const MAX_ERRORS = 5;
 
-// Lowercase and both ends of a move: the owner's disk ignores case, and moving a file away changes it too.
-const barred = (path: string) => { const p = path.toLowerCase(); return p === ".github" || p.startsWith(".github/") || p === "agents/core/reviewer.md"; };
+// `git diff --name-status --no-renames -z`: "status\0path\0". No renames, so a move shows as a delete and an add.
+export function changedFiles(raw: string): Array<{ status: string; path: string }> {
+  const parts = raw.split("\0").filter(Boolean), out: Array<{ status: string; path: string }> = [];
+  for (let i = 0; i + 1 < parts.length; i += 2) out.push({ status: parts[i], path: parts[i + 1] });
+  return out;
+}
+const TEST_FILE = /(^|\/)tests?\/|\.test\.[a-z]+$/;
+// The workflow, what it runs and what it checks, and the Reviewer's instructions. A new test is fine, because it can only add to CI.
+// Lowercase: the owner's disk ignores case. shortcut: package.json is barred whole, so a PR changing dependencies also goes to the owner; parse its scripts if that gets in the way.
+export function barred({ status, path }: { status: string; path: string }): boolean {
+  const p = path.toLowerCase();
+  return p === ".github" || p.startsWith(".github/") || p === "agents/core/reviewer.md" || p === "package.json" || p.endsWith("/package.json") || (TEST_FILE.test(p) && status !== "A");
+}
 
 // A verdict counts only if the whole reply is one: text in a diff that the Reviewer happens to quote is not a PASS.
 export function reviewerPassed(text: string): { passed: boolean; why: string } {
@@ -112,11 +123,11 @@ export function createImprover(o: ImproverOptions) {
     await git("fetch", "--quiet", "--no-tags", "origin", "+refs/heads/main:refs/city/main", `+refs/pull/${row.pr}/head:refs/city/pr-${row.pr}`);
     if ((await git("rev-parse", `refs/city/pr-${row.pr}`)).trim() !== sha) return; // it moved during the fetch: next tick
     const base = (await git("rev-parse", "refs/city/main")).trim();
-    const changed = (await git("diff", "--name-only", "--no-renames", "-z", `${base}...${sha}`)).split("\0").filter(Boolean);
+    const changed = changedFiles(await git("diff", "--name-status", "--no-renames", "-z", `${base}...${sha}`));
     if (!changed.length) return toOwner(row, "it changes nothing");
-    const judges = changed.filter(barred);
-    if (judges.length) return toOwner(row, "it changes CI or the Reviewer's prompt", judges.join(", "));
-    const ruleChanges = changed.filter(isRuleOrScoring);
+    const judges = changed.filter(barred).map((c) => c.path);
+    if (judges.length) return toOwner(row, "it changes CI, the test script, an existing test or the Reviewer's prompt", judges.join(", "));
+    const ruleChanges = changed.map((c) => c.path).filter(isRuleOrScoring);
 
     const runs = JSON.parse(await gh("api", `repos/${repo}/commits/${sha}/check-runs?per_page=100`)) as { check_runs: Array<{ name: string; status: string; conclusion: string | null; app?: { slug?: string } }> };
     const ci = runs.check_runs.filter((r) => r.name === "test" && r.app?.slug === "github-actions");

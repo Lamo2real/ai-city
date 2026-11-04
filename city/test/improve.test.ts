@@ -1,11 +1,12 @@
 // The self-improvement gate: what it merges, and everything it sends to the owner instead.
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { EvalRun } from "../src/evals.ts";
-import { createImprover, evalsHold, IMPROVE_GOAL, reviewerPassed } from "../src/improve.ts";
+import { barred, changedFiles, createImprover, evalsHold, IMPROVE_GOAL, reviewerPassed } from "../src/improve.ts";
 import { departmentReport, formatReport } from "../src/measure.ts";
 import { loadPolicy } from "../src/policy.ts";
 import { createCity } from "../src/runtime.ts";
@@ -69,7 +70,7 @@ function world(w: World = {}) {
     if (cmd === "gh" && args[0] === "api") return JSON.stringify({ check_runs: w.ci ?? [{ name: "test", status: "completed", conclusion: "success", app: { slug: "github-actions" } }] });
     if (cmd === "gh" && args[1] === "merge") { if (w.mergeFails) throw new Error("not mergeable"); merges.push(args); return ""; }
     if (args[2] === "rev-parse") return `${args[3].includes("main") ? BASE : state.head}\n`;
-    if (args[2] === "diff" && args.includes("--name-only")) return w.diff ?? "skills/python/SKILL.md\0";
+    if (args[2] === "diff" && args.includes("--name-status")) return (w.diff ?? "skills/python/SKILL.md\0").split("\0").filter(Boolean).map((p) => (p.startsWith("A:") ? `A\0${p.slice(2)}\0` : `M\0${p}\0`)).join("");
     if (args[2] === "diff") return w.patch ?? "+a small change";
     return "";
   };
@@ -150,16 +151,34 @@ test("by the owner's decision a change to the rules or scoring merges under the 
 });
 
 test("a PR cannot rewrite its own judges: CI config and the Reviewer's prompt go to the owner before anything is spent", async () => {
-  for (const path of [".github/workflows/ci.yml", ".github/CODEOWNERS", ".GitHub/workflows/ci.yml", "agents/core/reviewer.md", "AGENTS/CORE/REVIEWER.MD"]) {
-    const x = await refused({ diff: `skills/python/SKILL.md\0${path}\0` }, /changes CI or the Reviewer's prompt/);
+  for (const path of [".github/workflows/ci.yml", ".github/CODEOWNERS", ".GitHub/workflows/ci.yml", "agents/core/reviewer.md", "AGENTS/CORE/REVIEWER.MD", "package.json", "city/package.json", "jarvis/package.json", "jarvis/openclaw/package.json", "city/test/policy.test.ts", "jarvis/test/server.test.js", "jarvis/test/fixtures/city.js", "jarvis/voice/tests/test_x.py", "city/src/thing.test.ts"]) {
+    const x = await refused({ diff: `skills/python/SKILL.md\0${path}\0` }, /changes CI, the test script, an existing test or the Reviewer's prompt/);
     assert.deepEqual([x.reviewed, x.evals], [[], []], path);
     assert.ok(!x.calls.some((c) => c.includes("check-runs")), path);
   }
-  const x = world({ diff: "agents/core/orchestrator.md\0.githubish/x\0" });
+  const x = world({ diff: "agents/core/orchestrator.md\0.githubish/x\0A:city/test/new.test.ts\0A:jarvis/test/fixtures/new.js\0city/src/latest.ts\0package-lock.json\0" });
   x.event();
   await x.settle();
-  assert.equal(x.merges.length, 1, "other prompts and lookalike paths stay open");
+  assert.equal(x.merges.length, 1, "other prompts, lookalike paths and new tests stay open");
   x.end();
+});
+
+test("removing or moving a test is barred, and real git says so in the form the gate reads", () => {
+  const repo = mkdtempSync(join(tmpdir(), "repo-"));
+  const git = (...a: string[]) => execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...a], { encoding: "utf8" });
+  git("init", "-q", "-b", "main");
+  mkdirSync(join(repo, "city", "test"), { recursive: true });
+  mkdirSync(join(repo, "docs"));
+  for (const f of ["city/test/moved.test.ts", "city/test/gone.test.ts", "city/test/edited.test.ts"]) writeFileSync(join(repo, f), `${f}\n`.repeat(40));
+  git("add", "."); git("commit", "-qm", "base");
+  renameSync(join(repo, "city/test/moved.test.ts"), join(repo, "docs/moved file.md"));
+  rmSync(join(repo, "city/test/gone.test.ts"));
+  writeFileSync(join(repo, "city/test/edited.test.ts"), "weaker\n");
+  writeFileSync(join(repo, "city/test/new.test.ts"), "more\n");
+  git("add", "-A"); git("commit", "-qm", "change");
+  const changed = changedFiles(git("diff", "--name-status", "--no-renames", "-z", "HEAD~1...HEAD"));
+  assert.ok(changed.some((c) => c.path === "docs/moved file.md" && c.status === "A"), "a path with a space survives");
+  assert.deepEqual(changed.filter(barred).map((c) => c.path).sort(), ["city/test/edited.test.ts", "city/test/gone.test.ts", "city/test/moved.test.ts"]);
 });
 
 test("the three conditions still hold for such a change: a Reviewer FAIL or worse evals do not merge it", async () => {
