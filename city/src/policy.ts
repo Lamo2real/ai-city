@@ -22,6 +22,7 @@ export interface Policy {
     max_concurrent_agents: number;
     max_workers_per_manager: number;
     daily_spend_usd_per_department: number;
+    daily_spend_usd_global?: number; // optional, off when absent: caps all departments together per UTC day
     max_review_rounds: number;
   };
   rules: Rule[];
