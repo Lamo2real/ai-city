@@ -454,3 +454,44 @@ test("snapshot carries the caps from the loaded policy, not a copy", () => {
   assert.equal(real.snapshot().caps.max_active_agents_per_department, policy.caps.max_active_agents_per_department);
   c.close(); real.close();
 });
+
+test("a ticket to a retired agent revives it through the department cap: refused when full, revived and run when not", async () => {
+  const { runner, calls } = fakeRunner({});
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: capped });
+  const events: CityEvent[] = [];
+  city.on((e) => events.push(e));
+  const hire = (id: string) => city.toolsFor("orchestrator").find((t) => t.name === "hire_agent")!.handler({ spec: spec(id, "manager", "orchestrator") });
+  const retire = (id: string) => city.toolsFor("orchestrator").find((t) => t.name === "retire_agent")!.handler({ id });
+  for (const id of ["mgr-one", "mgr-two", "mgr-three", "mgr-four", "mgr-five"]) await hire(id);
+  await retire("mgr-five");
+  await hire("mgr-six"); // IT is full again: five active
+  const before = city.ledger.ticketsByStatus("open", "in_progress").length;
+  assert.throws(() => city.sendTicket({ to: "mgr-five", goal: "x" }), /^Error: cap reached: IT already has 5 active agents\. Retire one or reuse\.$/);
+  assert.equal(city.ledger.ticketsByStatus("open", "in_progress").length, before, "no ticket was created or dispatched");
+  assert.equal(city.ledger.getAgent("mgr-five")?.state, "retired");
+  await retire("mgr-six");
+  const t = city.sendTicket({ to: "mgr-five", goal: "x" });
+  await city.idle();
+  assert.equal(city.ledger.getAgent("mgr-five")?.state, "active");
+  assert.ok(events.some((e) => e.type === "agent.hired" && e.revived && e.agent.id === "mgr-five"));
+  assert.ok(calls.some((c) => c.agentId === "mgr-five" && c.prompt.includes(t.id)));
+  city.close();
+});
+
+test("resume over the department cap parks the ticket instead of crashing or bypassing the cap", async () => {
+  const { runner, calls } = fakeRunner({});
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: capped });
+  const hire = (id: string) => city.toolsFor("orchestrator").find((t) => t.name === "hire_agent")!.handler({ spec: spec(id, "manager", "orchestrator") });
+  for (const id of ["mgr-one", "mgr-two", "mgr-three", "mgr-four", "mgr-five"]) await hire(id);
+  await city.toolsFor("orchestrator").find((t) => t.name === "retire_agent")!.handler({ id: "mgr-five" });
+  await hire("mgr-six");
+  city.ledger.putTicket({ id: "t-parked", from: "orchestrator", to: "mgr-five", kind: "task", goal: "g", status: "in_progress", created_at: new Date().toISOString() });
+  await city.resume();
+  await city.idle();
+  const t = city.ledger.getTicket("t-parked")!;
+  assert.equal(t.status, "waiting_on_owner");
+  assert.match(t.result?.summary ?? "", /cap reached: IT already has 5 active agents/);
+  assert.equal(calls.filter((c) => c.agentId === "mgr-five").length, 0);
+  assert.equal(city.ledger.getAgent("mgr-five")?.state, "retired");
+  city.close();
+});

@@ -220,7 +220,9 @@ export function createCity(opts: CityOptions) {
     const draft = { id: newId("t"), status: "open", created_at: now(), kind: "task", ...input, from: typeof input.from === "string" && input.from ? input.from : from } as Record<string, unknown>;
     for (const k of Object.keys(draft)) if (draft[k] === undefined) delete draft[k];
     const ticket = validate<Ticket>("ticket", draft);
-    agent(ticket.to);
+    const target = agent(ticket.to);
+    // A ticket to a retired agent revives it first, through the department cap; refused = no ticket is created.
+    if (target.state === "retired" && target.kind !== "core" && !ledger.getTicket(ticket.id)) revive(target);
     if (!ledger.putTicket(ticket)) return ledger.getTicket(ticket.id)!;
     emit({ type: "ticket.status", ticket, previous: null });
     if (ticket.kind === "direct_instruction" && OWNER_SIDE.has(ticket.from)) {
@@ -236,24 +238,27 @@ export function createCity(opts: CityOptions) {
     return ticket;
   }
 
+  // Core agents never count; a worker belongs to its manager's department.
+  const activeIn = (dept: string) => ledger.agents("active").filter((a) => a.kind !== "core" && (a.department ?? "other") === dept).length;
+  const checkDepartment = (dept: string) => {
+    const cap = departmentCap(policy, dept);
+    if (activeIn(dept) >= cap) throw new Error(`cap reached: ${dept} already has ${cap} active agents. Retire one or reuse.`);
+  };
+  // A retired agent comes back through the same department check, whether hire_agent or a ticket brings it back.
+  function revive(a: AgentRow): AgentRow {
+    checkDepartment(a.department ?? "other");
+    log(`${a.id}: revived from the registry`);
+    const row = ledger.updateAgent(a.id, { state: "active", last_active_at: now() });
+    emit({ type: "agent.hired", agent: row, revived: true });
+    return row;
+  }
+
   function hire(by: string, input: Record<string, unknown>): AgentRow {
     const spec = validate<AgentSpec>("agent_spec", input);
     if (spec.parent !== by) throw new Error(`parent must be the hiring agent (${by})`);
     const existing = ledger.getAgent(spec.id);
     if (existing?.state === "active") throw new Error(`${spec.id} is already hired; find it with list_registry`);
-    // Core agents never count; a worker belongs to its manager's department.
-    const activeIn = (dept: string) => ledger.agents("active").filter((a) => a.kind !== "core" && (a.department ?? "other") === dept).length;
-    const checkDepartment = (dept: string) => {
-      const cap = departmentCap(policy, dept);
-      if (activeIn(dept) >= cap) throw new Error(`cap reached: ${dept} already has ${cap} active agents. Retire one or reuse.`);
-    };
-    if (existing) {
-      checkDepartment(existing.department ?? "other");
-      log(`${spec.id}: revived from the registry`);
-      const row = ledger.updateAgent(spec.id, { state: "active", last_active_at: now() });
-      emit({ type: "agent.hired", agent: row, revived: true });
-      return row;
-    }
+    if (existing) return revive(existing);
     const department = (spec.kind === "worker" ? agent(by).department : undefined) ?? spec.department ?? agent(by).department ?? "other";
     checkDepartment(department);
     if (spec.kind === "worker" && ledger.children(by).length >= policy.caps.max_workers_per_manager) throw new Error(`cap reached: ${policy.caps.max_workers_per_manager} workers per manager`);
@@ -399,7 +404,18 @@ export function createCity(opts: CityOptions) {
   // After a restart: open questions are asked again, unfinished tickets go back to their agents.
   async function resume(): Promise<void> {
     for (const q of ledger.openQuestions()) emit({ type: "question", id: q.id, question: q.question, ticket_id: q.question.ticket_id });
-    for (const t of ledger.ticketsByStatus("open", "in_progress", "in_review")) dispatch(t, "[resumed after a restart; continue where you left off] ");
+    for (const t of ledger.ticketsByStatus("open", "in_progress", "in_review")) {
+      const target = ledger.getAgent(t.to);
+      if (target && target.state === "retired" && target.kind !== "core") {
+        try { revive(target); } catch (err) {
+          // Over the department cap: park the ticket with a note rather than throw out of resume or bypass the cap.
+          log(`${t.to}: ticket ${t.id} parked: ${(err as Error).message}`);
+          setStatus(t.id, "waiting_on_owner", { result: { ...t.result, summary: `Not resumed after the restart: ${(err as Error).message}` } });
+          continue;
+        }
+      }
+      dispatch(t, "[resumed after a restart; continue where you left off] ");
+    }
   }
 
   async function idle(): Promise<void> {
