@@ -102,6 +102,22 @@ test("an event reaches the owning department once, as quoted data, and the resul
   city.close();
 });
 
+test("work filed as a direct instruction to the Orchestrator still comes back to the owner; an answer to its question stays an instruction", async () => {
+  const city = createCity({ runner: reporter, dataDir: dir(), ledgerPath: ":memory:", policy });
+  const events: CityEvent[] = [];
+  city.on((e) => events.push(e));
+  const send = city.toolsFor("jarvis").find((x) => x.name === "send_ticket")!.handler;
+  const work = await send({ ticket: { to: "orchestrator", kind: "direct_instruction", goal: "new work" } }) as { id: string };
+  assert.equal(city.ledger.getTicket(work.id)?.kind, "task");
+  await city.idle();
+  assert.ok(events.some((e) => e.type === "result" && e.ticket_id === work.id), "the owner hears the result");
+  await city.toolsFor("orchestrator").find((x) => x.name === "ask_user")!.handler({ question: { ticket_id: work.id, asked_by: "orchestrator", path: "Orchestrator", blocking: false, questions: [{ text: "which?", options: ["a", "b"], default: "a" }] } });
+  const answer = await send({ ticket: { to: "orchestrator", kind: "direct_instruction", goal: "a" } }) as { id: string };
+  assert.equal(city.ledger.getTicket(answer.id)?.kind, "direct_instruction");
+  await city.idle();
+  city.close();
+});
+
 test("the workforce view and health come from the ledger", async () => {
   const city = createCity({ runner: reporter, dataDir: dir(), ledgerPath: ":memory:", policy });
   const { manager } = city.createDepartment({ name: "Team", mission: "work" });

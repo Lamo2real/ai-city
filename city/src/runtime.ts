@@ -484,6 +484,9 @@ export function createCity(opts: CityOptions) {
   function sendTicket(from: string, input: Record<string, unknown>): Ticket {
     const draft = { id: newId("t"), status: "open", created_at: now(), kind: "task", ...input, from: typeof input.from === "string" && input.from ? input.from : from } as Record<string, unknown>;
     for (const k of Object.keys(draft)) if (draft[k] === undefined) delete draft[k];
+    // Work the owner gives the Orchestrator has to come back as a result, and a direct instruction ends once heard.
+    // Only an answer to the Orchestrator's own question stays one.
+    if (draft.kind === "direct_instruction" && draft.to === "orchestrator" && OWNER_SIDE.has(String(draft.from)) && !ledger.openQuestions().some((o) => o.question.asked_by === "orchestrator")) draft.kind = "task";
     if (typeof draft.parent_id === "string" && !draft.project) { const parentProject = ledger.getTicket(draft.parent_id)?.project; if (parentProject) draft.project = parentProject; }
     const ticket = validate<Ticket>("ticket", draft);
     const target = agent(ticket.to);
