@@ -26,7 +26,8 @@ test("a hire, a ticket, a question, a review and a report each show up as typed 
       await use(req, "ask_user", { question: { ticket_id: t.id, blocking: true, questions: [{ text: "Which repo?", default: "new" }] } });
     } else if (req.agentId === "it-manager" && req.prompt.startsWith("[direct instruction from owner")) {
       const t = JSON.parse(req.prompt.slice(req.prompt.indexOf("{")));
-      const v = await use(req, "request_review", { ticket_id: t.parent_id, artifact: "diff" }) as { verdict: string };
+      // The Orchestrator owns the gate; the runtime tool is called here so one agent script covers the whole flow.
+      const v = await city.toolsFor("orchestrator").find((x) => x.name === "request_review")!.handler({ ticket_id: t.parent_id, artifact: "diff" }) as { verdict: string };
       await use(req, "report", { ticket_id: t.parent_id, status: v.verdict === "PASS" ? "done" : "failed", summary: "built", artifacts: ["PR #1"] });
     } else if (req.agentId === "orchestrator" && req.prompt.startsWith("[report from it-manager")) {
       const id = /on ticket (\S+)\]/.exec(req.prompt)![1];

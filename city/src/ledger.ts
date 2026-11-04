@@ -5,7 +5,10 @@ import { DatabaseSync } from "node:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
-export type TicketStatus = "open" | "in_progress" | "waiting_on_owner" | "in_review" | "done" | "failed" | "cancelled";
+import type { Department } from "./departments.ts";
+import type { WorkerState } from "./lifecycle.ts";
+
+export type TicketStatus = "open" | "in_progress" | "waiting_on_owner" | "in_review" | "parked" | "done" | "failed" | "cancelled";
 
 export interface Ticket {
   id: string;
@@ -23,6 +26,10 @@ export interface Ticket {
   status: TicketStatus;
   review_rounds?: number;
   result?: { summary?: string; artifacts?: string[]; checks?: { name: string; passed: boolean }[]; cost_usd?: number };
+  depends_on?: string[];
+  project?: string;
+  complexity?: "simple" | "standard" | "complex";
+  workspace?: { repo: string; path: string; branch: string; base: string };
   created_at: string;
   updated_at?: string;
 }
@@ -40,6 +47,9 @@ export interface AgentRow {
   lifecycle: "persistent" | "temporary";
   idle_retire_minutes?: number;
   state: "active" | "retired";
+  worker_state?: WorkerState;
+  executor?: "sdk" | "openclaw";
+  capabilities?: string[];
   session_id?: string | null;
   session_key?: string | null; // what the session belongs to: root ticket (managers) or ticket (workers)
   context_tokens?: number; // size of the session after its last turn
@@ -100,7 +110,9 @@ const LARGE_DELTA_USD = 20;
 // for new rows; for backfilled rows (estimated = 1) it is the legacy input+output value and the split is 0.
 // "Today" is the UTC calendar day (ts is an ISO UTC string).
 export interface TurnUsage { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }
-const COST_COLUMNS = ["input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "estimated"];
+export interface TurnMeta { model?: string; durationMs?: number }
+export interface Approval { id: string; hash: string; agent_id: string; tool: string; summary: string; status: "pending" | "granted" | "denied" | "used"; question_id: string | null; ticket_id: string | null; created_at: string }
+const COST_COLUMNS = ["input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "estimated", "duration_ms"];
 
 // Idempotent: columns via ALTER (ignored when present); the backfill runs once, guarded by user_version.
 function migrate(db: DatabaseSync, path: string, log: (line: string) => void): void {
@@ -117,6 +129,7 @@ function migrate(db: DatabaseSync, path: string, log: (line: string) => void): v
   try { db.exec("ALTER TABLE costs ADD COLUMN tokens INTEGER NOT NULL DEFAULT 0"); } catch { /* already there */ }
   for (const c of COST_COLUMNS) { try { db.exec(`ALTER TABLE costs ADD COLUMN ${c} INTEGER NOT NULL DEFAULT 0`); } catch { /* already there */ } }
   try { db.exec("ALTER TABLE costs ADD COLUMN raw_usd REAL"); } catch { /* already there */ }
+  try { db.exec("ALTER TABLE costs ADD COLUMN model TEXT"); } catch { /* already there */ }
   // A baseline table keyed by session id alone (an earlier draft) carries over under the agent-scoped key.
   if (db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'session_costs'").get()) {
     db.exec("INSERT OR IGNORE INTO session_baselines (key, cumulative_usd) SELECT json_extract(a.json, '$.id') || ':' || s.session_id, s.cumulative_usd FROM session_costs s JOIN agents a ON json_extract(a.json, '$.session_id') = s.session_id");
@@ -158,6 +171,7 @@ export function openLedger(path: string, log: (line: string) => void = () => {})
   db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
   if (path !== ":memory:") for (const f of [path, `${path}-wal`, `${path}-shm`]) { try { chmodSync(f, 0o600); } catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; } }
   db.exec(SCHEMA);
+  db.exec("CREATE TABLE IF NOT EXISTS departments (key TEXT PRIMARY KEY, state TEXT NOT NULL, json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS approvals (id TEXT PRIMARY KEY, hash TEXT NOT NULL, status TEXT NOT NULL, question_id TEXT, json TEXT NOT NULL);");
   migrate(db, path, log);
   const rows = <T>(sql: string, ...args: (string | number)[]) => db.prepare(sql).all(...args).map((r) => JSON.parse(String((r as { json: string }).json)) as T);
   const one = <T>(sql: string, ...args: (string | number)[]) => { const r = db.prepare(sql).get(...args) as { json: string } | undefined; return r ? (JSON.parse(r.json) as T) : undefined; };
@@ -219,13 +233,13 @@ export function openLedger(path: string, log: (line: string) => void = () => {})
     },
 
     // usd is a per-turn delta. For the SDK's cumulative total use recordTurn.
-    addCost(agentId: string, ticketId: string | null, usd: number, tokens = 0, usage: TurnUsage = {}) {
+    addCost(agentId: string, ticketId: string | null, usd: number, tokens = 0, usage: TurnUsage = {}, meta: TurnMeta = {}) {
       const [i, o, cr, cw] = [usage.input ?? 0, usage.output ?? 0, usage.cacheRead ?? 0, usage.cacheWrite ?? 0];
       const split = i + o + cr + cw;
       if (split) tokens = split;
       if (!usd && !tokens) return;
       inTx(() => {
-        db.prepare("INSERT INTO costs (agent_id, ticket_id, usd, tokens, ts, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(agentId, ticketId, usd, tokens, now(), i, o, cr, cw);
+        db.prepare("INSERT INTO costs (agent_id, ticket_id, usd, tokens, ts, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, model, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(agentId, ticketId, usd, tokens, now(), i, o, cr, cw, meta.model ?? null, meta.durationMs ?? 0);
         const a = one<AgentRow>("SELECT json FROM agents WHERE id = ?", agentId);
         if (a) db.prepare("UPDATE agents SET json = ? WHERE id = ?").run(JSON.stringify({ ...a, total_cost_usd: (a.total_cost_usd ?? 0) + usd, last_active_at: now() }), agentId);
       });
@@ -236,7 +250,7 @@ export function openLedger(path: string, log: (line: string) => void = () => {})
     // unknown session starts from 0; a total below the last one means a reset, so it counts in full.
     // An empty session id falls back to the agent-scoped key "<agentId>:" (never a shared baseline).
     // New rows leave raw_usd NULL; raw_usd only holds the pre-migration values of backfilled rows.
-    recordTurn(agentId: string, ticketId: string | null, sessionId: string, cumulativeUsd: number, usage: TurnUsage = {}, tokens = 0): number {
+    recordTurn(agentId: string, ticketId: string | null, sessionId: string, cumulativeUsd: number, usage: TurnUsage = {}, tokens = 0, meta: TurnMeta = {}): number {
       if (!sessionId) log(`ledger: ${agentId} reported no session id; using the agent-scoped baseline`);
       return inTx(() => {
         const key = sessionKey(agentId, sessionId);
@@ -245,7 +259,7 @@ export function openLedger(path: string, log: (line: string) => void = () => {})
         const delta = cumulativeUsd >= prev ? cumulativeUsd - prev : cumulativeUsd;
         if (delta > LARGE_DELTA_USD) log(`ledger: warning: one turn of ${agentId} cost $${delta.toFixed(2)} (over $${LARGE_DELTA_USD}); check the cumulative assumption`);
         db.prepare("INSERT OR REPLACE INTO session_baselines (key, cumulative_usd) VALUES (?, ?)").run(key, cumulativeUsd);
-        this.addCost(agentId, ticketId, delta, tokens, usage);
+        this.addCost(agentId, ticketId, delta, tokens, usage, meta);
         return delta;
       });
     },
@@ -271,6 +285,50 @@ export function openLedger(path: string, log: (line: string) => void = () => {})
     compactionStats(since = "") {
       const rows = db.prepare("SELECT method, COUNT(*) AS n, SUM(tokens_before) AS before, SUM(tokens_after) AS after FROM compactions WHERE ts >= ? GROUP BY method").all(since) as unknown as Array<{ method: string; n: number; before: number; after: number }>;
       return { count: rows.reduce((s, r) => s + r.n, 0), tokens_before: rows.reduce((s, r) => s + r.before, 0), tokens_after: rows.reduce((s, r) => s + r.after, 0), by_method: Object.fromEntries(rows.map((r) => [r.method, r.n])) };
+    },
+    db,
+    putDepartment(d: Department) {
+      db.prepare("INSERT OR REPLACE INTO departments (key, state, json) VALUES (?, ?, ?)").run(d.key, d.state, JSON.stringify(d));
+    },
+    getDepartment: (key: string) => one<Department>("SELECT json FROM departments WHERE key = ?", key),
+    deleteDepartmentRow: (key: string) => { db.prepare("DELETE FROM departments WHERE key = ?").run(key); },
+    departments: () => rows<Department>("SELECT json FROM departments ORDER BY key"),
+
+    putApproval(a: Approval) {
+      db.prepare("INSERT OR REPLACE INTO approvals (id, hash, status, question_id, json) VALUES (?, ?, ?, ?, ?)").run(a.id, a.hash, a.status, a.question_id, JSON.stringify(a));
+    },
+    approvalByQuestion: (questionId: string) => one<Approval>("SELECT json FROM approvals WHERE question_id = ?", questionId),
+    approvalByHash: (hash: string, status: Approval["status"]) => one<Approval>("SELECT json FROM approvals WHERE hash = ? AND status = ?", hash, status),
+
+    // Estimated API-list-price value of the work, from what the SDK reports per turn. Never a charge on the subscription.
+    costReport() {
+      const day = now().slice(0, 10), month = day.slice(0, 7);
+      const q = (sql: string, ...args: string[]) => db.prepare(sql).all(...args) as Array<Record<string, unknown>>;
+      const sum = (since: string) => db.prepare("SELECT COALESCE(SUM(usd), 0) AS usd, COALESCE(SUM(tokens), 0) AS tokens, COUNT(*) AS turns FROM costs WHERE ts >= ?").get(since) as { usd: number; tokens: number; turns: number };
+      const agents = new Map(this.agents().map((a) => [a.id, a]));
+      const rollup = (keyOf: (r: { agent_id: string; model: string | null }) => string, since: string) => {
+        const out = new Map<string, { usd: number; tokens: number; turns: number }>();
+        for (const r of q("SELECT agent_id, model, usd, tokens FROM costs WHERE ts >= ?", since) as unknown as Array<{ agent_id: string; model: string | null; usd: number; tokens: number }>) {
+          const k = keyOf(r), e = out.get(k) ?? { usd: 0, tokens: 0, turns: 0 };
+          e.usd += r.usd; e.tokens += r.tokens; e.turns += 1;
+          out.set(k, e);
+        }
+        return Object.fromEntries([...out].sort((a, b) => b[1].usd - a[1].usd));
+      };
+      const doneCount = (db.prepare("SELECT COUNT(*) AS n FROM tickets WHERE status = 'done' AND updated_at >= ?").get(month) as { n: number }).n;
+      const failedCount = (db.prepare("SELECT COUNT(*) AS n FROM tickets WHERE status = 'failed' AND updated_at >= ?").get(month) as { n: number }).n;
+      const monthTotal = sum(month);
+      return {
+        estimated: true,
+        note: "Estimated value at API list prices. On the Claude subscription this is not a charge.",
+        today: sum(day), month: monthTotal,
+        by_model: rollup((r) => r.model ?? agents.get(r.agent_id)?.model ?? "unknown", month),
+        by_department: rollup((r) => agents.get(r.agent_id)?.department ?? "HQ", month),
+        by_agent: rollup((r) => r.agent_id, month),
+        by_ticket: q("SELECT ticket_id, ROUND(SUM(usd), 4) AS usd, SUM(tokens) AS tokens, COUNT(*) AS turns FROM costs WHERE ts >= ? AND ticket_id IS NOT NULL GROUP BY ticket_id ORDER BY 2 DESC LIMIT 20", month),
+        done_tickets: doneCount, failed_tickets: failedCount,
+        usd_per_done_ticket: doneCount ? monthTotal.usd / doneCount : null,
+      };
     },
     close: () => db.close(),
   };

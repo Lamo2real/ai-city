@@ -3,33 +3,171 @@
   "title": "Ticket",
   "description": "The only thing agents pass to each other. Stored in ~/.jarvis/ledger.db.",
   "type": "object",
-  "required": ["id", "from", "to", "kind", "goal", "status", "created_at"],
+  "required": [
+    "id",
+    "from",
+    "to",
+    "kind",
+    "goal",
+    "status",
+    "created_at"
+  ],
   "additionalProperties": false,
   "properties": {
-    "id": { "type": "string" },
-    "parent_id": { "type": ["string", "null"], "description": "Ticket this one was split from" },
-    "from": { "type": "string", "description": "agent id or 'owner'" },
-    "to": { "type": "string" },
-    "cc": { "type": "array", "items": { "type": "string" } },
-    "kind": { "enum": ["task", "fix", "direct_instruction", "review"] },
-    "goal": { "type": "string" },
-    "owner_words": { "type": "string", "description": "The owner's exact request, verbatim" },
-    "acceptance_criteria": { "type": "array", "items": { "type": "string" } },
-    "scope": { "type": "array", "items": { "type": "string" }, "description": "Repos, paths, accounts in scope" },
-    "budget_usd": { "type": "number", "minimum": 0 },
-    "deadline": { "type": ["string", "null"], "format": "date-time" },
-    "status": { "enum": ["open", "in_progress", "waiting_on_owner", "in_review", "done", "failed", "cancelled"] },
-    "review_rounds": { "type": "integer", "minimum": 0, "default": 0 },
+    "id": {
+      "type": "string"
+    },
+    "parent_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Ticket this one was split from"
+    },
+    "from": {
+      "type": "string",
+      "description": "agent id or 'owner'"
+    },
+    "to": {
+      "type": "string"
+    },
+    "cc": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "kind": {
+      "enum": [
+        "task",
+        "fix",
+        "direct_instruction",
+        "review"
+      ]
+    },
+    "goal": {
+      "type": "string"
+    },
+    "owner_words": {
+      "type": "string",
+      "description": "The owner's exact request, verbatim"
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "scope": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Repos, paths, accounts in scope"
+    },
+    "budget_usd": {
+      "type": "number",
+      "minimum": 0
+    },
+    "deadline": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "status": {
+      "enum": [
+        "open",
+        "in_progress",
+        "waiting_on_owner",
+        "in_review",
+        "parked",
+        "done",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "review_rounds": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0
+    },
     "result": {
       "type": "object",
       "properties": {
-        "summary": { "type": "string", "maxLength": 800 },
-        "artifacts": { "type": "array", "items": { "type": "string" } },
-        "checks": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "passed": { "type": "boolean" } } } },
-        "cost_usd": { "type": "number" }
+        "summary": {
+          "type": "string",
+          "maxLength": 800
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "passed": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "cost_usd": {
+          "type": "number"
+        }
       }
     },
-    "created_at": { "type": "string", "format": "date-time" },
-    "updated_at": { "type": "string", "format": "date-time" }
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "depends_on": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Tickets that must be done before this one starts"
+    },
+    "project": {
+      "type": "string",
+      "description": "Project this work belongs to; children inherit it. Scopes project memory and cost."
+    },
+    "complexity": {
+      "enum": [
+        "simple",
+        "standard",
+        "complex"
+      ],
+      "description": "Picks the worker's model for this ticket from policy.models"
+    },
+    "workspace": {
+      "type": "object",
+      "properties": {
+        "repo": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "base": {
+          "type": "string"
+        }
+      }
+    }
   }
 }

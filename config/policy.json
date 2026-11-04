@@ -6,13 +6,28 @@
     "department_caps": {},
     "max_workers_per_manager": 4,
     "daily_spend_usd_per_department": 20,
-    "max_review_rounds": 3
+    "max_review_rounds": 3,
+    "max_concurrent_turns": 4,
+    "turn_timeout_minutes": 60,
+    "resume_max_age_hours": 1
   },
+  "models": {
+    "simple": "claude-haiku-5-5",
+    "standard": "claude-sonnet-5-5",
+    "complex": "claude-opus-5-5",
+    "fallback": { "claude-fable-5-1": "claude-opus-5-5", "claude-opus-5-5": "claude-sonnet-5-5", "claude-sonnet-5-5": "claude-haiku-5-5" }
+  },
+  "autonomy": { "read_tools": ["Read", "Grep", "Glob", "read", "web_search", "web_fetch", "WebSearch", "WebFetch"] },
+  "repos_roots": ["~/projects", "/tmp"],
   "session": {
     "compact_at_context_pct": 60,
     "model_context_tokens": { "opus": 200000, "sonnet": 200000, "haiku": 200000, "fable": 200000, "default": 200000 }
   },
   "rules": [
+    { "tool": "^(Bash|exec|bash)$", "match": "\\bsecurity\\s+(add|delete|set|unlock|find)-", "decision": "deny", "reason": "Agents do not touch the Keychain. Secrets reach a process through its launcher." },
+    { "tool": "^(Bash|exec|bash)$", "match": "\\b(stripe\\s+(charges|payment_intents|refunds|payouts|transfers)\\b.*(create|capture|confirm)|npm\\s+publish|gh\\s+secret\\s+set|gh\\s+release\\s+create)", "decision": "ask", "reason": "Payments, publishing and credential changes need the owner." },
+    { "tool": "^(Bash|exec|bash)$", "match": "\\baws\\b.*\\b(delete|terminate|remove|deregister|destroy)-", "decision": "ask", "reason": "Deleting cloud resources needs the owner." },
+    { "tool": "^(Bash|exec|bash)$", "match": "\\b(drop\\s+(table|database)|truncate\\s+table)\\b", "decision": "ask", "reason": "Destructive database statements need the owner." },
     { "tool": "^Bash$", "match": "git\\s+push\\b.*(--force|-f\\b)", "decision": "deny", "reason": "Force-push is never allowed." },
     { "tool": "^Bash$", "match": "git\\s+push\\b.*\\b(main|master)\\b", "decision": "deny", "reason": "Never push to main. Open a PR; the Fable reviewer gates merges." },
     { "tool": "^Bash$", "match": "(^|[\\s\"';&|(])git\\s+([^;&|]*\\s)?(-c\\s|--output|--ext-diff|--textconv)", "decision": "deny", "reason": "git -c, --output, --ext-diff and --textconv can run programs or write files; not allowed." },

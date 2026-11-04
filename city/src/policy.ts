@@ -24,10 +24,16 @@ export interface Policy {
     max_workers_per_manager: number;
     daily_spend_usd_per_department: number;
     max_review_rounds: number;
+    max_concurrent_turns?: number;
+    turn_timeout_minutes?: number;
+    resume_max_age_hours?: number;
   };
   // Compact a session before its next turn once its context reaches this share of the model's window.
   session?: { compact_at_context_pct?: number; model_context_tokens?: Record<string, number> };
   rules: Rule[];
+  models?: { simple?: string; standard?: string; complex?: string; fallback?: Record<string, string> };
+  autonomy?: { read_tools?: string[] };
+  repos_roots?: string[];
 }
 
 // A department with no override gets the default, so a brand-new department is capped from its first hire.

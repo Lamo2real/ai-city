@@ -24,7 +24,7 @@ type Schema = {
 };
 
 const cache = new Map<string, Schema>();
-export function loadSchema(name: "ticket" | "agent_spec" | "question"): Schema {
+export function loadSchema(name: "ticket" | "agent_spec" | "question" | "department"): Schema {
   let s = cache.get(name);
   if (!s) {
     s = JSON.parse(readFileSync(join(SCHEMAS_DIR, `${name}.schema.json`), "utf8")) as Schema;
@@ -81,7 +81,7 @@ export class SchemaError extends Error {
   }
 }
 
-export function validate<T>(name: "ticket" | "agent_spec" | "question", value: unknown): T {
+export function validate<T>(name: "ticket" | "agent_spec" | "question" | "department", value: unknown): T {
   const problems = errors(loadSchema(name), value);
   if (problems.length) throw new SchemaError(name, problems);
   return value as T;

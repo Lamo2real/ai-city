@@ -43,7 +43,7 @@ export function createCityChat({ city, runner, dataDir, logger = () => {} }) {
     let result;
     try {
       result = await runner({
-        agentId: "jarvis", systemPrompt: prompt.body, model: prompt.model, effort: prompt.effort, allowedTools: prompt.tools, tools: city.toolsFor("jarvis"),
+        agentId: "jarvis", systemPrompt: prompt.body, model: prompt.model, effort: prompt.effort, allowedTools: prompt.tools, tools: city.toolsFor("jarvis").filter((t) => prompt.tools.includes(`mcp__jarvis__${t.name}`)),
         prompt: message, resume: sessions[sessionId], signal,
         onText: (text) => onEvent?.({ type: "text", text }),
         onTool: (name, input) => onEvent?.({ type: "tool", name, input }),
