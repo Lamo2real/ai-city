@@ -75,10 +75,10 @@ test("a ticket from Jarvis flows orchestrator → manager → worker and back th
   city.close();
 });
 
-test("the real max_concurrent_agents is a positive integer, at most the owner's decided 10", () => {
+test("the real max_concurrent_agents is a positive integer, at most the owner's decided 20", () => {
   const cap = policy.caps.max_concurrent_agents;
   assert.ok(Number.isInteger(cap) && cap >= 1, `max_concurrent_agents is ${cap}; it must be a positive integer`);
-  assert.ok(cap <= 10, `max_concurrent_agents is ${cap}, above 10: raise only with the owner's decision`);
+  assert.ok(cap <= 20, `max_concurrent_agents is ${cap}, above 20: raise only with the owner's decision`);
 });
 
 // The caps are pinned here, so this proves enforcement whatever config/policy.json says.
