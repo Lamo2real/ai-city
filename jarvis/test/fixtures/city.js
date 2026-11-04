@@ -22,6 +22,7 @@ export function citySnapshot(now = Date.now()) {
     questions: [{ id: "q-fx1", status: "open", created_at: new Date(now).toISOString(), question: { ticket_id: "t-fx4", asked_by: "ads-writer", path: "Marketing Manager › Ads Writer", questions: [{ text: "Daily budget: 20 or 40 euro?", options: ["20", "40"], default: "20" }] } }],
     usage: { usd: 1.73, tokens: 184200, turns: 31 },
     spend: { App: 0.91, IT: 0.22, Marketing: 0.4, Travel: 0.2 },
+    caps: { max_concurrent_agents: 10, max_workers_per_manager: 4, daily_spend_usd_per_department: 5, max_review_rounds: 3 },
   };
 }
 

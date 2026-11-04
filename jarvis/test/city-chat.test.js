@@ -142,7 +142,7 @@ test("the City View gets a snapshot, an agent's audit tail, and talks back throu
   assert.equal(snap.status, 200);
   const s = JSON.parse(snap.text);
   assert.ok(Array.isArray(s.agents) && s.agents.some((a) => a.id === "orchestrator"));
-  assert.deepEqual(Object.keys(s).sort(), ["agents", "questions", "spend", "tickets", "usage"]);
+  assert.deepEqual(Object.keys(s).sort(), ["agents", "caps", "questions", "spend", "tickets", "usage"]);
   assert.equal((await call({ path: "/api/city/audit?agent=Bad%20Name" })).status, 400);
   assert.equal((await call({ path: "/api/city/audit?agent=orchestrator" })).status, 200);
   const noAt = await call({ method: "POST", path: "/api/city/instruct", body: { text: "hello" } });
