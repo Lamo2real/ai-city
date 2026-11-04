@@ -18,6 +18,12 @@ class FakeJarvisServer(BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         SEEN.append({"path": self.path, "host": self.headers["Host"], "type": self.headers["Content-Type"], **body})
+        if self.path == "/api/warm":
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+            return
         self.send_response(200)
         self.send_header("Content-Type", "application/x-ndjson")
         self.end_headers()
@@ -61,6 +67,13 @@ def test_voice_and_text_turns_land_in_the_same_session(server):
     assert [s["sessionId"] for s in SEEN] == ["owner", "owner"]
     assert all(s["path"] == "/api/chat/stream" and s["voice"] is False and s["type"] == "application/json" for s in SEEN)
     assert SEEN[0]["host"].startswith("127.0.0.1:"), "the server only answers its own host"
+
+
+def test_warm_asks_for_this_session_and_a_dead_server_costs_nothing(server):
+    SEEN.clear()
+    JarvisSession(server).warm()
+    assert [(s["path"], s["sessionId"]) for s in SEEN] == [("/api/warm", "owner")]
+    JarvisSession("http://127.0.0.1:9").warm()  # nothing listens there: no exception
 
 
 def test_a_server_error_raises(server):
