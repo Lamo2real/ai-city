@@ -1,6 +1,7 @@
 {
   "server": "http://127.0.0.1:7777",
   "session_id": "owner",
+  "echo_cancellation": true,
   "timing_log": "~/Library/Logs/jarvis-voice-timings.jsonl",
   "cartesia": {
     "model": "sonic-3",

@@ -200,7 +200,7 @@ Gaps:
 - The pipeline has not run against a microphone, a speaker or Cartesia. The README marks every audio check unverified and needing the owner.
 - `jarvis.cartesia` is not in the Keychain and `config/voice.json` still has a placeholder Cartesia voice id. The owner adds both.
 - First audio misses the 800 ms target: a Jarvis server turn took 5.4 to 10.7 s to its first sentence.
-- No echo cancellation (headphones needed), and backchannels over 300 ms stop playback because MLX Whisper is not streaming.
+- Echo cancellation through macOS voice processing is built but has never run on real devices (`jarvis/voice/README.md` has the by-ear check). Backchannels over 300 ms stop playback because MLX Whisper is not streaming.
 - Not checked in this review: whether the old HUD voice path works today.
 
 ## 13. Security: partial
