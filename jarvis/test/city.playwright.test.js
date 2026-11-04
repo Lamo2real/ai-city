@@ -385,6 +385,7 @@ test("a pending merge that is gone clears its card", { skip }, async () => {
   gone = true;
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await page.waitForFunction(() => document.querySelector("#inboxmerge").children.length === 0);
+  assert.equal(await page.textContent("#inboxnote"), "Resolved elsewhere or expired. Nothing was merged here.");
   await page.close();
 });
 

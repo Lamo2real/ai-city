@@ -570,7 +570,7 @@ function syncConfirm(c){
 let pendingOff=false;
 async function pollPending(force=false){ if(document.hidden||(pendingOff&&!force)) return; const seq=confirmSeq;
   try{ const r=await fetch("./api/confirm/pending?sessionId="+encodeURIComponent(sessionId)); if(!r.ok){ pendingOff=true; return; } const j=await r.json(); pendingOff=false;
-    if(seq!==confirmSeq) return; /* something newer happened while this was in flight */ syncConfirm(j.confirm||null); }catch(e){ pendingOff=true; } }
+    if(seq!==confirmSeq) return; /* something newer happened while this was in flight */ if(!j.confirm&&confirmData){ syncConfirm(null); inboxNote("Resolved elsewhere or expired. Nothing was merged here."); } else syncConfirm(j.confirm||null); }catch(e){ pendingOff=true; } }
 pollPending(); setInterval(pollPending,5000); window.addEventListener("focus",()=>pollPending(true)); document.addEventListener("visibilitychange",()=>pollPending());
 
 /* One turn at a time. A new message or talking over Jarvis cancels the one in progress. */
