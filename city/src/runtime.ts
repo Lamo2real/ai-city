@@ -69,7 +69,7 @@ export function createCity(opts: CityOptions) {
   const agentsDir = opts.agentsDir ?? AGENTS_DIR;
   const policy = opts.policy ?? loadPolicy();
   const log = opts.log ?? (() => {});
-  const ledger = openLedger(opts.ledgerPath ?? join(dataDir, "ledger.db"));
+  const ledger = openLedger(opts.ledgerPath ?? join(dataDir, "ledger.db"), log);
   const listeners = new Set<(e: CityEvent) => void>();
   const emit = (e: CityEvent) => { for (const fn of listeners) fn(e); };
   const prompts = new Map<string, AgentPrompt>();
@@ -151,8 +151,8 @@ export function createCity(opts: CityOptions) {
       allowedTools: a.kind === "core" ? [...p.tools] : [...new Set([...p.tools, ...a.tools])], tools: toolsFor(agentId), prompt: text, resume: a.session_id, cwd: cwdFor(ticket), onText,
     });
     ledger.updateAgent(agentId, { session_id: result.sessionId, last_active_at: now() });
-    ledger.addCost(agentId, ticket?.id ?? null, result.costUsd, result.tokens ?? 0);
-    emit({ type: "cost.update", agent: agentId, ticket_id: ticket?.id ?? null, usd: result.costUsd, tokens: result.tokens ?? 0, today: ledger.usageToday() });
+    const delta = ledger.recordTurn(agentId, ticket?.id ?? null, result.sessionId, result.costUsd, result.usage ?? {}, result.tokens ?? 0);
+    emit({ type: "cost.update", agent: agentId, ticket_id: ticket?.id ?? null, usd: delta, tokens: result.tokens ?? 0, today: ledger.usageToday() });
     return result;
   }
 

@@ -7,6 +7,9 @@ import { test } from "node:test";
 import { loadPolicy } from "../src/policy.ts";
 import { createCity, type CityEvent } from "../src/runtime.ts";
 import type { Runner, TurnRequest } from "../src/sdk.ts";
+// A real session's total_cost_usd is cumulative; the fakes mimic that.
+const totals = new Map<string, number>();
+const cum = (id: string) => { const v = (totals.get(id) ?? 0) + 0.01; totals.set(id, v); return v; };
 
 type Script = Record<string, (req: TurnRequest) => Promise<string | void> | string | void>;
 const use = (req: TurnRequest, name: string, args: Record<string, unknown>) => req.tools.find((t) => t.name === name)!.handler(args);
@@ -16,7 +19,7 @@ function fakeRunner(script: Script) {
   const runner: Runner = async (req) => {
     calls.push(req);
     const text = (await script[req.agentId]?.(req)) ?? "";
-    return { text, sessionId: `s-${req.agentId}`, costUsd: 0.01 };
+    return { text, sessionId: `s-${req.agentId}`, costUsd: cum(req.agentId) };
   };
   return { runner, calls };
 }
