@@ -237,3 +237,27 @@ test("warm: at most two processes are kept, the least recently used goes", async
   assert.equal(procs.length, 3);
   warm.close();
 });
+
+test("warm: a process in the middle of a turn is never evicted", async () => {
+  let release = () => {};
+  const { queryFn, procs } = fakeProcesses(async function* (text: string) {
+    if (text === "long") await new Promise<void>((r) => { release = r; });
+    yield ok(`to ${text}`, "s");
+  } as any);
+  const warm = createWarmRunner({ policy, env: {}, queryFn });
+  const long = warm.run("a", { ...base, prompt: "long" });
+  await warm.run("b", { ...base, prompt: "1" });
+  warm.warmUp("c", { ...base, prompt: "" });
+  assert.deepEqual(procs.map((p) => p.closed), [false, true, false], "the idle one goes, the busy one stays");
+  release();
+  assert.equal((await long).text, "to long");
+  warm.close();
+});
+
+test("warm: a turn cancelled while it waited is never sent to the model", async () => {
+  const { queryFn, procs } = fakeProcesses(() => [ok("x")]);
+  const warm = createWarmRunner({ policy, env: {}, queryFn });
+  await assert.rejects(warm.run("hud", { ...base, prompt: "gone", signal: AbortSignal.abort() }), (err: any) => err.cancelled === true);
+  assert.deepEqual(procs[0].said, []);
+  warm.close();
+});

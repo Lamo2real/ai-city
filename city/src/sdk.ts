@@ -207,6 +207,7 @@ interface Warm {
   close: () => void;
   session: string | null;
   settling: Promise<void> | null; // an interrupted turn draining to its result
+  busy: boolean; // a turn is running: never evicted
   dead: boolean;
 }
 
@@ -238,11 +239,12 @@ export function createWarmRunner({ policy, env, queryFn = query }: { policy: Pol
       close: () => { w.dead = true; open = false; wake?.(); abort.abort(); },
       session: req.resume ?? null,
       settling: null,
+      busy: false,
       dead: false,
     };
     warms.delete(key);
     warms.set(key, w);
-    for (const [k, other] of warms) if (warms.size > MAX_WARM && other !== w) drop(k, other);
+    for (const [k, other] of warms) if (warms.size > MAX_WARM && other !== w && !other.busy && !other.settling) drop(k, other);
     return w;
   }
 
@@ -264,11 +266,10 @@ export function createWarmRunner({ policy, env, queryFn = query }: { policy: Pol
   }
 
   async function deliver(key: string, w: Warm, req: TurnRequest): Promise<TurnResult> {
+    if (req.signal?.aborted) throw Object.assign(new Error("turn cancelled"), { cancelled: true });
     const turn = turnReader(req, w.session);
     const stopped = new Promise<never>((_, reject) => {
-      const onAbort = () => reject(Object.assign(new Error("turn cancelled"), { cancelled: true }));
-      if (req.signal?.aborted) onAbort();
-      else req.signal?.addEventListener("abort", onAbort, { once: true });
+      req.signal?.addEventListener("abort", () => reject(Object.assign(new Error("turn cancelled"), { cancelled: true })), { once: true });
     });
     stopped.catch(() => {});
     w.send(req.prompt);
@@ -299,6 +300,7 @@ export function createWarmRunner({ policy, env, queryFn = query }: { policy: Pol
       const warm = reusing ? w! : start(key, req);
       warms.delete(key);
       warms.set(key, warm); // most recently used last
+      warm.busy = true;
       try {
         return await deliver(key, warm, req);
       } catch (err) {
@@ -307,6 +309,8 @@ export function createWarmRunner({ policy, env, queryFn = query }: { policy: Pol
         // A parked process can die unseen. Nothing of this turn has happened yet, so a new one can take it.
         if ((err as { unstarted?: boolean }).unstarted && reusing && !isUsageLimit((err as Error).message ?? "")) return this.run(key, req);
         throw asLimit(err);
+      } finally {
+        warm.busy = false;
       }
     },
     warmUp(key, req) {
