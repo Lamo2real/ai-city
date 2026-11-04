@@ -191,14 +191,16 @@ Gaps:
 ## 12. Voice: partial
 
 Evidence:
-- `jarvis/voice/` (Python 3.12, uv): clause aggregator, barge-in handling, long-turn trimming, offline fallback selection, per-turn timing, and a session client for the shared `owner` conversation. Unit tests run without audio (`uv run pytest`). Config in `config/voice.json`.
+- `jarvis/voice/` (Python 3.12, uv): clause aggregator, barge-in handling, a Haiku long-turn summary, offline fallback wired through a Pipecat service switcher, per-turn latency log, and a session client for the shared `owner` conversation. Unit tests run without audio (`uv run pytest`). Config in `config/voice.json`.
+- `jarvis/voice/tests/smoke_graph.py` runs the whole graph on synthetic speech from `say`, with no devices. Measured: about 900 ms to first audio with a scripted Jarvis and Kokoro, 6.4 s on one turn with a real Jarvis.
 - The HUD's existing speech path (`jarvis/bin/jarvis-say` and the server's voice route) is separate from the Pipecat pipeline.
 - Typed and spoken turns share one Jarvis session.
 
 Gaps:
-- `jarvis/voice/jarvis_voice/pipeline.py` has never run. The offline fallback is selected but not wired into the Pipecat graph, and the long-turn summary is a truncation. The README marks every audio check unverified and needing the owner.
-- `config/voice.json` still has a placeholder Cartesia voice id.
-- No latency measurement exists.
+- The pipeline has not run against a microphone, a speaker or Cartesia. The README marks every audio check unverified and needing the owner.
+- `jarvis.cartesia` is not in the Keychain and `config/voice.json` still has a placeholder Cartesia voice id. The owner adds both.
+- First audio misses the 800 ms target: a Jarvis server turn took 5.4 to 10.7 s to its first sentence.
+- No echo cancellation (headphones needed), and backchannels over 300 ms stop playback because MLX Whisper is not streaming.
 - Not checked in this review: whether the old HUD voice path works today.
 
 ## 13. Security: partial

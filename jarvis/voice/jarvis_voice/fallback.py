@@ -1,7 +1,9 @@
 """Which voice engine speaks: Cartesia when the network is there, otherwise
-Kokoro-MLX for English and Piper for Swedish. The log says which."""
+Kokoro for English and Piper for Swedish. The log says which."""
 import re
 import socket
+import threading
+import time
 from collections.abc import Callable
 
 _SV = re.compile(r"[åäö]|\b(och|är|jag|det|inte|för|att|på|som|med|har|till|ett|den|av|kan|vi|du|ni|nu|hej)\b", re.I)
@@ -25,6 +27,24 @@ def network_ok(host: str = "api.cartesia.ai", port: int = 443, timeout: float = 
             return True
     except OSError:
         return False
+
+
+class OnlineProbe:
+    """Keeps the answer current in the background: a turn must never wait on a socket."""
+
+    def __init__(self, check: Callable[[], bool] = network_ok, every_s: float = 2.0):
+        self.check = check
+        self.every_s = every_s
+        self.online = check()
+        threading.Thread(target=self._watch, daemon=True).start()
+
+    def _watch(self) -> None:
+        while True:
+            time.sleep(self.every_s)
+            self.online = self.check()
+
+    def __call__(self) -> bool:
+        return self.online
 
 
 def select_engine(text: str, online: bool) -> tuple[str, str]:

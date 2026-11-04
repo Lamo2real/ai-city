@@ -66,7 +66,7 @@ Everything runs on the owner's Claude subscription through the logged-in `claude
 | Spotify | Spotify Web API via `jarvis/bin/jarvis-spotify` (PKCE, tokens in Keychain) | Set up once: [docs/spotify-setup.md](docs/spotify-setup.md). Falls back to `osascript` for basic controls. |
 | Gmail | Gmail API via `jarvis/bin/jarvis-mail` (full mailbox access, PKCE, tokens in Keychain, audit log) | Set up once: [docs/gmail-setup.md](docs/gmail-setup.md). Jarvis on every channel can then read and send your mail. |
 | Video | `ffmpeg` + YouTube Data API | Add an upload MCP or a small script in Phase 7. |
-| Voice | Cartesia API, Kokoro-MLX, Piper | Python libraries, not MCP. |
+| Voice | Cartesia API, Kokoro, Piper | Python libraries, not MCP. |
 
 ## Try it
 

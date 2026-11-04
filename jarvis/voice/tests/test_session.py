@@ -1,13 +1,14 @@
 """Voice is a client of the same route the HUD's text box uses, with the same session id."""
 import json
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
 from jarvis_voice.session import JarvisSession, SessionError
 
 SEEN = []
+CLOSED = threading.Event()
 
 
 class FakeJarvisServer(BaseHTTPRequestHandler):
@@ -22,6 +23,13 @@ class FakeJarvisServer(BaseHTTPRequestHandler):
         self.end_headers()
         if body["message"] == "fail":
             self.wfile.write(json.dumps({"type": "error", "error": "Jarvis could not get an answer"}).encode() + b"\n")
+            return
+        if body["message"] == "stall":
+            self.wfile.write(json.dumps({"type": "sentence", "text": "Starting."}).encode() + b"\n")
+            self.wfile.flush()
+            CLOSED.clear()
+            self.rfile.read(1)  # returns when the client hangs up
+            CLOSED.set()
             return
         for event in [{"type": "filler", "text": "One moment, sir."}, {"type": "sentence", "text": "Math it is —"}, {"type": "sentence", "text": "eighteen."}, {"type": "done", "reply": "Math it is — eighteen."}]:
             self.wfile.write(json.dumps(event).encode() + b"\n")
@@ -38,7 +46,7 @@ class FakeJarvisServer(BaseHTTPRequestHandler):
 
 @pytest.fixture(scope="module")
 def server():
-    httpd = HTTPServer(("127.0.0.1", 0), FakeJarvisServer)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), FakeJarvisServer)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{httpd.server_address[1]}"
     httpd.shutdown()
@@ -63,3 +71,13 @@ def test_a_server_error_raises(server):
 def test_unprompted_messages_for_this_session_only(server):
     events = JarvisSession(server).events()
     assert next(events) == "The team is done, sir."
+
+
+def test_cancel_drops_the_running_turn_and_the_server_sees_the_hang_up(server):
+    session = JarvisSession(server)
+    turn = session.sentences("stall")
+    assert next(turn) == "Starting."
+    session.cancel()
+    assert list(turn) == []
+    assert CLOSED.wait(2)
+    session.cancel()  # nothing running: harmless
