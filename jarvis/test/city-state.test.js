@@ -1,8 +1,8 @@
 // Events in, scene state out: the City View's reducer and panel mappings, with no DOM and no three.js.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agentRows, ageText, inboxItems, limits, relTime, ticketGroups, agentPanel, agentStatus, applySnapshot, departmentPanel, initialState, layout, propFor, reduce, topBar } from "../hud/city-state.js";
-import { cityEvent, citySnapshot } from "./fixtures/city.js";
+import { agentRows, ageText, applyLive, checkText, courierFor, departmentNames, estUsd, gateStatus, inboxItems, integrationGroups, limits, parkedRows, relTime, ticketGroups, traceLines, workforceGroups, agentPanel, agentStatus, applySnapshot, departmentPanel, initialState, layout, propFor, reduce, topBar } from "../hud/city-state.js";
+import { cityEvent, cityIntegrations, cityParked, citySnapshot, cityTrace, cityWorkforce } from "./fixtures/city.js";
 
 const T0 = 1_000_000;
 const agent = (id, kind, department, parent = "orchestrator", model = "claude-sonnet-5-5", extra = {}) => ({ id, role: id, kind, department, parent, model, tools: [], lifecycle: "persistent", state: "active", created_at: "", last_active_at: "", total_cost_usd: 0.5, ...extra });
@@ -83,7 +83,7 @@ test("panels show real data and dashes for what is unknown", () => {
   assert.equal(p.prop, "laptop");
   assert.equal(agentPanel(s, "nobody"), null);
   const d = departmentPanel(s, "App");
-  assert.deepEqual(d, { name: "App", manager: "app-manager", workers: ["ios-dev"], openTickets: [{ id: "t1", goal: "Build the screen", status: "in_progress", to: "ios-dev" }], todayUsd: 0.9 });
+  assert.deepEqual(d, { name: "App", mission: null, state: null, manager: "app-manager", workers: ["ios-dev"], workerStates: { "ios-dev": "working" }, released: [], openTickets: [{ id: "t1", goal: "Build the screen", status: "in_progress", to: "ios-dev" }], todayUsd: 0.9 });
   assert.equal(departmentPanel(s, "Video").todayUsd, null);
   assert.equal(propFor(agent("cam", "worker", "Video", "video-manager", "claude-sonnet-5-5", { role: "Camera operator" })), "camera");
   assert.equal(propFor(agent("m", "manager", "Video")), null);
@@ -205,4 +205,171 @@ test("relative times", () => {
   assert.equal(relTime(50 * H), "2 d ago");
   assert.equal(ageText(90 * 60_000), "1 h");
   assert.equal(ageText(null), "—");
+});
+
+// ---- What the backend now reports ----
+const dept = (name, extra = {}) => ({ key: name.toLowerCase(), name, mission: `${name} mission`, responsibilities: [], manager_id: null, skills: [], tools: [], autonomy: "standard", state: "active", created_at: new Date(T0 - 5000).toISOString(), updated_at: "", ...extra });
+
+test("departments come from the registry, not from the agents, in the order they were created", () => {
+  const snap = { agents: [agent("ghost", "worker", "Nowhere"), agent("a", "worker", "app")], departments: [dept("Later", { created_at: new Date(T0 - 1000).toISOString() }), dept("App", { created_at: new Date(T0 - 900_000).toISOString() }), dept("Gone", { state: "deleted" })] };
+  const s = applySnapshot(initialState(T0), snap, T0);
+  assert.deepEqual(departmentNames(s), ["App", "Later"], "the registry's list, oldest first; a deleted one and an agent's stray department are not departments");
+  assert.equal(s.agents.a.department, "App", "an agent carries the registry's spelling");
+  assert.ok(Object.values(s.departments).every((d) => d.builtAt <= T0 - 60000), "no construction animation for what already exists");
+  assert.deepEqual(Object.keys(applySnapshot(initialState(T0), { agents: [agent("b", "worker", "Old")] }, T0).departments), ["Old"], "a server from before the registry still draws");
+});
+
+test("department.created and department.updated build, rename, archive and delete", () => {
+  let s = applySnapshot(initialState(T0), { agents: [agent("mgr", "manager", "App")], departments: [dept("App")] }, T0);
+  const builtAt = s.departments.App.builtAt;
+  s = reduce(s, { type: "department.created", department: dept("Video") }, T0 + 1);
+  assert.equal(s.departments.Video.builtAt, T0 + 1, "a new one gets its construction animation");
+  assert.equal(s.feed[0].text, "Department Video created");
+  // A hire can arrive before its department: the building appears once, and the registry entry fills it in.
+  s = reduce(s, { type: "agent.hired", agent: agent("mgr2", "manager", "Ops"), revived: false }, T0 + 2);
+  s = reduce(s, { type: "department.created", department: dept("Ops") }, T0 + 3);
+  assert.equal(s.departments.Ops.builtAt, T0 + 2);
+  assert.equal(s.departments.Ops.mission, "Ops mission");
+  // A rename moves members without an event of their own and keeps the building's slot.
+  s = reduce(s, { type: "department.updated", department: dept("Apps"), previous_key: "app" }, T0 + 4);
+  assert.equal(s.departments.App, undefined);
+  assert.equal(s.departments.Apps.builtAt, builtAt);
+  assert.equal(s.agents.mgr.department, "Apps");
+  assert.equal(s.feed[0].text, "Department App is now Apps");
+  s = reduce(s, { type: "department.updated", department: dept("Video", { state: "archived" }) }, T0 + 5);
+  assert.equal(s.feed[0].text, "Department Video: active → archived");
+  assert.equal(layout(s).buildings.find((b) => b.dept === "Video").archived, true);
+  assert.equal(departmentPanel(s, "Video").state, "archived");
+  s = reduce(s, { type: "department.updated", department: dept("Video", { state: "deleted" }) }, T0 + 6);
+  assert.equal(s.departments.Video, undefined);
+});
+
+test("worker.state is the truth for a worker; every lifecycle word shows as itself", () => {
+  let s = initialState(T0);
+  s = reduce(s, { type: "agent.hired", agent: agent("w", "worker", "IT", "m"), revived: false }, T0);
+  s = reduce(s, { type: "ticket.status", ticket: ticket("t1", "w", "in_progress"), previous: null }, T0);
+  assert.equal(agentStatus(s, "w"), "working", "before the first lifecycle event the ticket decides");
+  const lines = s.feed.length;
+  for (const st of ["requested", "hired", "assigned", "working", "idle"]) {
+    s = reduce(s, { type: "worker.state", id: "w", state: st, previous: null }, T0);
+    assert.equal(agentStatus(s, "w"), st);
+  }
+  assert.equal(s.feed.length, lines, "these show as hire and ticket lines already");
+  for (const st of ["review", "completed", "failed", "paused", "cancelled"]) {
+    s = reduce(s, { type: "worker.state", id: "w", state: st, previous: "working" }, T0);
+    assert.equal(agentStatus(s, "w"), st);
+    assert.equal(s.feed[0].text, `w: working → ${st}`);
+  }
+  s = reduce(s, { type: "worker.state", id: "w", state: "blocked", previous: "working" }, T0);
+  assert.equal(agentStatus(s, "w"), "blocked");
+  s = reduce(s, { type: "ticket.status", ticket: ticket("t1", "w", "waiting_on_owner"), previous: "in_progress" }, T0);
+  assert.equal(agentStatus(s, "w"), "waiting_on_owner", "blocked on the owner keeps its question mark");
+  assert.equal(reduce(s, { type: "worker.state", id: "nobody", state: "working", previous: null }), s, "no agent is made up");
+});
+
+test("a released worker stays findable as history, with its last ticket", () => {
+  let s = applySnapshot(initialState(T0), { agents: [agent("m", "manager", "IT"), agent("w", "worker", "IT", "m", "claude-sonnet-5-5", { lifecycle: "temporary", worker_state: "completed" })], departments: [dept("IT")] }, T0);
+  s = reduce(s, { type: "ticket.status", ticket: ticket("t9", "w", "done"), previous: "in_review" }, T0);
+  s = reduce(s, { type: "worker.state", id: "w", state: "released", previous: "completed" }, T0);
+  s = reduce(s, { type: "agent.retired", id: "w" }, T0);
+  assert.equal(agentStatus(s, "w"), "released");
+  assert.equal(s.feed[0].text, "w released");
+  const d = departmentPanel(s, "IT");
+  assert.deepEqual(d.workers, []);
+  assert.deepEqual(d.released, [{ id: "w", role: "w" }]);
+  assert.equal(agentPanel(s, "w").lastTicket, "t9");
+  assert.equal(agentPanel(s, "w").status, "released");
+});
+
+test("the pause comes from the snapshot and the events, and a reset in the past is no pause", () => {
+  const until = new Date(T0 + 3600_000).toISOString();
+  let s = applySnapshot(initialState(T0), { agents: [], city: { paused_until: until, turns_running: 0, turns_waiting: 3 } }, T0);
+  const g = gateStatus(s, T0);
+  assert.deepEqual([g.known, g.running, g.waiting, g.paused.until, g.paused.inText, g.paused.reason], [true, 0, 3, Date.parse(until), "1 h", null]);
+  assert.equal(g.paused.text.length, 5, "HH:MM");
+  assert.equal(gateStatus(s, T0 + 3600_000).paused, null, "the gate lifts by itself at the reset");
+  s = reduce(s, { type: "city.resumed" }, T0);
+  assert.equal(gateStatus(s, T0).paused, null);
+  assert.equal(gateStatus(s, T0).waiting, 3, "the counters are the last ones the server said");
+  s = reduce(s, { type: "city.paused", until, reason: "You've hit your 5-hour limit" }, T0);
+  assert.equal(gateStatus(s, T0).paused.reason, "You've hit your 5-hour limit");
+  assert.match(s.feed[0].text, /City paused until \d\d:\d\d: You've hit/);
+  s = applyLive(s, { city: { paused_until: until, turns_running: 1, turns_waiting: 2 } }, T0);
+  assert.deepEqual([gateStatus(s, T0).running, gateStatus(s, T0).paused.reason], [1, "You've hit your 5-hour limit"], "a refresh keeps the reason only the event carried");
+  const fresh = reduce(initialState(T0), { type: "city.paused", until, reason: "x" }, T0);
+  assert.equal(gateStatus(fresh, T0).running, null, "never a made-up zero");
+  assert.deepEqual([gateStatus(initialState(T0), T0).known, gateStatus(initialState(T0), T0).paused], [false, null], "an old server says nothing");
+});
+
+test("parked tickets leave the running board, and come back or vanish by the ticket events", () => {
+  const [p1, p2] = cityParked(T0);
+  let s = applySnapshot(initialState(T0), { agents: [], tickets: [ticket("t1", "w", "in_progress")], parked: [p2, p1] }, T0);
+  assert.deepEqual(parkedRows(s, T0).map((t) => t.id), ["t-pk2", "t-pk1"], "oldest first");
+  assert.equal(parkedRows(s, T0)[0].ageMs, 50 * 3600_000);
+  s = reduce(s, { type: "ticket.status", ticket: { ...ticket("t1", "w", "parked") }, previous: "in_progress" }, T0);
+  s = reduce(s, { type: "tickets.parked", ids: ["t1", "unknown"] }, T0);
+  assert.equal(s.tickets.t1, undefined, "not counted as running");
+  assert.equal(s.parked.t1.status, "parked");
+  assert.equal(s.parked.unknown, undefined, "an id alone is no ticket: the next snapshot brings it");
+  assert.equal(s.feed[0].text, "2 stale tickets parked; they wait for you");
+  s = reduce(s, { type: "ticket.status", ticket: { ...p1, status: "in_progress" }, previous: "parked" }, T0);
+  assert.equal(s.parked["t-pk1"], undefined);
+  assert.equal(s.tickets["t-pk1"].status, "in_progress", "resumed");
+  s = reduce(s, { type: "ticket.status", ticket: { ...p2, status: "cancelled" }, previous: "parked" }, T0);
+  assert.equal(s.parked["t-pk2"], undefined);
+  assert.equal(s.tickets["t-pk2"], undefined, "cancelled");
+  assert.deepEqual(Object.keys(applyLive(s, { parked: [p1] }, T0).parked), ["t-pk1"], "the snapshot is the list");
+  // Only a ticket.status arrived before the parked event: the same answer.
+  const only = reduce(applySnapshot(initialState(T0), { agents: [], tickets: [ticket("t2", "w", "open")] }, T0), { type: "tickets.parked", ids: ["t2"] }, T0);
+  assert.equal(only.parked.t2.status, "parked");
+});
+
+test("turn.failed and the question event go to the feed, once", () => {
+  let s = reduce(initialState(T0), { type: "turn.failed", agent: "", ticket_id: null, error: "overloaded", retrying: true }, T0);
+  assert.equal(s.feed[0].text, "A turn failed, retrying: overloaded");
+  s = reduce(s, { type: "turn.failed", agent: "w", ticket_id: "t1", error: "boom", retrying: false }, T0);
+  assert.equal(s.feed[0].text, "w failed: boom");
+  const question = { ticket_id: "t1", asked_by: "w", path: "M › W", questions: [{ text: "Which?" }] };
+  s = reduce(s, { type: "question.asked", id: "q1", question, ticket_id: "t1" }, T0);
+  const lines = s.feed.length;
+  assert.equal(reduce(s, { type: "question", id: "q1", question, ticket_id: "t1" }, T0), s, "the same question on its way to the owner");
+  s = reduce(s, { type: "question", id: "q2", question, ticket_id: "t1" }, T0);
+  assert.equal(topBar(s).questionsWaiting, 2, "re-sent after a restart: still known");
+  assert.equal(s.feed.length, lines + 1);
+});
+
+test("a courier only moves for a real hand-over between two agents", () => {
+  const t = (status, from = "m", to = "w") => ({ ...ticket("t1", to, status), from });
+  assert.deepEqual(courierFor({ type: "ticket.status", ticket: t("open"), previous: null }), { from: "m", to: "w", kind: "ticket" });
+  assert.deepEqual(courierFor({ type: "ticket.status", ticket: t("done"), previous: "in_review" }), { from: "w", to: "m", kind: "result" });
+  assert.deepEqual(courierFor({ type: "ticket.status", ticket: t("failed"), previous: "in_progress" }), { from: "w", to: "m", kind: "result" });
+  assert.equal(courierFor({ type: "ticket.status", ticket: t("in_progress"), previous: "open" }), null);
+  assert.equal(courierFor({ type: "ticket.status", ticket: t("cancelled"), previous: "open" }), null);
+  assert.equal(courierFor({ type: "ticket.status", ticket: t("open", "w"), previous: null }), null, "to itself");
+  assert.equal(courierFor({ type: "agent.hired" }), null);
+});
+
+test("every dollar figure is marked as an estimate and an unknown stays a dash", () => {
+  assert.equal(estUsd(1.726), "est. $1.73");
+  assert.equal(estUsd(0.0314, 3), "est. $0.031");
+  assert.equal(estUsd(null), "—");
+  assert.equal(estUsd(undefined), "—");
+});
+
+test("the panels' readers: workforce groups, what an integration checked, a ticket's story", () => {
+  const g = workforceGroups(cityWorkforce());
+  assert.deepEqual(g.current.map((w) => w.id), ["ios-dev", "ads-writer"]);
+  assert.deepEqual(g.released.map((w) => w.id), ["old-writer"]);
+  assert.deepEqual(workforceGroups(null), { current: [], released: [] });
+  const checks = cityIntegrations(T0).integrations.map((i) => checkText(i.check));
+  assert.deepEqual(checks, ["gh auth status", "port 18789", "Keychain item jarvis.meta exists", "which blender", null]);
+  assert.equal(checkText({ mcp: "figma" }), "claude mcp list: figma");
+  assert.deepEqual(integrationGroups(cityIntegrations(T0).integrations).map((x) => [x.category, x.items.length]), [["development", 2], ["marketing", 1], ["video", 2]]);
+  assert.deepEqual(integrationGroups(undefined), []);
+  const lines = traceLines(cityTrace(T0));
+  assert.deepEqual(lines.map((l) => l.text), [
+    "app-manager sent ios-dev: Build the habit tracker screen", "ios-dev: open → in_progress", "ios-dev: a turn of 2100 tokens, est. $0.031",
+    "ios-dev failed, retrying: overloaded", "App Manager › iOS Developer asked: SwiftData?",
+  ], "the question is told once");
+  assert.deepEqual(traceLines(undefined), []);
 });

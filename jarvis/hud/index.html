@@ -168,22 +168,59 @@
     clip-path:polygon(0 8px,8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%)}
   .cityui h3{font-family:Orbitron,sans-serif;font-weight:500;font-size:10px;letter-spacing:.22em;color:var(--o2);margin:0 0 6px}
   .cityui .mute{color:var(--mute)}
-  #citytop{top:10px;left:50%;transform:translateX(-50%);display:flex;gap:18px;padding:8px 16px;white-space:nowrap;max-width:calc(100% - 20px);overflow-x:auto}
+  #citytop{top:10px;left:50%;transform:translateX(-50%);display:flex;gap:18px;padding:8px 16px;white-space:nowrap;max-width:calc(100% - 360px);overflow-x:auto}
   #citytop .stat{display:flex;flex-direction:column;align-items:flex-start}
   #citytop .stat .k{color:var(--mute);letter-spacing:.15em;font-size:9px}
   #citytop .stat b{font-family:Orbitron,sans-serif;font-size:13px;color:var(--txt)}
   #citydepts{top:10px;right:10px;width:150px;padding:10px;display:flex;flex-direction:column;gap:4px;max-height:calc(100% - 180px);overflow-y:auto}
   #citydepts .dept{text-align:left;background:transparent;border:0;border-left:3px solid var(--line);color:var(--txt);padding:5px 8px;cursor:pointer;font:inherit}
   #citydepts .dept:hover,#citydepts .dept:focus-visible{background:rgba(255,106,26,.12);outline:none}
+  #citydepts .dept.off{color:var(--mute)}
+  #citydepts h3:not(:first-child){margin-top:10px}
   #cityfeed{left:10px;bottom:74px;width:300px;padding:10px;max-height:40%;overflow-y:auto}
   #cityfeed .line{display:flex;gap:8px;padding:2px 0;color:var(--txt)}
   #cityfeed .line .t{color:var(--mute);flex:none}
   #cityfeed .line.fail{color:var(--bad)}#cityfeed .line.pass,#cityfeed .line.done{color:var(--ok)}#cityfeed .line.question{color:#ffd21e}
   #cityinbox{right:10px;bottom:74px;width:300px;padding:10px;display:flex;align-items:center;justify-content:space-between;gap:10px}
-  #cityinbox button{min-height:40px;padding:0 12px;background:var(--o);color:#1a0800;border:0;font:inherit;letter-spacing:.1em;cursor:pointer}
+  #cityinbox button,#cityparked button{min-height:40px;padding:0 12px;background:var(--o);color:#1a0800;border:0;font:inherit;letter-spacing:.1em;cursor:pointer}
+  #cityparked{right:10px;bottom:136px;width:300px;padding:10px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+  #cityparked button{flex:none;white-space:nowrap}
+  #cityparked[hidden],#citypaused[hidden],#cityerror[hidden]{display:none}
   #citypanel input{width:100%;background:rgba(0,0,0,.4);border:1px solid var(--line);color:var(--txt);font:inherit;padding:5px 6px}
   #citypanel button[type=submit],#citypanel .wide{margin-top:4px;background:var(--o);color:#1a0800;border:0;font:inherit;padding:5px 10px;cursor:pointer;letter-spacing:.1em}
-  #citypanel{top:10px;left:10px;width:320px;max-height:calc(100% - 100px);overflow-y:auto;padding:12px}
+  /* Under the top bar, so the numbers and the estimate label stay readable while a panel is open. */
+  #citypanel{top:62px;left:10px;width:min(320px,calc(100% - 20px));max-height:calc(100% - 152px);overflow-y:auto;padding:12px;z-index:2;scrollbar-width:thin;scrollbar-color:var(--dim) transparent}
+  #citypanel[data-kind=workforce],#citypanel[data-kind=costs],#citypanel[data-kind=health],#citypanel[data-kind=parked],#citypanel[data-kind=story]{width:min(460px,calc(100% - 20px));background:rgba(7,3,2,.94)}
+  #citypanel[data-kind=costs] .row .k,#citypanel[data-kind=health] .row .k{width:140px}
+  #citypanel .hint{color:var(--mute);margin:6px 0;line-height:1.4}
+  #citypanel .costnote{color:var(--txt)}
+  #citypanel .saynote:empty{display:none}
+  #citypanel .saynote{color:var(--txt)}
+  #citypanel .act{min-height:32px;padding:0 10px;background:transparent;color:var(--txt);border:1px solid var(--line);font:inherit;letter-spacing:.05em;cursor:pointer}
+  #citypanel .act:hover{background:rgba(255,106,26,.12)}
+  #citypanel .act.main{background:var(--o);color:#1a0800;border-color:var(--o)}
+  #citypanel .act.sure{background:var(--bad);color:#fff;border-color:var(--bad)}
+  #citypanel .act:disabled{opacity:.5;cursor:default}
+  #citypanel .act.back{margin-bottom:6px}
+  #citypanel .link{background:none;border:0;padding:0;font:inherit;color:var(--o2);cursor:pointer;text-decoration:underline;text-underline-offset:2px;text-align:left;word-break:break-word}
+  #citypanel button:focus-visible{outline:2px solid var(--o2);outline-offset:2px}
+  #citypanel .acts{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+  #citypanel .withact{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  #citypanel .wk{padding:6px 0;border-bottom:1px dashed rgba(255,106,26,.15);line-height:1.4;word-break:break-word}
+  #citypanel .nowrap{white-space:nowrap}
+  #citypanel .wkhead{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  #citypanel .tag{flex:none;font-size:10px;letter-spacing:.1em;padding:0 6px;border:1px solid var(--dim);color:var(--mute)}
+  #citypanel .tag.good{border-color:var(--ok);color:var(--ok)}
+  #citypanel .tag.warn{border-color:#ffd21e;color:#ffd21e}
+  #citypanel .tag.bad{border-color:var(--bad);color:#ff8a7f}
+  #citypanel table.costs{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  #citypanel table.costs th{color:var(--mute);font-weight:normal;text-align:right;padding:2px 0 2px 8px}
+  #citypanel table.costs td{text-align:right;padding:2px 0 2px 8px;border-top:1px dashed rgba(255,106,26,.15);white-space:nowrap}
+  #citypanel table.costs td:first-child,#citypanel table.costs th:first-child{text-align:left;padding-left:0;white-space:normal;word-break:break-word}
+  #citypanel .story .line{display:flex;gap:8px;line-height:1.4;word-break:break-word}
+  #citypanel .story .t{color:var(--mute);flex:none}
+  #citypanel .legend{display:grid;grid-template-columns:max-content 1fr;gap:2px 10px}
+  #citypanel .legend dt{color:var(--txt)}#citypanel .legend dd{color:var(--mute)}
   #citypanel header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
   #citypanel header h3{margin:0;font-size:12px}
   #citypanel header .ibtn{width:28px;height:28px;font-size:16px}
@@ -194,11 +231,29 @@
   #citypanel h4{font-size:10px;letter-spacing:.2em;color:var(--o2);margin:10px 0 4px}
   #citypanel ul{list-style:none;margin:0;padding:0}#citypanel li{padding:2px 0;color:var(--txt)}
   #citypanel .instruct{margin-top:10px;display:flex;flex-direction:column;gap:4px}
-  #cityerror{position:absolute;left:50%;top:60px;transform:translateX(-50%);max-width:calc(100% - 20px);color:#fff;background:var(--bad);font-size:12px;letter-spacing:.05em;padding:6px 12px;text-align:center}
+  #cityalerts{position:absolute;left:50%;top:60px;transform:translateX(-50%);width:max-content;max-width:calc(100% - 360px);display:flex;flex-direction:column;gap:6px;z-index:1}
+  /* An open panel takes the left side: the banner moves beside it instead of going under it. */
+  @media (min-width:1100px){#city:has(#citypanel:not([hidden])) #cityalerts{left:490px;right:180px;transform:none;width:auto;max-width:none}}
+  #cityerror{color:#fff;background:var(--bad);font-size:12px;letter-spacing:.05em;padding:6px 12px;text-align:center}
+  #citypaused{position:static;padding:8px 14px;font-size:12px;line-height:1.4;color:var(--txt);background:rgba(40,26,4,.92);border-color:#ffd21e}
+  #citypaused b{color:#ffd21e;font-weight:normal}
+  #citypaused .why{color:var(--mute);margin-top:2px}
   .srlist{position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden}
   .srlist:focus-within{position:absolute;left:10px;bottom:120px;width:auto;height:auto;background:rgba(7,3,2,.9);padding:8px;z-index:3}
   @media (max-width:1200px){#cityfeed,#cityinbox{width:240px}#citydepts{width:120px}}
-  @media (max-width:800px){#citydepts{display:none}#cityfeed,#cityinbox{width:calc(50% - 15px);max-height:30%}}
+  /* Phone width: the top bar and a row of departments and records across the top, the alerts under them. */
+  @media (max-width:800px){
+    #citytop{left:10px;right:10px;transform:none;max-width:none}
+    #citydepts{top:62px;left:10px;right:10px;width:auto;max-height:none;flex-direction:row;overflow-x:auto;padding:6px}
+    #citydepts h3{display:none}
+    #citydepts .dept{flex:none;min-height:40px;white-space:nowrap}
+    #cityalerts{top:124px;left:10px;right:10px;transform:none;width:auto;max-width:none}
+    #cityfeed,#cityinbox,#cityparked{width:calc(50% - 15px);max-height:30%}
+    #cityinbox,#cityparked{flex-direction:column;align-items:stretch}
+    #cityparked{bottom:190px}
+    #citypanel{top:10px;max-height:calc(100% - 96px)} /* a phone has no room beside it: the panel takes the screen until closed */
+    #citypanel .act{min-height:40px}
+  }
   .core.panel{grid-area:auto;background:none;border:0;clip-path:none;padding:0;overflow:hidden;min-width:0;min-height:0}
   .core.panel:before{display:none}
   .hud-stat,.corelabel{display:none}
@@ -341,9 +396,13 @@
     <section id="city" tabindex="-1" aria-label="City view">
       <canvas aria-label="Isometric city of the agents"></canvas>
       <div class="cityui" id="citytop" role="status"></div>
-      <div id="cityerror" role="alert" hidden></div>
+      <div id="cityalerts">
+        <div id="cityerror" role="alert" hidden></div>
+        <div class="cityui" id="citypaused" role="status" hidden></div>
+      </div>
       <nav class="cityui" id="citydepts" aria-label="Departments"></nav>
       <div class="cityui" id="cityfeed" aria-live="polite"></div>
+      <div class="cityui" id="cityparked" aria-live="polite" hidden><span id="cityparkedsum"></span><button type="button" id="cityparkedbtn">Review parked</button></div>
       <div class="cityui" id="cityinbox" aria-live="polite"><span id="citysum">Nothing waiting.</span><button type="button" id="cityopeninbox">Open Needs you</button></div>
       <aside class="cityui" id="citypanel" role="dialog" aria-label="Details" hidden></aside>
       <nav id="citylist" class="srlist" aria-label="Buildings and agents (keyboard)"></nav>
@@ -923,7 +982,7 @@ load();
 </script>
 <script type="module">
 /* Status board: limits, tickets and agents of the AI City, from GET /api/city and the shared event stream. Text goes in with textContent. */
-import { applySnapshot, reduce, initialState, limits, ticketGroups, agentRows, relTime, ageText } from "./city-state.js";
+import { COST_NOTE, estUsd, applySnapshot, reduce, initialState, limits, ticketGroups, agentRows, relTime, ageText } from "./city-state.js";
 const $ = (id) => document.getElementById(id);
 const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 let state = initialState(), streamLost = false, timer = null, costTimer = null;
@@ -942,7 +1001,7 @@ function renderLimits() {
   const legacyTotal = L.agents.max !== null;
   strip.append(legacyTotal ? lim("AGENTS ACTIVE", of(L.agents.active, L.agents.max), L.agents.active >= L.agents.max) : lim(L.agentsLabel, `${L.agents.active} active`),
     withNote(lim("WORKERS PER MANAGER (MOST)", L.workersPerManager.max === null ? String(L.workersPerManager.largest) : of(L.workersPerManager.largest, L.workersPerManager.max), L.workersPerManager.max !== null && L.workersPerManager.largest >= L.workersPerManager.max), L.workersPerManager.max));
-  if (L.usage) { const u = lim("USAGE TODAY", `${L.usage.turns} turns · ${Number(L.usage.tokens).toLocaleString("en-US")} tokens`); u.append(mk("span", "", `${fmtUsd(L.usage.usd)} (SDK cost estimate)`)); strip.append(u); } else strip.append(lim("USAGE TODAY", "—"));
+  if (L.usage) { const u = lim("USAGE TODAY", `${L.usage.turns} turns · ${Number(L.usage.tokens).toLocaleString("en-US")} tokens`); u.append(mk("span", "", `${estUsd(L.usage.usd)} (API list price, not a charge)`)); strip.append(u); } else strip.append(lim("USAGE TODAY", "—"));
   parts.push(strip);
   if (L.agentsByDepartment.length) {
     const ha = mk("h4", "", "AGENTS PER DEPARTMENT" + (L.agentCapPerDepartment === null ? " · cap: unknown until Jarvis restarts" : "")); ha.style.cssText = "font-size:10px;letter-spacing:.2em;color:var(--o2);margin:4px 0";
@@ -953,11 +1012,11 @@ function renderLimits() {
       top.append(name, mk("span", "amt", of(d.active, d.cap))); row.append(top); parts.push(row);
     }
   }
-  const h = mk("h4", "", "SPEND TODAY PER DEPARTMENT" + (L.departments[0]?.cap != null ? ` (cap ${fmtUsd(L.departments[0].cap)} each)` : " · cap: unknown until Jarvis restarts")); h.style.cssText = "font-size:10px;letter-spacing:.2em;color:var(--o2);margin:4px 0";
-  parts.push(h);
+  const h = mk("h4", "", "ESTIMATED SPEND TODAY PER DEPARTMENT" + (L.departments[0]?.cap != null ? ` (cap ${fmtUsd(L.departments[0].cap)} each)` : " · cap: unknown until Jarvis restarts")); h.style.cssText = "font-size:10px;letter-spacing:.2em;color:var(--o2);margin:4px 0";
+  parts.push(h, mk("div", "mute costnote", COST_NOTE));
   if (!L.departments.length) parts.push(mk("div", "mute", "No spend recorded today."));
   for (const d of L.departments) {
-    const row = mk("div", d.over ? "dept over" : "dept"), top = mk("div", "top2"), amt = mk("span", "amt", d.cap === null ? `${fmtUsd(d.usd)} today` : fmtUsd(d.usd));
+    const row = mk("div", d.over ? "dept over" : "dept"), top = mk("div", "top2"), amt = mk("span", "amt", d.cap === null ? `${estUsd(d.usd)} today` : estUsd(d.usd));
     const name = mk("span", "", d.dept); if (d.over) name.append(mk("span", "overtag", "OVER CAP"));
     top.append(name, amt); row.append(top);
     if (d.pct !== null) { const bar = mk("div", "bar"); const i = mk("i", d.over ? "over" : ""); i.style.width = `${d.pct}%`; bar.append(i); row.append(bar); }
