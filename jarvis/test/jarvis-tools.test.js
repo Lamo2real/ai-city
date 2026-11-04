@@ -10,7 +10,7 @@ import { loadCorePrompt } from "city";
 const DIR = fileURLToPath(new URL("../../agents/core/", import.meta.url));
 
 // Every Bash entry a core agent may hold: dedicated CLIs and fixed read-only subcommands, exactly.
-export const ALLOWED_BASH = new Set(["Bash(jarvis-spotify:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(terraform show:*)"]);
+export const ALLOWED_BASH = new Set(["Bash(jarvis-spotify:*)", "Bash(jarvis-mail:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(terraform show:*)"]);
 const RUNNERS = /^(osascript|open|sh|bash|zsh|dash|ksh|fish|node|nodejs|deno|bun|npx|npm|python[\d.]*|ruby|perl|php|lua|curl|wget|env|xargs|sudo|eval|exec|osacompile|swift|jxa)$/i;
 
 // Pass this checkout's agents dir: the `city` package may be linked from another worktree.
@@ -36,8 +36,8 @@ for (const file of files) {
   });
 }
 
-test("jarvis keeps jarvis-spotify and its prompt no longer mentions osascript", () => {
-  assert.ok(toolsOf("jarvis.md").includes("Bash(jarvis-spotify:*)"));
+test("jarvis holds exactly the two dedicated CLIs and no shell, and its prompt never mentions osascript", () => {
+  assert.deepEqual(toolsOf("jarvis.md").filter((t) => /^Bash\b/.test(t)).sort(), ["Bash(jarvis-mail:*)", "Bash(jarvis-spotify:*)"]);
   assert.doesNotMatch(readFileSync(join(DIR, "jarvis.md"), "utf8"), /osascript/i);
 });
 

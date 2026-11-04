@@ -289,18 +289,26 @@ test("approval survives a restart through the mode-600 file", () => {
   assert.equal(b.redeem(ID, H).approved, true);
 });
 
-test("the HUD button route approves by id on localhost only", async () => {
+test("POST /api/mail/confirm does not exist, and no header-less local call can approve", async () => {
   const m = mailCli();
-  const held = await m.out(businessSend("Button send"));
-  assert.equal((await http("POST", "/api/mail/confirm", { body: { confirm_id: "mail-nope" } })).status, 409);
-  assert.equal((await http("POST", "/api/mail/confirm", { body: { confirm_id: held.json.confirm_id } })).status, 200);
-  assert.equal((await m.out(businessSend("Button send"))).json.ok, true);
-  assert.equal(lastAudit().approval_channel, "hud-button");
-  // Not reachable through the tailnet or LAN handlers.
+  const held = await m.out(businessSend("No button yet"));
+  const id = held.json.confirm_id;
+  assert.equal((await http("POST", "/api/mail/confirm", { body: { confirm_id: id } })).status, 404);
+  assert.equal((await http("POST", "/api/mail/confirm", { body: { confirm_id: id }, headers: bearer })).status, 404, "not even with the token");
+  const hash = draftHash({ to: ["boss@acme.se"], cc: [], bcc: [], subject: "Quote", body: "No button yet" });
+  for (const [method, path, body] of [["POST", "/api/mail/pending", { confirm_id: id, draft_hash: hash, summary: {} }], ["POST", "/api/mail/redeem", { confirm_id: id, draft_hash: hash }], ["GET", `/api/mail/approval/${id}?hash=${hash}`], ["POST", "/api/mail/approve", { confirm_id: id }], ["POST", `/api/mail/approval/${id}`, {}]]) {
+    const r = await http(method, path, { body });
+    assert.ok([401, 404].includes(r.status), `${method} ${path} → ${r.status}`);
+  }
+  assert.equal(app.mailGate.approval(id, hash).approved, false);
+  assert.equal((await m.out(businessSend("No button yet"))).json.needs_owner_confirmation, true);
+  assert.equal(m.sends().length, 0);
+  // Not reachable through the tailnet or LAN handlers either.
   let status = 0;
   const r = { writeHead(s) { status = s; }, end() {}, setHeader() {} };
-  await app.handleTailnet({ method: "POST", url: "/api/mail/confirm", headers: { host: "x.ts.net" } }, r, { host: "x.ts.net", login: "o@x.com" });
+  await app.handleTailnet({ method: "POST", url: "/api/mail/pending", headers: { host: "x.ts.net" } }, r, { host: "x.ts.net", login: "o@x.com" });
   assert.equal(status, 403);
+  await say("cancel the email");
 });
 
 test("approval records go to the audit log without the draft", async () => {
@@ -333,4 +341,56 @@ test("contacts: list, add personal / business, move, remove; mode 600; bad input
   assert.equal((await m.out(["contacts", "add", "mum@yahoo.se"])).json.error, "BAD_REQUEST");
   assert.equal((await m.out(["contacts", "add", "mum@yahoo.se", "--personal", "--business"])).json.error, "BAD_REQUEST");
   assert.equal((await m.out(["contacts", "add", "not-an-address", "--personal"])).json.error, "BAD_REQUEST");
+});
+
+// ---- the owner hears the server's summary ----
+// A server whose "model" registers draft B on the gate during its turn while describing something else.
+async function holdingServer(modelText) {
+  let srv;
+  srv = createServer({ booqyDir: dir, dataDir: mkdtempSync(join(tmpdir(), "jarvis-ab-")), port: 0, getState: async () => ({}), speak: async () => null, keychain, mailGateOptions: { auditPath },
+    chat: async () => {
+      srv.mailGate.register({ confirm_id: "mail-draftbbbbbbbbbbbbbbbbbb", draft_hash: "a".repeat(64), summary: { to: ["boss@acme.se"], cc: ["cc@acme.se"], bcc: [], subject: "Quote", first_lines: ["Draft B text", "second"], why: ["boss@acme.se → company domain (acme.se)"] } });
+      return modelText;
+    } });
+  await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  const port2 = srv.address().port;
+  const post = (path, body) => new Promise((resolve, reject) => {
+    const req = request({ host: "127.0.0.1", port: port2, path, method: "POST", headers: { Host: `127.0.0.1:${port2}`, "Content-Type": "application/json" } }, (r) => { let d = ""; r.on("data", (c) => { d += c; }); r.on("end", () => resolve({ status: r.statusCode, text: d })); });
+    req.on("error", reject);
+    req.end(JSON.stringify(body));
+  });
+  return { srv, post };
+}
+
+test("the model describes draft A, the server registered draft B: the reply carries B", async () => {
+  const { srv, post } = await holdingServer("I have drafted a friendly note to alice@family.org about the weekend.");
+  const reply = JSON.parse((await post("/api/chat", { message: "email my friend", sessionId: "ab-1" })).text).reply;
+  assert.match(reply, /alice@family\.org/, "the model's own words are still there");
+  assert.match(reply, /Email to boss@acme\.se; cc cc@acme\.se, subject "Quote", starts: Draft B text, held because boss@acme\.se → company domain \(acme\.se\)\. Say exactly: I confirm the email, or: Cancel the email\./);
+  const again = JSON.parse((await post("/api/chat", { message: "any news", sessionId: "ab-1" })).text).reply;
+  assert.ok(!again.includes("held because"), "an unchanged pending send is not announced twice");
+  const approved = JSON.parse((await post("/api/chat", { message: "I confirm the email", sessionId: "ab-1" })).text).reply;
+  assert.match(approved, /Approved: email to boss@acme\.se; cc cc@acme\.se, subject "Quote"\./);
+  srv.close();
+});
+
+test("the stream route appends the server's hold notice too", async () => {
+  const { srv, post } = await holdingServer("All set, I sent it to somebody else.");
+  const text = (await post("/api/chat/stream", { message: "send it", sessionId: "s-1" })).text;
+  const done = text.trim().split("\n").map((l) => JSON.parse(l)).find((e) => e.type === "done");
+  assert.match(done.reply, /Email to boss@acme\.se; cc cc@acme\.se, subject "Quote", starts: Draft B text, held because/);
+  assert.match(text, /"type":"sentence","text":"Email to boss@acme\.se/);
+  srv.close();
+});
+
+// ---- address canonicalisation ----
+test("list lookups canonicalise: +tags, gmail dots and googlemail", () => {
+  const biz = { personal: [], business: ["pal@gmail.com"] };
+  for (const a of ["p.al+x@gmail.com", "PAL@googlemail.com", "Pal <p.a.l+news@gmail.com>"]) assert.match(classify([a], { contacts: biz }).why[0] ?? "", /business list/, a);
+  const pers = { personal: ["pal@gmail.com", "@googlemail.com"], business: [] };
+  assert.equal(classify(["p.al+x@gmail.com"], { contacts: pers, context: "invoice" }).business, false, "personal entry matches the same person");
+  assert.equal(classify(["anyone@gmail.com"], { contacts: { personal: ["@googlemail.com"], business: [] }, context: "invoice" }).business, false, "@googlemail.com covers gmail.com");
+  assert.equal(classify(["x+tag@acme.se"], { contacts: { personal: ["x@acme.se"], business: [] } }).business, false, "+tag stripped on any domain");
+  assert.equal(classify(["pal2@gmail.com"], { contacts: biz }).business, false, "a different person is not caught");
+  assert.equal(classify(["O.wner+x@gmail.com"], { own: ["owner@gmail.com"], context: "invoice" }).business, false, "own address, canonicalised");
 });

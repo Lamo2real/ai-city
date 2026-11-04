@@ -62,6 +62,8 @@ Everything works without asking **except sending** (send, reply, forward, send-d
 4. A company or custom domain (anything that isn't Gmail, iCloud, Outlook/Hotmail/Live, Yahoo, Proton, GMX, AOL and similar): held. A consumer address is held too when the thread or the draft reads like business (invoice, contract, quote, offer, a title like CEO, a company suffix like AB, Ltd or Inc).
 5. Not sure: held.
 
+Business-wording detection is fail-safe: it can only hold a send, never release one. Its signal words are English and Swedish (invoice, contract, quote, offer, faktura, avtal, offert, and titles and company suffixes like CEO, VD, AB, Ltd, Inc). Addresses are compared in canonical form for the lists, so `p.al+news@googlemail.com` is the same person as `pal@gmail.com`.
+
 If anything is held, nothing is sent. Jarvis tells you the draft in plain words (who, subject, the first lines, and why it was held) and asks you to reply **"I confirm the email"** to send it, or **"Cancel the email"**.
 
 - **Only you can approve.** The Jarvis server watches for your own message, exactly that phrase, on the HUD, by voice, in the Jarvis app or on Telegram (not on the plain-HTTP LAN page). The model and `jarvis-mail` cannot approve: there is no command or flag for it. An approval is for that exact draft (change a word and it needs a new one), works once, and lapses after 30 minutes. Only one email waits at a time: a newer one replaces the older.

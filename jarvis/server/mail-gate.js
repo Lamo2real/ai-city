@@ -13,11 +13,28 @@ const MAX_BODY = 8 * 1024;
 const ID_RE = /^[\w-]{8,64}$/;
 const HASH_RE = /^[0-9a-f]{64}$/;
 // Channels that may approve. The plain-HTTP LAN browser never can, as with merges.
-const CAN_APPROVE = new Set(["hud", "app", "telegram", "hud-button"]);
+const CAN_APPROVE = new Set(["hud", "app", "telegram"]);
 
 const normalise = (text) => String(text ?? "").toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ").trim();
 export const isEmailConfirm = (text) => normalise(text) === "i confirm the email";
 export const isEmailCancel = (text) => normalise(text) === "cancel the email";
+
+const oneLine = (v, max) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+
+// What the owner is told, built from the summary jarvis-mail REGISTERED, never from the model's words.
+export function describeEmail(summary) {
+  const who = [
+    (summary.to ?? []).join(", "),
+    summary.cc?.length ? `cc ${summary.cc.join(", ")}` : "",
+    summary.bcc?.length ? `bcc ${summary.bcc.join(", ")}` : "",
+  ].filter(Boolean).join("; ");
+  return `email to ${oneLine(who, 300)}, subject "${oneLine(summary.subject, 200)}"`;
+}
+export function holdNotice(item) {
+  const first = oneLine(item.summary.first_lines?.[0], 160);
+  const why = (item.summary.why ?? []).map((w) => oneLine(w, 160)).join("; ") || "it needs your approval";
+  return `Email to ${describeEmail(item.summary).slice("email to ".length)}${first ? `, starts: ${first}` : ""}, held because ${why}. Say exactly: I confirm the email, or: Cancel the email.`;
+}
 
 export function createMailGate({ dataDir, keychain, logger = () => {}, now = Date.now, ttlMs = TTL_MS, auditPath }) {
   const file = join(dataDir, "mail-pending.json");
@@ -78,18 +95,20 @@ export function createMailGate({ dataDir, keychain, logger = () => {}, now = Dat
     }
     if (!CAN_APPROVE.has(channel)) return { reply: "An email to a business contact can only be confirmed on the Mac, in the Jarvis app or on Telegram, sir. Nothing was sent." };
     if (!waiting.length) return { reply: "No email is waiting for confirmation, sir." };
-    approve(waiting[0], channel);
-    return { forward: "[Jarvis server] The owner approved the pending email. Send it now by running exactly the same jarvis-mail command again." };
+    const item = waiting[0];
+    approve(item, channel);
+    return {
+      forward: "[Jarvis server] The owner approved the pending email. Send it now by running exactly the same jarvis-mail command again.",
+      note: `Approved: ${describeEmail(item.summary)}.`,
+    };
   }
 
-  // For the future inbox SEND button: approve by id (localhost HUD route only).
-  function confirmById(confirm_id) {
-    prune();
-    const it = items.get(confirm_id);
-    if (!it || it.status !== "pending") return false;
-    approve(it, "hud-button");
-    return true;
-  }
+  // Which sends are waiting now, and the server-built notice for any that appeared since `before`.
+  const snapshot = () => new Set(active("pending").map((i) => i.confirm_id));
+  const newHold = (before) => {
+    const fresh = active("pending").filter((i) => !before?.has(i.confirm_id));
+    return fresh.length ? holdNotice(fresh[fresh.length - 1]) : null;
+  };
 
   // One atomic step for jarvis-mail: approved for exactly this hash? Then it is used up, whatever happens next.
   function redeem(confirm_id, draft_hash) {
@@ -144,16 +163,11 @@ export function createMailGate({ dataDir, keychain, logger = () => {}, now = Dat
         if (!(await guarded())) return json(res, 401, { error: "not authorised" });
         return json(res, 200, approval(decodeURIComponent(pathname.slice("/api/mail/approval/".length)), searchParams.get("hash")));
       }
-      // The HUD's own button (a future inbox SEND button): same trust as /api/confirm for merges.
-      if (req.method === "POST" && pathname === "/api/mail/confirm") {
-        const { confirm_id } = await readJson(req);
-        return confirmById(confirm_id) ? json(res, 200, { ok: true }) : json(res, 409, { error: "nothing to confirm" });
-      }
     } catch {
       return json(res, 400, { error: "bad request" });
     }
     return json(res, 404, { error: "not found" });
   }
 
-  return { register, intercept, confirmById, redeem, approval, handle, pending: () => active("pending") };
+  return { register, intercept, snapshot, newHold, redeem, approval, handle, pending: () => active("pending") };
 }

@@ -213,6 +213,7 @@ async function handleChat(req, res, { chat, speak, gate, phone, parsed, mail, ch
   // An email to a business contact is approved only by the owner's own words, matched here.
   const mailTurn = mail?.intercept(message, channel);
   if (mailTurn?.reply) return reply(res, mailTurn.reply, voice, speak, gate, sessionId, phone);
+  const heldBefore = mail?.snapshot();
 
   const started = Date.now();
   const before = gate.current(sessionId)?.id;
@@ -230,6 +231,9 @@ async function handleChat(req, res, { chat, speak, gate, phone, parsed, mail, ch
     if (phone) gate.cancel(sessionId);
     text = phone ? PHONE_MERGE : gate.prompt(sessionId);
   }
+  // The owner hears the server's own summary of a held or approved email, not the model's description of it.
+  const mailNote = [mail?.newHold(heldBefore), mailTurn?.note].filter(Boolean).join(" ");
+  if (mailNote) text = `${text}\n\n${mailNote}`;
   return reply(res, text, voice, speak, gate, sessionId, phone);
 }
 
@@ -306,6 +310,7 @@ async function handleChatStream(req, res, { chat, speak, gate, phone, firstWaitM
     return finish(mailTurn.reply);
   }
 
+  const heldBefore = mail?.snapshot();
   const lines = FILLERS[fillerLanguage(message)];
   const started = Date.now();
   const before = gate.current(sessionId)?.id;
@@ -349,6 +354,12 @@ async function handleChatStream(req, res, { chat, speak, gate, phone, firstWaitM
     text = phone ? PHONE_MERGE : gate.prompt(sessionId);
     say("sentence", text);
   } else if (!spoken && text) say("sentence", text);
+  // The owner hears the server's own summary of a held or approved email, not the model's description of it.
+  const mailNote = [mail?.newHold(heldBefore), mailTurn?.note].filter(Boolean).join(" ");
+  if (mailNote) {
+    say("sentence", mailNote);
+    text = `${text}\n\n${mailNote}`;
+  }
   return finish(text);
 }
 

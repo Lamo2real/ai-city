@@ -61,19 +61,37 @@ export function createContacts({ path = CONTACTS_PATH } = {}) {
   };
 }
 
-const listed = (list, address) => list.some((e) => e === address || (e.startsWith("@") && address.endsWith(e)));
+// One person, one key: "p.al+news@googlemail.com" is "pal@gmail.com". Used for every list lookup.
+export function canonical(address) {
+  const a = addressOf(address);
+  const at = a.lastIndexOf("@");
+  if (at < 1) return a;
+  let local = a.slice(0, at).split("+")[0];
+  let domain = a.slice(at + 1);
+  if (domain === "googlemail.com") domain = "gmail.com";
+  if (domain === "gmail.com") local = local.replaceAll(".", "");
+  return `${local}@${domain}`;
+}
+const canonicalEntry = (e) => (e.startsWith("@") ? e.replace(/^@googlemail\.com$/, "@gmail.com") : canonical(e));
+const listed = (list, address) => {
+  const c = canonical(address);
+  return list.some((raw) => {
+    const e = canonicalEntry(raw);
+    return e === c || (e.startsWith("@") && c.endsWith(e));
+  });
+};
 
 // ---- classification ----
 
 // → { business: boolean, why: ["addr → reason", ...] }. Order: own, personal list, business list, domain, unsure.
 export function classify(recipients, { own = [], contacts = { personal: [], business: [] }, context = "" } = {}) {
-  const ownSet = new Set(own.map((a) => a.toLowerCase()));
+  const ownSet = new Set(own.map((a) => canonical(a)));
   const signal = SIGNAL_WORDS.test(context) || SIGNAL_TITLES.test(context);
   const why = [];
   for (const r of recipients) {
     const a = addressOf(r);
     const domain = /^[^\s@]+@([a-z0-9-]+(\.[a-z0-9-]+)+)$/.exec(a)?.[1];
-    if (ownSet.has(a)) continue;
+    if (ownSet.has(canonical(a))) continue;
     if (listed(contacts.personal, a)) continue;
     if (listed(contacts.business, a)) { why.push(`${a} → on your business list`); continue; }
     if (!domain) { why.push(`${a} → not sure who this is`); continue; }
