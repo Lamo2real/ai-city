@@ -1,9 +1,10 @@
 // Safari commands with the owner's rules enforced in code: no passwords or codes, payments need approval,
 // page content is labelled as data, and risky actions are audited.
 import { SafariError, MESSAGES } from "./errors.js";
+import { assertPublicUrl, assertPublicPage } from "./hosts.js";
 import { pageJs, isPaymentPage, writesSensitiveField, guardBypass, wrapContent } from "./page.js";
 
-const REFUSED = new Set(["PASSWORD_FIELD", "SPEND_NEEDS_APPROVAL"]);
+const REFUSED = new Set(["PASSWORD_FIELD", "SPEND_NEEDS_APPROVAL", "INTERNAL_HOST"]);
 const PAGE_MESSAGES = {
   ...MESSAGES,
   BAD_SELECTOR: "That isn't a valid CSS selector.",
@@ -24,7 +25,7 @@ export function normalizeUrl(input) {
   return url;
 }
 
-export function createSafari({ mac, audit, spend, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now }) {
+export function createSafari({ mac, audit, spend, lookup, settle = 300, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now }) {
   async function ensureRunning() {
     if (!(await mac.isRunning())) await mac.launch();
   }
@@ -47,6 +48,7 @@ export function createSafari({ mac, audit, spend, sleep = (ms) => new Promise((r
   // Using a valid approval spends it (spend.authorize records it), so a retry needs a new one.
   async function gate(tab, spendTicket, action, selector, amount) {
     const probe = await page(tab, pageJs.probe(action === "js" ? undefined : selector));
+    assertPublicPage(probe.url); // defence in depth: never act on an internal page
     if (!isPaymentPage(probe, action)) return { url: probe.url };
     const verdict = spendTicket ? spend(spendTicket, probe.url, amount, probe.total) : { ok: false, reason: null };
     if (verdict.ok) return { url: probe.url, spendTicket, approvalAudit: verdict.audit };
@@ -70,14 +72,24 @@ export function createSafari({ mac, audit, spend, sleep = (ms) => new Promise((r
 
   const opened = async (fn) => { await ensureRunning(); return fn(); };
 
+  // After a load, redirects may have landed on an internal host: send that tab to about:blank and refuse.
+  async function afterLoad(tab) {
+    await sleep(settle);
+    const urls = tab ? [{ ...tab, url: (await page(tab, pageJs.probe()).catch(() => ({}))).url }]
+      : ((await mac.tabs?.().catch(() => [])) ?? []).filter((t) => t.active).map((t) => ({ window: t.window, index: t.index, url: t.url }));
+    for (const t of urls) {
+      try { assertPublicPage(t.url); } catch (err) { await mac.navigate(t.window, t.index, "about:blank").catch(() => {}); throw err; }
+    }
+  }
+
   return {
     windows: () => opened(async () => ({ windows: await mac.windows() })),
     tabs: () => opened(async () => ({ tabs: await mac.tabs() })),
-    open: (url, mode) => opened(async () => { await mac.open(normalizeUrl(url), mode === "window" ? "window" : "tab"); return { ok: true }; }),
+    open: (url, mode) => opened(async () => { const u = normalizeUrl(url); await assertPublicUrl(u, lookup); await mac.open(u, mode === "window" ? "window" : "tab"); await afterLoad(null); return { ok: true }; }),
     switchTo: (w, t) => opened(async () => { await mac.switchTo(w, t); return { ok: true }; }),
     close: (w, t) => opened(async () => { await mac.closeTab(w, t); return { ok: true }; }),
     closeWindow: (w) => opened(async () => { await mac.closeWindow(w); return { ok: true }; }),
-    navigate: (tab, url) => opened(async () => { await mac.navigate(tab.window, tab.index, normalizeUrl(url)); return { ok: true }; }),
+    navigate: (tab, url) => opened(async () => { const u = normalizeUrl(url); await assertPublicUrl(u, lookup); await mac.navigate(tab.window, tab.index, u); await afterLoad(tab); return { ok: true }; }),
     history: (tab, dir) => opened(async () => { await page(tab, pageJs.history(dir)); return { ok: true }; }),
 
     read: (tab) => opened(async () => {
@@ -110,6 +122,7 @@ export function createSafari({ mac, audit, spend, sleep = (ms) => new Promise((r
 
     fill: (tab, selector, value) => opened(() =>
       audited({ action: "fill", selector }, async () => {
+        assertPublicPage((await page(tab, pageJs.probe())).url);
         const p = await page(tab, pageJs.fill(selector, value));
         return { ok: true, url: p.url };
       })),

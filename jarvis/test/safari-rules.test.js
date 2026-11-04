@@ -14,8 +14,9 @@ const tmp = () => mkdtempSync(join(tmpdir(), "safari-test-"));
 const marker = (src) => /^\/\*jarvis:(\w+)\*\//.exec(src)?.[1];
 
 // A fake Safari: answers page scripts by their marker.
-function rig({ page = {}, spend = () => ({ ok: false, reason: null }) } = {}) {
+function rig({ page = {}, spend = () => ({ ok: false, reason: null }), lookup = async () => [{ address: "93.184.216.34" }], tabs = [] } = {}) {
   const runs = [];
+  const navs = [];
   const mac = {
     isRunning: async () => true, launch: async () => runs.push("launch"),
     runJs: async (w, t, src) => {
@@ -24,12 +25,12 @@ function rig({ page = {}, spend = () => ({ ok: false, reason: null }) } = {}) {
       const answer = typeof page[m] === "function" ? page[m](src) : page[m];
       return JSON.stringify(answer ?? {});
     },
-    open: async () => {}, navigate: async () => {},
+    open: async () => {}, navigate: async (w, t, u) => { navs.push(u); }, tabs: async () => tabs,
   };
   const dir = tmp();
   const audit = createAudit({ path: join(dir, "Jarvis", "access-audit.jsonl"), now: () => new Date("2026-01-01T00:00:00Z") });
   const lines = () => { try { return readFileSync(audit.path, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-  return { safari: createSafari({ mac, audit, spend }), runs, audit, lines };
+  return { safari: createSafari({ mac, audit, spend, lookup, settle: 0 }), runs, navs, audit, lines };
 }
 const TAB = { window: 1, index: 0 };
 const SHOP = { probe: { url: "https://shop.test/checkout?token=abc", cardInputs: false } };
@@ -393,4 +394,43 @@ test("a total on the page above the approved maximum is refused without spending
   page.probe.total = 19.5;
   assert.equal((await r.safari.submit(TAB, "form", { spendTicket: "approved", amount: 10 })).ok, true, "refusal didn't spend it");
   assert.match(pageJs.probe("#b"), /data-total/);
+});
+
+const INTERNAL = ["http://127.0.0.1:7778", "http://127.1:7778", "http://2130706433/", "http://[::1]/", "http://localhost/", "http://x.localhost/", "http://m-d1hgp.tailca48e1.ts.net/", "http://100.100.100.100/", "http://192.168.1.1/", "http://10.0.0.5/", "http://172.20.1.1/", "http://169.254.169.254/", "http://0.0.0.0/", "http://[::ffff:127.0.0.1]/", "http://[::ffff:7f00:1]/", "http://[fd12::1]/", "http://[fe80::1]/", "http://printer.local/", "http://db.internal/", "http://intranet/", "http://m-d1hgp/", "http://M-D1HGP.local/"];
+
+test("open and navigate refuse local, internal and tailnet addresses; public https still works", async () => {
+  for (const bad of INTERNAL) {
+    const r = rig();
+    await assert.rejects(r.safari.open(bad), { code: "INTERNAL_HOST" }, bad);
+    await assert.rejects(r.safari.navigate(TAB, bad), { code: "INTERNAL_HOST" }, bad);
+    assert.deepEqual(r.navs, [], bad);
+  }
+  const ok = rig();
+  assert.equal((await ok.safari.open("https://example.com/")).ok, true);
+  assert.equal((await ok.safari.navigate(TAB, "https://172.32.0.1/")).ok, true, "172.32 is public");
+});
+
+test("a public hostname that resolves to a private address is refused", async () => {
+  for (const address of ["127.0.0.1", "10.1.2.3", "::1", "::ffff:192.168.0.1"]) {
+    const r = rig({ lookup: async () => [{ address: "93.184.216.34" }, { address }] });
+    await assert.rejects(r.safari.navigate(TAB, "https://rebind.example.com/"), { code: "INTERNAL_HOST" }, address);
+  }
+});
+
+test("a redirect that lands on an internal host sends the tab to about:blank", async () => {
+  const r = rig({ page: { probe: { url: "http://127.0.0.1:7778/" } } });
+  await assert.rejects(r.safari.navigate(TAB, "https://example.com/go"), { code: "INTERNAL_HOST" });
+  assert.deepEqual(r.navs, ["https://example.com/go", "about:blank"]);
+  const o = rig({ tabs: [{ window: 1, index: 2, url: "http://100.100.100.100/", active: true }] });
+  await assert.rejects(o.safari.open("https://example.com/go"), { code: "INTERNAL_HOST" });
+  assert.deepEqual(o.navs, ["about:blank"]);
+});
+
+test("js, click, submit and fill refuse when the current page is internal", async () => {
+  const page = { probe: { url: "http://127.0.0.1:7778/", cardInputs: false }, js: { url: "x", value: "1" }, click: {}, submit: {}, fill: {} };
+  for (const act of [(s) => s.js(TAB, "fetch('/api/city/answer',{method:'POST'})"), (s) => s.click(TAB, "#b"), (s) => s.submit(TAB, "form"), (s) => s.fill(TAB, "#a", "x")]) {
+    const r = rig({ page });
+    await assert.rejects(act(r.safari), { code: "INTERNAL_HOST" });
+    assert.ok(!r.runs.some((m) => ["js", "click", "submit", "fill"].includes(m)), "nothing ran on the page");
+  }
 });
