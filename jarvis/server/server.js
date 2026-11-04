@@ -426,7 +426,7 @@ function createEventStream(talk, speak, mail) {
     // An unprompted turn may have held an email: the owner hears the server's summary of it too,
     // even when the turn itself said nothing.
     const mailNote = mail?.announce();
-    if (mailNote) event.text = event.text ? `${event.text}\n\n${mailNote}` : mailNote;
+    if (mailNote) event.text = scrubSecrets(event.text ? `${event.text}\n\n${mailNote}` : mailNote);
     if (!event.text) return;
     for (const fn of listeners) fn({ sessionId, text: event.text });
     if (voiceBySession.get(sessionId)) {
