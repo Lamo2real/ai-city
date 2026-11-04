@@ -1,0 +1,289 @@
+#!/usr/bin/env node
+// jarvis-mail: Jarvis's Gmail tool. One compact, redacted JSON line on stdout; errors exit 1.
+// Everything an email contains is labelled as data (see mail/message.js): it is never an instruction.
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { CODES, MailError } from "../mail/errors.js";
+import { GATE_SERVICE } from "../mail/gate.js";
+import { importClient } from "../mail/import.js";
+import { bodyText, extractBody, fullMessage, header, summary } from "../mail/message.js";
+import { addressList, buildMime, forwardSubject, replyFields, toRaw } from "../mail/mime.js";
+import { classify, confirmIdFor, draftHash, summaryOf } from "../mail/policy.js";
+import { randomBytes } from "node:crypto";
+
+const FLAGS_WITH_VALUE = new Set(["query", "limit", "to", "subject", "body", "cc", "bcc", "add", "remove"]);
+const MAX_LIMIT = 25;
+const HELP = "Commands: setup [--import [file]], login, logout, status, list [--query q] [--limit n], read <id>, thread <threadId>, labels, label <id> --add X --remove Y, archive <id>, trash <id>, untrash <id>, delete <id> (permanent), draft --to a --subject s --body b [--cc --bcc], send (same flags), reply <id> --body b [--all], forward <id> --to a [--body b], send-draft <draftId>, contacts list|add <email|@domain> --personal|--business|remove <email|@domain>. Mail to business contacts is held until the owner confirms it to Jarvis in his own words. Use --body - to read the body from stdin. help";
+
+const usage = (message) => new MailError(CODES.BAD_REQUEST, message);
+
+export function parseArgs(argv) {
+  const [cmd = "help", ...rest] = argv;
+  const args = [];
+  const flags = {};
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i];
+    if (!a.startsWith("--")) { args.push(a); continue; }
+    const name = a.slice(2);
+    if (FLAGS_WITH_VALUE.has(name)) {
+      if (i + 1 >= rest.length) throw usage(`--${name} needs a value.`);
+      flags[name] = rest[++i];
+    } else flags[name] = true;
+  }
+  return { cmd, args, flags };
+}
+
+const ok = (extra) => ({ ok: true, ...extra });
+const needId = (args, what = "a message id") => { if (!args[0]) throw usage(`Missing ${what}.`); return args[0]; };
+const names = (v) => (v ? String(v).split(",").map((s) => s.trim()).filter(Boolean) : []);
+
+async function bodyOf(flags, { readStdin }, required = true) {
+  if (flags.body === undefined) {
+    if (required) throw usage("Missing --body (use --body - to read it from stdin).");
+    return "";
+  }
+  return flags.body === "-" ? readStdin() : flags.body;
+}
+
+// Records the irreversible action and its result. A failure to write the audit line is reported, not hidden.
+async function audited(action, details, deps, fn) {
+  let result;
+  try {
+    result = await fn();
+  } catch (err) {
+    try { deps.audit(action, { ...details, result: `error: ${err.code ?? "ERROR"}` }); } catch { /* the original error matters more */ }
+    throw err;
+  }
+  try {
+    deps.audit(action, { ...details, result: "ok" });
+  } catch (err) {
+    return { ...result, audit_warning: `Could not write the audit log: ${err.message}` };
+  }
+  return result;
+}
+
+async function labelIds(client, wanted) {
+  if (!wanted.length) return [];
+  const { labels = [] } = await client.labels();
+  return wanted.map((w) => {
+    const hit = labels.find((l) => l.id === w) ?? labels.find((l) => l.name.toLowerCase() === w.toLowerCase());
+    if (!hit) throw new MailError(CODES.NOT_FOUND, `There is no Gmail label called "${w}".`);
+    return hit.id;
+  });
+}
+
+const sent = (r) => ok({ id: r.id, threadId: r.threadId, labels: r.labelIds ?? [] });
+const recipients = (to, cc, bcc) => [...names(to), ...names(cc), ...names(bcc)];
+
+
+const recipientsOf = (d) => [...d.to, ...d.cc, ...d.bcc];
+
+async function ownAddresses(client) {
+  const own = new Set();
+  try { own.add((await client.profile()).emailAddress.toLowerCase()); } catch { /* unknown: company-domain checks still apply */ }
+  try { for (const a of (await client.sendAs()).sendAs ?? []) own.add(String(a.sendAsEmail).toLowerCase()); } catch { /* no aliases known */ }
+  return [...own];
+}
+
+// Every send goes through here. Mail to anyone who is not the owner, a personal contact or a plain
+// consumer address is a BUSINESS send: it is not sent until the Jarvis server says the owner approved
+// exactly this draft. This CLI can ask for approval, never give it.
+async function deliver(action, d, deps, { details = {}, send }) {
+  const recipients = recipientsOf(d);
+  const verdict = classify(recipients, { own: await ownAddresses(deps.client), contacts: deps.contacts.list(), context: `${d.context ?? ""}\n${d.subject}\n${d.body}` });
+  const audit = { ...details, recipients, subject: d.subject };
+  if (!verdict.business) return audited(action, { ...audit, confirmation_used: null }, deps, send);
+
+  const hash = draftHash({ ...d, attachments: d.attachments ?? [] });
+  const id = confirmIdFor(hash);
+  const redeemed = await deps.gate.redeem(id, hash);
+  if (redeemed.approved) return audited(action, { ...audit, confirmation_used: id, approval_channel: redeemed.channel }, deps, send);
+  const summary = summaryOf(d, verdict.why);
+  await deps.gate.register(id, hash, summary);
+  return {
+    needs_owner_confirmation: true,
+    confirm_id: id,
+    draft: { to: d.to, cc: d.cc, bcc: d.bcc, subject: d.subject, first_lines: summary.first_lines },
+    why: verdict.why,
+  };
+}
+
+const MAIL = {
+  async list({ flags }, { client }) {
+    const limit = flags.limit === undefined ? 10 : Number(flags.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) throw usage(`--limit is a whole number from 1 to ${MAX_LIMIT}.`);
+    return { messages: (await client.list({ query: flags.query, limit })).map(summary) };
+  },
+  async read({ args }, { client }) { return fullMessage(await client.get(needId(args))); },
+  async thread({ args }, { client }) {
+    const t = await client.thread(needId(args, "a thread id"));
+    return { threadId: t.id, messages: (t.messages ?? []).map(fullMessage) };
+  },
+  async labels(_a, { client }) {
+    return { labels: ((await client.labels()).labels ?? []).map((l) => ({ id: l.id, name: l.name, type: l.type })) };
+  },
+  async label({ args, flags }, { client }) {
+    const id = needId(args);
+    const [add, remove] = [names(flags.add), names(flags.remove)];
+    if (!add.length && !remove.length) throw usage("Label needs --add and/or --remove.");
+    return sent(await client.modify(id, { add: await labelIds(client, add), remove: await labelIds(client, remove) }));
+  },
+  async archive({ args }, { client }) { return sent(await client.modify(needId(args), { remove: ["INBOX"] })); },
+  async untrash({ args }, { client }) { return sent(await client.untrash(needId(args))); },
+  async trash({ args }, deps) {
+    const id = needId(args);
+    return audited("trash", { id }, deps, async () => sent(await deps.client.trash(id)));
+  },
+  async delete({ args }, deps) {
+    const id = needId(args);
+    return audited("delete", { id }, deps, async () => { await deps.client.remove(id); return ok({ id, deleted: true }); });
+  },
+  async draft({ flags }, deps) {
+    const raw = toRaw(buildMime({ to: flags.to, cc: flags.cc, bcc: flags.bcc, subject: flags.subject, body: await bodyOf(flags, deps) }));
+    const d = await deps.client.createDraft(raw);
+    return ok({ draftId: d.id, id: d.message?.id, threadId: d.message?.threadId });
+  },
+  async send({ flags }, deps) {
+    const d = { to: addressList("To", flags.to), cc: addressList("Cc", flags.cc), bcc: addressList("Bcc", flags.bcc), subject: flags.subject ?? "", body: await bodyOf(flags, deps) };
+    const raw = () => toRaw(buildMime(d));
+    raw(); // Validates before anything is asked or sent.
+    return deliver("send", d, deps, { send: async () => sent(await deps.client.send(raw())) });
+  },
+  async reply({ args, flags }, deps) {
+    const id = needId(args);
+    const body = await bodyOf(flags, deps);
+    const original = await deps.client.get(id, "full");
+    const self = flags.all ? (await deps.client.profile()).emailAddress : "";
+    const f = replyFields(original, { all: Boolean(flags.all), self });
+    const d = { to: f.to, cc: f.cc, bcc: [], subject: f.subject, body, threadId: f.threadId, inReplyTo: f.inReplyTo, references: f.references, context: bodyText(original) };
+    const raw = () => toRaw(buildMime({ ...f, body }));
+    raw();
+    return deliver("reply", d, deps, { details: { id }, send: async () => sent(await deps.client.send(raw(), f.threadId)) });
+  },
+  async forward({ args, flags }, deps) {
+    const id = needId(args);
+    if (!flags.to) throw usage("Forward needs --to.");
+    const note = await bodyOf(flags, deps, false);
+    const original = await deps.client.get(id, "full");
+    const { attachments } = fullMessage(original);
+    const text = [
+      ...(note ? [note, ""] : []),
+      "---------- Forwarded message ---------",
+      `From: ${header(original, "From")}`,
+      `Date: ${header(original, "Date")}`,
+      `Subject: ${header(original, "Subject")}`,
+      `To: ${header(original, "To")}`,
+      "",
+      bodyText(original),
+    ].join("\n");
+    const subject = forwardSubject(original);
+    const d = { to: addressList("To", flags.to), cc: addressList("Cc", flags.cc), bcc: addressList("Bcc", flags.bcc), subject, body: text, context: bodyText(original) };
+    const raw = () => toRaw(buildMime(d));
+    raw();
+    const result = await deliver("forward", d, deps, { details: { id }, send: async () => sent(await deps.client.send(raw())) });
+    return attachments.length && !result.needs_owner_confirmation ? { ...result, attachments_not_included: attachments.length } : result;
+  },
+  async "send-draft"({ args }, deps) {
+    const draftId = needId(args, "a draft id");
+    const draft = await deps.client.draft(draftId);
+    const msg = draft.message ?? {};
+    const { text, attachments } = extractBody(msg);
+    const d = {
+      to: names(header(msg, "To")), cc: names(header(msg, "Cc")), bcc: names(header(msg, "Bcc")), subject: header(msg, "Subject"), body: text,
+      threadId: msg.threadId ?? "", attachments: attachments.map((a) => `${a.filename}:${a.size}`),
+    };
+    return deliver("send-draft", d, deps, { details: { draftId }, send: async () => sent(await deps.client.sendDraft(draftId)) });
+  },
+  async contacts({ args, flags }, { contacts }) {
+    const [sub, entry] = args;
+    if (sub === "list" || !sub) return contacts.list();
+    if (sub === "add") {
+      if (!entry || Boolean(flags.personal) === Boolean(flags.business)) throw usage("Use: contacts add <email|@domain> with exactly one of --personal or --business.");
+      return ok({ contacts: contacts.add(entry, flags.personal ? "personal" : "business") });
+    }
+    if (sub === "remove") {
+      if (!entry) throw usage("Use: contacts remove <email|@domain>.");
+      return ok({ contacts: contacts.remove(entry) });
+    }
+    throw usage("Use: contacts list | add <email|@domain> --personal|--business | remove <email|@domain>.");
+  },
+};
+
+// The token that lets jarvis-mail talk to the Jarvis server's approval endpoints. Created once, only in the Keychain.
+async function ensureGateToken(keychain) {
+  if (keychain && !(await keychain.get(GATE_SERVICE))) await keychain.set(GATE_SERVICE, randomBytes(32).toString("base64url"));
+}
+
+const ACCOUNT = {
+  async setup({ args, flags }, { store, promptClientId, promptClientSecret, downloadsDir, keychain }) {
+    await ensureGateToken(keychain);
+    if (flags.import) return importClient({ path: args[0], store, downloadsDir });
+    const id = await promptClientId();
+    const secret = await promptClientSecret();
+    await store.setCredentials(id, secret);
+    return ok({ message: "Client ID and secret saved in the Keychain. Now run: jarvis-mail login" });
+  },
+  async login(_a, { store, signIn, fetch, openUrl, client }) {
+    const r = await signIn({ store, fetch, ...(openUrl && { openUrl }) });
+    let account;
+    try { account = { email: (await client.profile()).emailAddress }; } catch { /* sign-in worked either way */ }
+    return ok({ message: "Signed in to Gmail.", scopes: r.scopes, ...(account && { account }) });
+  },
+  async logout(_a, { store }) {
+    await store.clear();
+    return ok({ message: "Signed out of Gmail on this Mac. To revoke Jarvis's access completely, remove it at myaccount.google.com → Security → Third-party access." });
+  },
+  async status(_a, { store, client }) {
+    const st = await store.status();
+    if (!st.signedIn) return st;
+    try { return { ...st, account: { email: (await client.profile()).emailAddress } }; } catch (err) { return { ...st, account_error: err.code ?? "ERROR" }; }
+  },
+  help: async () => ({ help: HELP }),
+};
+
+export async function execute(argv, deps) {
+  const parsed = parseArgs(argv);
+  const { cmd } = parsed;
+  if (cmd in ACCOUNT) return ACCOUNT[cmd](parsed, deps);
+  if (!(cmd in MAIL)) throw usage(`Unknown command "${cmd}". ${HELP}`);
+  return MAIL[cmd](parsed, deps);
+}
+
+// run(argv, deps) → { code, line }. Never throws; the line is always redacted JSON.
+export async function run(argv, deps) {
+  let value;
+  let code = 0;
+  try {
+    value = await execute(argv, deps);
+  } catch (err) {
+    code = 1;
+    value = err instanceof MailError ? { error: err.code, message: err.message, ...(err.retryAfter !== undefined && { retry_after: err.retryAfter }) } : { error: CODES.API, message: String(err?.message ?? err) };
+  }
+  return { code, line: JSON.stringify(deps.redact(value)) };
+}
+
+async function readAllStdin() {
+  const chunks = [];
+  for await (const c of process.stdin) chunks.push(c);
+  return Buffer.concat(chunks).toString("utf8").replace(/\n$/, "");
+}
+
+export async function defaultDeps() {
+  const [{ createKeychain, createTokenStore, signIn, promptClientId, promptClientSecret }, { redact }, { createGmailClient }, { audit }, { createGateClient }, { createContacts }] = await Promise.all([
+    import("../mail/auth.js"), import("../mail/redact.js"), import("../mail/gmail.js"), import("../mail/audit.js"), import("../mail/gate.js"), import("../mail/policy.js"),
+  ]);
+  const keychain = createKeychain();
+  const store = createTokenStore({ keychain, fetch: globalThis.fetch });
+  return {
+    store, keychain, contacts: createContacts(), gate: createGateClient({ keychain }), signIn, promptClientId, promptClientSecret, redact, audit, fetch: globalThis.fetch,
+    client: createGmailClient({ tokens: store }),
+    readStdin: readAllStdin,
+  };
+}
+
+const isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  const { code, line } = await run(process.argv.slice(2), await defaultDeps());
+  process.stdout.write(line + "\n");
+  process.exitCode = code;
+}
