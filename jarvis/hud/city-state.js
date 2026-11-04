@@ -213,8 +213,17 @@ export function placement(state, id) {
   const dept = deptOf(a);
   if (hasOpenWork(state, id)) return { place: "station", dept, why: "ticket" };
   if (a.awaiting_merge) return { place: "station", dept, why: "merge" };
-  if (a.kind === "worker" && a.state !== "retired" && a.worker_state !== "released") return { place: "station", dept, why: "hired" };
+  if (a.state !== "retired" && a.worker_state !== "released") return { place: "station", dept, why: "hired" }; // managers too: an idle one stays in its window
   return { place: "home", dept, why: a.state === "retired" ? "released" : "off work" };
+}
+
+// A real retirement or release walks home, once per id. `walked` is the set of ids that already did; it is filled here,
+// so a reconnect, a snapshot or a later move home never plays the walk again. Pure otherwise.
+export function walksOut(state, id, walked) {
+  const a = state.agents[id];
+  if (!a || walked.has(id) || (a.state !== "retired" && a.worker_state !== "released")) return false;
+  walked.add(id);
+  return true;
 }
 
 // What the figure shows: a key of VISUALS, one for every activity the runtime reports and every lifecycle mark.
@@ -412,6 +421,9 @@ export function departmentPanel(state, dept) {
     todayUsd: spent.length ? spent.reduce((a, b) => a + b, 0) : null,
   };
 }
+
+// How many agents stand at work in a department building (not HQ). The City counts lit windows the same way.
+export const agentsAtWork = (state) => Object.values(state.agents).filter((a) => !CORE.has(a.id) && a.kind !== "core" && placement(state, a.id).place === "station").length;
 
 export function topBar(state) {
   const agents = Object.values(state.agents).filter((a) => !CORE.has(a.id));
