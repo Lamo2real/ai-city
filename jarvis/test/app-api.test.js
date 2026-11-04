@@ -11,6 +11,15 @@ import { createKeychain } from "../server/keychain.js";
 import { createServer } from "../server/server.js";
 import { startTailnetListener } from "../server/tailnet.js";
 
+// Waits for a condition instead of sleeping a fixed time (fixed sleeps were flaky on a busy machine).
+async function waitFor(condition, what = "condition", timeoutMs = 5000) {
+  const until = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() > until) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
 const HOST = "mac.tail1234.ts.net";
 const LOGIN = "owner@example.com";
 const TOKEN = "T0ken_for_tests_AAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -185,8 +194,9 @@ test("a merge started from the phone is cancelled, not confirmable", async () =>
 });
 
 test("only one chat at a time", async () => {
+  release = null;
   const first = call(port, "POST", "/api/app/v1/chat", auth(), { message: "hold" });
-  await new Promise((r) => setTimeout(r, 100));
+  await waitFor(() => release !== null, "the held chat to start");
   const second = await call(port, "POST", "/api/app/v1/chat", auth(), { message: "again" });
   assert.equal(second.status, 429);
   assert.ok(second.headers["retry-after"]);
@@ -216,15 +226,14 @@ test("events carry only Jarvis's words for the owner session", async () => {
     res.on("data", (d) => chunks.push(d.toString()));
   });
   req.end();
-  await new Promise((r) => setTimeout(r, 100));
+  await waitFor(() => chunks.join("").includes(": connected"), "the event stream to open");
   await say("owner", "Your build passed, sir.");
   await say("some-hud-tab", "private to another session");
-  await new Promise((r) => setTimeout(r, 50));
+  await waitFor(() => chunks.join("").includes("Your build passed"), "the owner event");
   const data = chunks.join("");
   assert.deepEqual(data.match(/^data: .*$/gm), [`data: ${JSON.stringify({ type: "jarvis", text: "Your build passed, sir." })}`]);
   assert.ok(!data.includes("another session") && !data.includes("AUDIO") && !data.includes('"city"'));
   req.destroy();
-  await new Promise((r) => setTimeout(r, 50));
   assert.equal(events().length, 1); // Just the server's own talk.on hook.
 });
 
@@ -234,7 +243,7 @@ test("events need the token and send a keepalive", async () => {
   const api = createAppApi({ keychain: fakeKeychain({ [PAIRING_SERVICE]: TOKEN }), chatStream: async () => {}, events: { subscribe: () => () => {} }, keepaliveMs: 20 });
   const req = Object.assign(new EventEmitter(), { method: "GET", url: "/api/app/v1/events", headers: { authorization: `Bearer ${TOKEN}` } });
   await api.handle(req, { writeHead() {}, write: (s) => writes.push(s) });
-  await new Promise((r) => setTimeout(r, 70));
+  await waitFor(() => writes.filter((w) => w === ": keepalive\n\n").length >= 2, "two keepalives");
   req.emit("close");
   assert.ok(writes.filter((w) => w === ": keepalive\n\n").length >= 2);
 });

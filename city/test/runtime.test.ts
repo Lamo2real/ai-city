@@ -383,7 +383,7 @@ test("a later report that corrects a ticket's status goes through; a repeat is i
 test("an existing install's core rows are refreshed from the prompts: old tools like osascript are dropped", async () => {
   const ledgerPath = join(dir(), "ledger.db");
   const first = createCity({ runner: fakeRunner({}).runner, dataDir: dir(), ledgerPath, policy });
-  first.ledger.updateAgent("jarvis", { tools: ["mcp__jarvis__send_ticket", "Bash(osascript:*)"] }); // what an old release stored
+  first.ledger.updateAgent("jarvis", { tools: ["mcp__jarvis__send_ticket", "Bash(osascript:*)"], session_id: "sess-keep", total_cost_usd: 1.25 }); // what an old release stored
   first.close();
 
   const { runner, calls } = fakeRunner({
@@ -393,6 +393,9 @@ test("an existing install's core rows are refreshed from the prompts: old tools 
     },
   });
   const city = createCity({ runner, dataDir: dir(), ledgerPath, policy });
+  // The refresh replaces the tools, never the conversation or the spend.
+  assert.equal(city.agent("jarvis").session_id, "sess-keep", "session_id survives the boot refresh");
+  assert.equal(city.agent("jarvis").total_cost_usd, 1.25, "total_cost_usd survives the boot refresh");
   city.sendTicket({ to: "orchestrator", goal: "anything" });
   await city.idle();
 
