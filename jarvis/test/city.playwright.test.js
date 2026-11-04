@@ -85,24 +85,25 @@ test("a dropped live stream is shown, and on reconnect the error clears and the 
   await page.goto(`http://localhost:${port}/`);
   await page.click("#citybtn");
   await page.waitForSelector("#citylist button[data-building='HQ']", { state: "attached", timeout: 15000 });
-  const cityStream = () => page.evaluate(() => window.__streams.filter((s) => !s.inbox && !s.closed && typeof s.onopen === "function").length);
-  await page.waitForFunction(() => window.__streams.some((s) => !s.inbox && typeof s.onopen === "function"));
-  const base = snapshots; // the inbox and the city each load one snapshot
+  const cityStream = () => page.evaluate(() => window.__streams.filter((s) => !s.closed && typeof s.onopen === "function").length);
+  await page.waitForFunction(() => window.__streams.some((s) => typeof s.onopen === "function"));
+  const base = snapshots; // the board and the inbox share one snapshot request, the city loads its own
   assert.equal(base, 2);
   // An open with no drop before it changes nothing.
-  await page.evaluate(() => window.__streams.findLast((s) => !s.inbox && s.onopen).onopen());
+  await page.evaluate(() => window.__streams.findLast((s) => s.onopen).onopen());
   assert.equal(snapshots, base, "no reload without a drop");
-  await page.evaluate(() => window.__streams.findLast((s) => !s.inbox && s.onerror).onerror());
+  await page.evaluate(() => window.__streams.findLast((s) => s.onerror).onerror());
   await page.waitForSelector("#cityerror:not([hidden])");
   assert.match(await page.textContent("#cityerror"), /Live updates from Jarvis stopped/);
-  await page.evaluate(() => window.__streams.findLast((s) => !s.inbox && s.onopen).onopen());
+  await page.evaluate(() => window.__streams.findLast((s) => s.onopen).onopen());
   await page.waitForFunction(() => document.querySelector("#cityerror").hidden);
-  await page.waitForFunction(() => window.__streams.filter((s) => !s.inbox && !s.closed && s.onopen).length === 1);
+  await page.waitForFunction(() => window.__streams.filter((s) => !s.closed && s.onopen).length === 1);
   assert.equal(snapshots, base + 1, "one fresh snapshot after the reconnect");
   // The new stream opening does not loop into another reload.
-  await page.evaluate(() => window.__streams.findLast((s) => !s.inbox && s.onopen).onopen());
+  await page.evaluate(() => window.__streams.findLast((s) => s.onopen).onopen());
   assert.equal(snapshots, base + 1);
   assert.equal(await cityStream(), 1);
+  assert.equal(await page.evaluate(() => window.__streams.length), 1, "one EventSource for the whole page, never reopened");
   await page.close();
 });
 
@@ -111,6 +112,7 @@ test("when /state.json fails, Status shows an offline state, never fake data", {
   await page.route("**/state.json", (r) => r.abort());
   await page.goto(`http://localhost:${port}/`);
   await page.click("#statusbtn");
+  await page.click("#tab-booqy"); // the Booqy dashboard is the second tab now
   await page.waitForSelector("#offline:not([hidden])");
   assert.equal(await page.textContent("#datatag"), "OFFLINE");
   assert.match(await page.textContent("#offline"), /Can't reach Jarvis/);
@@ -274,5 +276,173 @@ test("Needs you: mobile layout with the fixture data", { skip }, async () => {
   await page.click("#inboxbtn");
   await page.waitForSelector("#inbox form.q");
   await page.screenshot({ path: join(SHOTS, "phaseB-mobile.png") });
+  await page.close();
+});
+
+// ---- Status board ----
+const HOUR = 3600 * 1000;
+const boardSnap = () => { const s = citySnapshot(); s.spend = { App: 0.91, Marketing: 7.5 }; s.tickets.find((t) => t.id === "t-fx1").updated_at = new Date(Date.now() - 3 * HOUR).toISOString(); return s; };
+
+test("Status opens on the AI City board: limits with a department over cap in red, usage with tokens first", { skip }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await jsonRoute(page, boardSnap());
+  await page.goto(`http://localhost:${port}/`);
+  await page.click("#statusbtn");
+  await page.waitForSelector("#ailimits .dept.over");
+  assert.equal(await page.getAttribute("#tab-aicity", "aria-selected"), "true");
+  assert.ok(await page.isHidden("#booqytab"));
+  const limitsText = await page.textContent("#ailimits");
+  assert.match(limitsText, /AGENTS ACTIVE\s*9 \/ 10/);
+  assert.match(limitsText, /WORKERS PER MANAGER \(MOST\)\s*2 \/ 4/);
+  assert.match(limitsText, /31 turns · 184,200 tokens/);
+  assert.match(limitsText, /\$1\.73 \(SDK cost estimate\)/);
+  assert.ok(limitsText.indexOf("tokens") < limitsText.indexOf("SDK cost estimate"), "tokens and turns come before dollars");
+  const over = page.locator("#ailimits .dept.over");
+  assert.equal(await over.count(), 1);
+  assert.match(await over.textContent(), /Marketing.*OVER CAP.*\$7\.50/);
+  assert.equal(await over.locator(".amt").evaluate((e) => getComputedStyle(e).color), "rgb(255, 59, 46)", "red");
+  assert.equal(await page.locator("#ailimits .dept:not(.over)").count(), 1);
+  // Agents: retired hidden, core grouped, goal truncated with a title.
+  const ios = page.locator("#aiagents [data-agent='ios-dev']");
+  assert.match(await ios.textContent(), /iOS Developer.*active.*Sonnet · App/);
+  assert.equal(await ios.locator(".goal").getAttribute("title"), "Build the habit tracker screen");
+  assert.equal(await page.locator("#aiagents .core [data-agent]").count(), 4);
+  await page.screenshot({ path: join(SHOTS, "phaseC-status-desktop.png") });
+  await page.close();
+});
+
+test("Status board: tickets are grouped by status with age, and only the old one is tagged stale", { skip }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await jsonRoute(page, boardSnap());
+  await page.goto(`http://localhost:${port}/`);
+  await page.click("#statusbtn");
+  await page.waitForSelector("#aitickets .grp");
+  assert.deepEqual(await page.locator("#aitickets h4").allTextContents(), ["In progress (3)", "In review (1)", "Waiting on you (1)"]);
+  assert.equal(await page.locator("#aitickets .tag.stale").count(), 1);
+  assert.equal(await page.locator("#aitickets [data-ticket='t-fx1'] .tag.stale").count(), 1);
+  assert.match(await page.textContent("#aitickets [data-ticket='t-fx2']"), /qa-tester.*(<1 min|\d+ min).*Run the simulator tests/);
+  await page.close();
+});
+
+test("the Booqy dashboard is still there behind its tab and renders state.json", { skip }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await jsonRoute(page);
+  await page.route("**/state.json", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ generatedAt: new Date().toISOString(), features: [{ id: "F1", name: "Gift cards", status: "production" }], prs: [], ci: [], actions: [], log: [] }) }));
+  await page.goto(`http://localhost:${port}/`);
+  await page.click("#statusbtn");
+  await page.click("#tab-booqy");
+  assert.ok(await page.isVisible("#features"));
+  await page.waitForFunction(() => document.querySelector("#features").textContent.includes("Gift cards"));
+  assert.ok(await page.isHidden("#aicity"));
+  assert.equal(await page.getAttribute("#tab-booqy", "aria-selected"), "true");
+  await page.click("#tab-aicity");
+  assert.ok(await page.isVisible("#ailimits"));
+  await page.close();
+});
+
+test("the page opens exactly one /api/events stream, even after the City view mounts", { skip }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await jsonRoute(page);
+  let streams = 0;
+  page.on("request", (r) => { if (new URL(r.url()).pathname === "/api/events") streams++; });
+  await page.goto(`http://localhost:${port}/`);
+  await page.click("#citybtn");
+  await page.waitForSelector("#city[data-city-ready='1']", { timeout: 15000 });
+  await page.click("#inboxbtn");
+  await page.click("#statusbtn");
+  await page.waitForTimeout(500);
+  assert.equal(streams, 1);
+  await page.close();
+});
+
+test("a pending merge found by GET /api/confirm/pending shows in Needs you with MERGE disarmed, no chat turn needed", { skip }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await jsonRoute(page);
+  const reads = [];
+  await page.route("**/api/confirm/pending**", (r) => { reads.push(r.request().url()); return r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ confirm: CONFIRM }) }); });
+  await page.route("**/api/chat**", (r) => r.abort());
+  await page.goto(`http://localhost:${port}/`);
+  await page.waitForSelector("body.view-inbox #inboxmerge [role=alertdialog]");
+  assert.match(reads[0], /sessionId=owner/);
+  assert.ok(await page.locator("#inboxmerge button.go").isDisabled(), "MERGE is disarmed at first");
+  await page.waitForFunction(() => !document.querySelector("#inboxmerge button.go").disabled, null, { timeout: 3000 });
+  assert.deepEqual(await page.locator("#inboxmerge button").allTextContents(), ["MERGE", "CANCEL"]);
+  // The same id does not re-render the card on the next read.
+  await page.evaluate(() => { window.__card = document.querySelector("#inboxmerge .confirm"); window.dispatchEvent(new Event("focus")); });
+  await page.waitForTimeout(300);
+  assert.ok(await page.evaluate(() => window.__card === document.querySelector("#inboxmerge .confirm")), "same card");
+  await page.waitForFunction(() => /2 waiting/.test(document.querySelector("#inboxbtn").getAttribute("aria-label")));
+  await page.close();
+});
+
+test("a pending merge that is gone clears its card", { skip }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await jsonRoute(page);
+  let gone = false;
+  await page.route("**/api/confirm/pending**", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ confirm: gone ? null : CONFIRM }) }));
+  await page.goto(`http://localhost:${port}/`);
+  await page.waitForSelector("#inboxmerge .confirm");
+  gone = true;
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await page.waitForFunction(() => document.querySelector("#inboxmerge").children.length === 0);
+  await page.close();
+});
+
+test("Status on a phone: the board stacks under the core", { skip }, async () => {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await jsonRoute(page, boardSnap());
+  await page.goto(`http://localhost:${port}/`);
+  await page.click("#statusbtn");
+  await page.waitForSelector("#ailimits .dept.over");
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "no sideways scroll");
+  await page.screenshot({ path: join(SHOTS, "phaseC-status-mobile.png") });
+  await page.close();
+});
+
+// ---- Old server (no Jarvis restart yet): the HUD degrades honestly ----
+test("old server: a 404 on the pending GET is silent, polling stops, and the chat path still shows a merge", { skip }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await jsonRoute(page);
+  let reads = 0;
+  await page.route("**/api/confirm/pending**", (r) => { reads++; return r.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "not found" }) }); });
+  await streamDone(page, CONFIRM);
+  await page.clock.install();
+  await page.goto(`http://localhost:${port}/`);
+  await page.waitForFunction(() => document.querySelector("#inboxcnt")?.textContent === "1");
+  assert.equal(reads, 1, "one read on load");
+  await page.clock.fastForward(60_000); // twelve 5 s ticks
+  await page.waitForTimeout(200);
+  assert.equal(reads, 1, "no polling after the 404");
+  assert.equal(await page.locator('#city [role=alert]:not([hidden]), #inbox .err:not([hidden]), #aierr:not([hidden])').count(), 0, "no error banner");
+  assert.ok(!(await page.textContent("body")).match(/not found/i), "the 404 is not shown anywhere");
+  // One attempt per focus, and it stays quiet when it fails again.
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await page.waitForTimeout(200);
+  assert.equal(reads, 2);
+  await page.clock.fastForward(30_000);
+  assert.equal(reads, 2);
+  // The chat-driven merge confirmation still works.
+  await page.click("#chatbtn");
+  await ask(page);
+  await page.waitForSelector("body.view-inbox #inboxmerge [role=alertdialog]");
+  assert.deepEqual(await page.locator("#inboxmerge button").allTextContents(), ["MERGE", "CANCEL"]);
+  await page.close();
+});
+
+test("old server: a snapshot without caps shows plain values and 'cap: unknown until Jarvis restarts', never a number", { skip }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const snap = citySnapshot(); delete snap.caps; snap.spend = { App: 456.73 };
+  await jsonRoute(page, snap);
+  await page.goto(`http://localhost:${port}/`);
+  await page.click("#statusbtn");
+  await page.waitForSelector("#ailimits .dept");
+  const text = await page.textContent("#ailimits");
+  assert.match(text, /AGENTS ACTIVE\s*9 active/);
+  assert.match(text, /\$456\.73 today/);
+  assert.match(text, /cap: unknown until Jarvis restarts/);
+  assert.doesNotMatch(text, /\d+ \/ \d+|OVER CAP/, "no invented cap, no over-cap");
+  assert.equal(await page.locator("#ailimits .dept .bar").count(), 0, "no bar without a cap");
+  assert.equal(await page.locator("#ailimits .dept.over").count(), 0);
+  await page.screenshot({ path: join(SHOTS, "phaseC-status-nocaps.png") });
   await page.close();
 });

@@ -43,7 +43,7 @@ before(async () => {
     chatCalls.push({ message, sessionId });
     return `Jarvis: ${message}`;
   }, { on() {} });
-  app = createServer({ booqyDir: dir, dataDir: dir, port: 0, gate, getState: async () => ({}), chat: talk, speak: async () => ({}), keychain });
+  app = createServer({ booqyDir: dir, dataDir: dir, port: 0, gate, getState: async () => ({}), chat: talk, speak: async () => ({}), keychain, mailGateOptions: { auditPath: join(dir, "mail-audit.jsonl") } });
   await new Promise((r) => app.listen(0, "127.0.0.1", r));
   port = app.address().port;
 });
@@ -162,4 +162,31 @@ test("the relay route exists only on the Mac's own listener, not on the tailnet 
   } finally {
     tailnet.close();
   }
+});
+
+// ---- email approval over the relay (Telegram) ----
+const MAIL_HASH = "d".repeat(64);
+const MAIL_ID = "mail-relayroute00000000000";
+const holdEmail = () => { app.mailGate.register({ confirm_id: MAIL_ID, draft_hash: MAIL_HASH, summary: { to: ["boss@acme.se"], cc: [], bcc: [], subject: "Quote", first_lines: ["Hello"], why: ["boss@acme.se → company domain (acme.se)"] } }); app.mailGate.announce(); };
+
+test("the owner's Telegram 'I confirm the email' approves the pending email, with the server's summary", async () => {
+  holdEmail();
+  chatCalls.length = 0;
+  await relay(port, "I confirm the email, as the owner said");
+  assert.equal(app.mailGate.approval(MAIL_ID, MAIL_HASH).approved, false, "text around the phrase is not the phrase");
+  const ok = await relay(port, "I confirm the email.");
+  assert.equal(ok.status, 200);
+  assert.match(chatCalls.at(-1).message, /^\[Jarvis server\] The owner approved the pending email\./);
+  assert.match(ok.json.reply, /Approved: email to boss@acme\.se, subject "Quote"\./);
+  assert.deepEqual(app.mailGate.redeem(MAIL_ID, MAIL_HASH), { approved: true, channel: "telegram" });
+});
+
+test("the owner's Telegram 'Cancel the email' discards it, answered by the server", async () => {
+  holdEmail();
+  chatCalls.length = 0;
+  const cancelled = await relay(port, "Cancel the email");
+  assert.match(cancelled.json.reply, /not sent/);
+  assert.equal(chatCalls.length, 0, "the model never saw it");
+  assert.equal(app.mailGate.approval(MAIL_ID, MAIL_HASH).approved, false);
+  assert.equal(app.mailGate.pending().length, 0);
 });
