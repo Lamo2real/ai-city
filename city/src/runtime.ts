@@ -69,7 +69,7 @@ export function createCity(opts: CityOptions) {
   const agentsDir = opts.agentsDir ?? AGENTS_DIR;
   const policy = opts.policy ?? loadPolicy();
   const log = opts.log ?? (() => {});
-  const ledger = openLedger(opts.ledgerPath ?? join(dataDir, "ledger.db"));
+  const ledger = openLedger(opts.ledgerPath ?? join(dataDir, "ledger.db"), log);
   const listeners = new Set<(e: CityEvent) => void>();
   const emit = (e: CityEvent) => { for (const fn of listeners) fn(e); };
   const prompts = new Map<string, AgentPrompt>();

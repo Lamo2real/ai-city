@@ -11,6 +11,7 @@ Read `BUILD_PLAN.md` for the current phase. Build one phase at a time and do not
 - **Question & Instruction Bus**: any agent can ask the owner a question (`schemas/question.schema.json`); the owner can address any agent directly (`@ios-dev …`), with its manager cc'd.
 - **Ledger**: every unit of work is a ticket (`schemas/ticket.schema.json`) in SQLite at `~/.jarvis/ledger.db`. Work must survive a crash and resume.
 - **Policy gate**: `.claude/hooks/policy_gate.py` + `config/policy.json`. The runtime's `city/src/policy.ts` is a port of the same `decide()` with the same self-test cases, used as the SDK `canUseTool` callback. Never bypass it.
+- **Cost accounting**: each `costs` row is a per-turn delta (the SDK's `total_cost_usd` is cumulative per resumed session; baselines live in `session_baselines`, keyed `<agent>:<session>`). Rows backfilled by the v1 migration have `estimated = 1` and keep their old value in `raw_usd`. Rollback: `UPDATE costs SET usd = raw_usd, estimated = 0 WHERE raw_usd IS NOT NULL; PRAGMA user_version = 0;` (a file ledger is also copied to `ledger.db.pre-cost-v1.bak` first). `caps.daily_spend_usd_per_department` and every "today" in the ledger and HUD is the **UTC calendar day**: it rolls over at 01:00/02:00 Stockholm time (winter/summer).
 - **One interface between Jarvis and the city**: `send_ticket` in; questions and results out. Voice and text are two inputs to one Jarvis conversation: typed and spoken turns share one session and memory.
 
 ## Stack

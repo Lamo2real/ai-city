@@ -333,7 +333,7 @@ export function mountCity(root, { fetchImpl = fetch, EventSourceImpl = EventSour
     open = { dept: name };
     const d = departmentPanel(state, name);
     const box = showPanel(`${name === "HQ" ? "Headquarters" : `${name} department`}`, "department");
-    box.append(row("manager", d.manager ?? "—"), row("workers", d.workers.length ? d.workers.join(", ") : "—"), row("today's cost", d.todayUsd === null ? "—" : `$${fmt(d.todayUsd, 2)}`));
+    box.append(row("manager", d.manager ?? "—"), row("workers", d.workers.length ? d.workers.join(", ") : "—"), row("today's cost, UTC",d.todayUsd === null ? "—" : `$${fmt(d.todayUsd, 2)}`));
     box.append(el("h4", null, `Open tickets (${d.openTickets.length})`));
     const ul = el("ul", "tickets");
     if (!d.openTickets.length) ul.append(el("li", "mute", "—"));
@@ -346,7 +346,7 @@ export function mountCity(root, { fetchImpl = fetch, EventSourceImpl = EventSour
     const t = topBar(state), d = daylight();
     $("#citytop").replaceChildren(
       stat("AGENTS", `${t.agentsTotal} / ${t.agentsActive} active`), stat("TICKETS RUNNING", String(t.ticketsRunning)), stat("QUESTIONS", String(t.questionsWaiting)),
-      stat("USAGE TODAY", t.usage ? `${t.usage.turns} turns · ${Math.round(t.usage.tokens / 1000)}k tokens · $${fmt(t.usage.usd, 2)}` : "—"),
+      stat("USAGE TODAY, UTC",t.usage ? `${t.usage.turns} turns · ${Math.round(t.usage.tokens / 1000)}k tokens · $${fmt(t.usage.usd, 2)}` : "—"),
       stat("STOCKHOLM", `${d.text} ${d.light > 0.5 ? "☀" : d.light > 0.2 ? "◐" : "☾"}`),
     );
     const list = $("#citydepts"); list.replaceChildren(el("h3", null, "Departments"));

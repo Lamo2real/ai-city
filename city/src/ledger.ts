@@ -2,7 +2,7 @@
 // survives a crash and the daemon can resume it. Rows keep the full JSON plus
 // the few columns we query on.
 import { DatabaseSync } from "node:sqlite";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
 export type TicketStatus = "open" | "in_progress" | "waiting_on_owner" | "in_review" | "done" | "failed" | "cancelled";
@@ -69,8 +69,17 @@ CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, kind TEXT NOT NULL, pare
 CREATE TABLE IF NOT EXISTS questions (id TEXT PRIMARY KEY, ticket_id TEXT NOT NULL, asked_by TEXT NOT NULL, status TEXT NOT NULL, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS costs (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, ticket_id TEXT, usd REAL NOT NULL, tokens INTEGER NOT NULL DEFAULT 0, ts TEXT NOT NULL);
 -- The SDK's total_cost_usd is cumulative per session; this remembers the last one so each costs row is a delta.
-CREATE TABLE IF NOT EXISTS session_costs (session_id TEXT PRIMARY KEY, cumulative_usd REAL NOT NULL);
+-- Keyed by "<agentId>:<sessionId>" so two agents can never share a baseline.
+CREATE TABLE IF NOT EXISTS session_baselines (key TEXT PRIMARY KEY, cumulative_usd REAL NOT NULL);
 `;
+
+export const sessionKey = (agentId: string, sessionId: string) => `${agentId}:${sessionId}`;
+const LARGE_DELTA_USD = 20;
+
+// ROLLBACK of the cost migration (v1): the backfill keeps the pre-migration cumulative values in costs.raw_usd.
+//   UPDATE costs SET usd = raw_usd, estimated = 0 WHERE raw_usd IS NOT NULL; PRAGMA user_version = 0;
+// Rows written by recordTurn leave raw_usd NULL (so that statement never touches them). A file ledger is also
+// copied to <db>.pre-cost-v1.bak (VACUUM INTO) before its first migration.
 
 // costs.usd is the cost of ONE turn (a delta). costs.tokens = input + output + cache_read + cache_write
 // for new rows; for backfilled rows (estimated = 1) it is the legacy input+output value and the split is 0.
@@ -79,13 +88,25 @@ export interface TurnUsage { input?: number; output?: number; cacheRead?: number
 const COST_COLUMNS = ["input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "estimated"];
 
 // Idempotent: columns via ALTER (ignored when present); the backfill runs once, guarded by user_version.
-function migrate(db: DatabaseSync): void {
+function migrate(db: DatabaseSync, path: string, log: (line: string) => void): void {
+  const v = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
+  if (v < 1 && path !== ":memory:") {
+    const rows = (db.prepare("SELECT COUNT(*) AS n FROM costs").get() as { n: number }).n;
+    const bak = `${path}.pre-cost-v1.bak`;
+    if (rows > 0 && !existsSync(bak)) { db.exec(`VACUUM INTO '${bak.replace(/'/g, "''")}'`); log(`ledger: backed up to ${bak} before the cost migration`); }
+  }
   try { db.exec("ALTER TABLE costs ADD COLUMN tokens INTEGER NOT NULL DEFAULT 0"); } catch { /* already there */ }
   for (const c of COST_COLUMNS) { try { db.exec(`ALTER TABLE costs ADD COLUMN ${c} INTEGER NOT NULL DEFAULT 0`); } catch { /* already there */ } }
-  const v = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
+  try { db.exec("ALTER TABLE costs ADD COLUMN raw_usd REAL"); } catch { /* already there */ }
+  // A baseline table keyed by session id alone (an earlier draft) carries over under the agent-scoped key.
+  if (db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'session_costs'").get()) {
+    db.exec("INSERT OR IGNORE INTO session_baselines (key, cumulative_usd) SELECT json_extract(a.json, '$.id') || ':' || s.session_id, s.cumulative_usd FROM session_costs s JOIN agents a ON json_extract(a.json, '$.session_id') = s.session_id");
+    db.exec("DROP TABLE session_costs");
+  }
   if (v >= 1) return;
   db.exec("BEGIN IMMEDIATE");
   try {
+    db.exec("UPDATE costs SET raw_usd = usd WHERE raw_usd IS NULL");
     // Old rows hold the cumulative total. delta = usd - previous usd for the agent; a drop = a new session.
     const prev = new Map<string, number>();
     const total = new Map<string, number>();
@@ -103,7 +124,7 @@ function migrate(db: DatabaseSync): void {
       const a = JSON.parse(row.json) as AgentRow;
       db.prepare("UPDATE agents SET json = ? WHERE id = ?").run(JSON.stringify({ ...a, total_cost_usd: sum }), id);
       // So the next turn of the live session continues from its cumulative total instead of re-counting it.
-      if (a.session_id) db.prepare("INSERT OR REPLACE INTO session_costs (session_id, cumulative_usd) VALUES (?, ?)").run(a.session_id, prev.get(id) ?? 0);
+      if (a.session_id) db.prepare("INSERT OR REPLACE INTO session_baselines (key, cumulative_usd) VALUES (?, ?)").run(sessionKey(id, a.session_id), prev.get(id) ?? 0);
     }
     db.exec("PRAGMA user_version = 1");
     db.exec("COMMIT");
@@ -112,12 +133,12 @@ function migrate(db: DatabaseSync): void {
 
 export const now = () => new Date().toISOString();
 
-export function openLedger(path: string) {
+export function openLedger(path: string, log: (line: string) => void = () => {}) {
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
   db.exec(SCHEMA);
-  migrate(db);
+  migrate(db, path, log);
   const rows = <T>(sql: string, ...args: (string | number)[]) => db.prepare(sql).all(...args).map((r) => JSON.parse(String((r as { json: string }).json)) as T);
   const one = <T>(sql: string, ...args: (string | number)[]) => { const r = db.prepare(sql).get(...args) as { json: string } | undefined; return r ? (JSON.parse(r.json) as T) : undefined; };
   let depth = 0; // nested calls join the outer transaction
@@ -187,14 +208,21 @@ export function openLedger(path: string) {
         if (a) db.prepare("UPDATE agents SET json = ? WHERE id = ?").run(JSON.stringify({ ...a, total_cost_usd: (a.total_cost_usd ?? 0) + usd, last_active_at: now() }), agentId);
       });
     },
-    // Records a turn from the SDK's cumulative per-session total; returns the delta stored. A new or
+    // Records a turn from the SDK's cumulative per-session total; returns the delta stored.
+    // ASSUMPTION (proven from the ledger): result.total_cost_usd is CUMULATIVE for a resumed session, so
+    // the per-turn cost is the difference from the last total seen for that agent's session. A new or
     // unknown session starts from 0; a total below the last one means a reset, so it counts in full.
+    // An empty session id falls back to the agent-scoped key "<agentId>:" (never a shared baseline).
+    // New rows leave raw_usd NULL; raw_usd only holds the pre-migration values of backfilled rows.
     recordTurn(agentId: string, ticketId: string | null, sessionId: string, cumulativeUsd: number, usage: TurnUsage = {}, tokens = 0): number {
+      if (!sessionId) log(`ledger: ${agentId} reported no session id; using the agent-scoped baseline`);
       return inTx(() => {
-        const r = db.prepare("SELECT cumulative_usd FROM session_costs WHERE session_id = ?").get(sessionId) as { cumulative_usd: number } | undefined;
+        const key = sessionKey(agentId, sessionId);
+        const r = db.prepare("SELECT cumulative_usd FROM session_baselines WHERE key = ?").get(key) as { cumulative_usd: number } | undefined;
         const prev = r?.cumulative_usd ?? 0;
         const delta = cumulativeUsd >= prev ? cumulativeUsd - prev : cumulativeUsd;
-        db.prepare("INSERT OR REPLACE INTO session_costs (session_id, cumulative_usd) VALUES (?, ?)").run(sessionId, cumulativeUsd);
+        if (delta > LARGE_DELTA_USD) log(`ledger: warning: one turn of ${agentId} cost $${delta.toFixed(2)} (over $${LARGE_DELTA_USD}); check the cumulative assumption`);
+        db.prepare("INSERT OR REPLACE INTO session_baselines (key, cumulative_usd) VALUES (?, ?)").run(key, cumulativeUsd);
         this.addCost(agentId, ticketId, delta, tokens, usage);
         return delta;
       });
