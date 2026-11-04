@@ -5,7 +5,8 @@
     "max_concurrent_agents": 20,
     "max_workers_per_manager": 4,
     "daily_spend_usd_per_department": 20,
-    "max_review_rounds": 3
+    "max_review_rounds": 3,
+    "session_rotate_context_tokens": 150000
   },
   "rules": [
     { "tool": "^Bash$", "match": "git\\s+push\\b.*(--force|-f\\b)", "decision": "deny", "reason": "Force-push is never allowed." },

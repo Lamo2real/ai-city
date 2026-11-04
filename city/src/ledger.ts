@@ -41,6 +41,8 @@ export interface AgentRow {
   idle_retire_minutes?: number;
   state: "active" | "retired";
   session_id?: string | null;
+  session_key?: string | null; // what the session belongs to: root ticket (managers) or ticket (workers)
+  context_tokens?: number; // size of the session after its last turn
   prompt_path?: string;
   created_at: string;
   last_active_at: string;
@@ -141,6 +143,7 @@ export function openLedger(path: string) {
       });
     },
     ticketsByStatus: (...statuses: TicketStatus[]) => rows<Ticket>(`SELECT json FROM tickets WHERE status IN (${statuses.map(() => "?").join(",")}) ORDER BY updated_at`, ...statuses),
+    ticketsTo: (to: string) => rows<Ticket>("SELECT json FROM tickets WHERE to_agent = ? ORDER BY updated_at", to),
     ticketsFrom: (from: string) => rows<Ticket>("SELECT json FROM tickets WHERE from_agent = ? ORDER BY updated_at", from),
     inbox: (agentId: string) => rows<Ticket>("SELECT json FROM tickets WHERE status IN ('open','in_progress') AND (to_agent = ? OR json LIKE ?) ORDER BY updated_at", agentId, `%"cc":[%"${agentId}"%`),
 
@@ -165,6 +168,7 @@ export function openLedger(path: string) {
     },
     getQuestion: (id: string) => one<QuestionRow>("SELECT json FROM questions WHERE id = ?", id),
     openQuestions: () => rows<QuestionRow>("SELECT json FROM questions WHERE status = 'open'"),
+    answeredQuestions: () => rows<QuestionRow>("SELECT json FROM questions WHERE status = 'answered'"),
     answerQuestion(id: string, answer: string): QuestionRow {
       return inTx(() => {
         const q = one<QuestionRow>("SELECT json FROM questions WHERE id = ?", id);

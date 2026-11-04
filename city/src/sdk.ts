@@ -32,6 +32,7 @@ export interface TurnResult {
   costUsd: number; // CUMULATIVE for the session (SDK total_cost_usd); the ledger turns it into a per-turn delta
   tokens?: number; // input + output + cache read + cache write tokens of the turn
   usage?: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  contextTokens?: number; // input + cache_read + cache_write of the last result: how big the session is now
 }
 
 export type Runner = (req: TurnRequest) => Promise<TurnResult>;
@@ -100,6 +101,7 @@ export function createRunner({ policy, env, queryFn = query }: { policy: Policy;
     let costUsd = 0;
     let tokens = 0;
     let usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    let contextTokens = 0;
     for await (const m of queryFn({ prompt: req.prompt, options }) as AsyncIterable<SDKMessage>) {
       if (m.type === "stream_event") {
         const e = m.event as { type: string; delta?: { type?: string; text?: string } };
@@ -111,6 +113,7 @@ export function createRunner({ policy, env, queryFn = query }: { policy: Policy;
         costUsd = m.total_cost_usd ?? 0;
         usage = { input: m.usage?.input_tokens ?? 0, output: m.usage?.output_tokens ?? 0, cacheRead: m.usage?.cache_read_input_tokens ?? 0, cacheWrite: m.usage?.cache_creation_input_tokens ?? 0 };
         tokens = usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+        contextTokens = (m.usage?.input_tokens ?? 0) + (m.usage?.cache_read_input_tokens ?? 0) + (m.usage?.cache_creation_input_tokens ?? 0);
         if (m.subtype === "success") text = m.result;
         else {
           const detail = m.errors.join("; ");
@@ -120,6 +123,6 @@ export function createRunner({ policy, env, queryFn = query }: { policy: Policy;
       }
     }
     if (isUsageLimit(text)) throw new UsageLimit(text);
-    return { text, sessionId, costUsd, tokens, usage };
+    return { text, sessionId, costUsd, tokens, usage, contextTokens };
   };
 }

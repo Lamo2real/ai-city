@@ -23,6 +23,7 @@ export interface Policy {
     max_workers_per_manager: number;
     daily_spend_usd_per_department: number;
     max_review_rounds: number;
+    session_rotate_context_tokens?: number; // a manager session bigger than this is replaced by a fresh one + handover
   };
   rules: Rule[];
 }
