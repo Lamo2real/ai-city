@@ -8,6 +8,8 @@ Written 2026-11-04 from the code on branch `feat/openclaw-nervous-system` (first
 
 `main` does not contain any of this work. `git rev-list --count main..HEAD` gives 23, and `main` has no `recordTurn` in `city/src/ledger.ts`, so `main` still has the cost accounting that summed a running session total on every turn. Until this chain is merged, the corrected figures exist only here.
 
+The game-style City view and Jarvis's direct line sit one branch further on, on `feat/city-game-direct-jarvis`, stacked on `feat/openclaw-nervous-system`. See `docs/ARCHITECTURE.md`.
+
 ## The ten highest-impact improvements
 
 | # | Improvement | Status | Evidence in code | Still open |

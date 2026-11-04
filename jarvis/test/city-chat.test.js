@@ -139,6 +139,18 @@ test("chat.idle waits for relayed turns, so a CLI does not exit before Jarvis ha
   assert.equal(settled, true);
 });
 
+test("one agent's status: a bad id is a 404, and a secret in its work is scrubbed", async () => {
+  assert.equal((await call({ path: "/api/city/agent?id=Bad%20Name" })).status, 404);
+  assert.equal((await call({ path: "/api/city/agent?id=nobody" })).status, 404);
+  const secret = `ghp_${"a".repeat(36)}`;
+  city.ledger.putTicket({ id: "t-secret", created_at: new Date().toISOString(), updated_at: new Date().toISOString(), from: "jarvis", to: "secretary", kind: "task", goal: `use ${secret}`, status: "in_review" });
+  const r = await call({ path: "/api/city/agent?id=secretary" });
+  assert.equal(r.status, 200);
+  assert.ok(JSON.parse(r.text).current.some((t) => t.id === "t-secret"));
+  assert.ok(!r.text.includes(secret));
+  city.ledger.updateTicket("t-secret", { status: "cancelled" });
+});
+
 test("the City View gets a snapshot, an agent's audit tail, and talks back through the bus", async () => {
   const snap = await call({ path: "/api/city" });
   assert.equal(snap.status, 200);

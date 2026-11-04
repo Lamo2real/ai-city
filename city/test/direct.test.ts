@@ -84,6 +84,29 @@ test("ask_agent reaches a busy manager at once, in a forked session with no tool
   city.close();
 });
 
+test("ask_agent reaches a worker in its very first turn, in the folder that turn runs in", async () => {
+  let finish!: () => void;
+  const stuck = new Promise<void>((r) => { finish = r; });
+  const asked: TurnRequest[] = [];
+  const runner: Runner = async (req) => {
+    if (req.forkSession) { asked.push(req); return { text: "Coding.", sessionId: "fork", costUsd: 0, tokens: 1 }; }
+    if (req.agentId === "eng-1") { req.onSession?.("s-first"); await stuck; return { text: "", sessionId: "s-first", costUsd: 0, tokens: 0 }; }
+    return { text: "", sessionId: `s-${req.agentId}`, costUsd: 0, tokens: 0 };
+  };
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: basePolicy() });
+  const { manager } = city.createDepartment({ name: "IT", mission: "keep the systems running" });
+  await hireWorker(city, manager, "eng-1");
+  await tool(city, manager, "send_ticket")({ ticket: { to: "eng-1", goal: "code" } });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(city.agent("eng-1").session_id ?? null, null, "no saved session until the turn ends");
+  const r = await city.askAgent("eng-1", "what now?") as { answered_by: string };
+  assert.equal(r.answered_by, "eng-1");
+  assert.equal(asked[0].resume, "s-first");
+  finish();
+  await city.idle();
+  city.close();
+});
+
 test("ask_agent falls back to the record, and says so, when the agent cannot be asked", async () => {
   const failing: Runner = async (req) => { if (req.forkSession) throw new Error("No conversation found"); return { text: "", sessionId: "s", costUsd: 0, tokens: 0 }; };
   const city = createCity({ runner: failing, openclawRunner: quiet, dataDir: dir(), ledgerPath: ":memory:", policy: basePolicy() });
@@ -131,7 +154,7 @@ test("activity follows the turn: understanding, then each tool, then what it wai
   assert.deepEqual(worker.slice(0, 4), ["understanding", "reading", "running", "in_review"]);
   assert.ok(of(manager).includes("reviewing"));
   const row = events.find((e) => e.type === "agent.activity" && e.activity === "running") as { detail: string };
-  assert.equal(row.detail, "npm test");
+  assert.equal(row.detail, "npm", "only the program: a command can carry a secret");
   assert.equal((city.snapshot() as { activities: Record<string, { activity: string }> }).activities["wrk-a"].activity, worker.at(-1));
   city.close();
 });
@@ -157,6 +180,60 @@ test("a branch's state: no commits, unmerged, merged, deleted", async () => {
   assert.equal(await branchState(w), "unmerged");
   r.git("merge", "-q", "--no-ff", "-m", "merge", "feat/x");
   assert.equal(await branchState(w), "merged");
+});
+
+test("a worker does not wait on a branch from another of its manager's tickets", async () => {
+  const r = repo();
+  const city = createCity({ runner: quiet, dataDir: dir(), ledgerPath: ":memory:", policy: basePolicy() });
+  const { manager } = city.createDepartment({ name: "IT", mission: "keep the systems running" });
+  await hireWorker(city, manager, "eng-1");
+  const w = await allocateWorkspace(join(dir(), "w"), "t-7", r.path, [tmpdir(), "/private/tmp", "/var/folders", "/private/var/folders"], "feat/other");
+  const coding = await tool(city, "orchestrator", "send_ticket")({ ticket: { to: manager, goal: "code" } }) as { id: string };
+  city.ledger.updateTicket(coding.id, { workspace: w });
+  await tool(city, "orchestrator", "send_ticket")({ ticket: { to: manager, goal: "research, no code" } });
+  const t = await tool(city, manager, "send_ticket")({ ticket: { to: "eng-1", goal: "look something up" } }) as { id: string };
+  await tool(city, "eng-1", "report")({ ticket_id: t.id, status: "done", summary: "ok", artifacts: [] });
+  await city.idle();
+  assert.equal(city.agent("eng-1").awaiting_merge ?? null, null);
+  city.close();
+});
+
+test("a checked-out branch is not a merged branch when the repo has a remote", async () => {
+  const r = repo();
+  const w = await allocateWorkspace(join(dir(), "w"), "t-6", r.path, [tmpdir(), "/private/tmp", "/var/folders", "/private/var/folders"], "feat/try");
+  writeFileSync(join(w.path, "c.txt"), "c");
+  execFileSync("git", ["-C", w.path, "add", "-A"]);
+  execFileSync("git", ["-C", w.path, "commit", "-qm", "c"], { env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.test", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.test" } });
+  r.git("update-ref", "refs/remotes/origin/HEAD", w.base);
+  r.git("merge", "-q", "--ff-only", "feat/try");
+  assert.equal(await branchState(w), "unmerged");
+});
+
+test("an agent's open tickets are never lost behind newer finished ones", async () => {
+  const city = createCity({ runner: quiet, dataDir: dir(), ledgerPath: ":memory:", policy: basePolicy() });
+  const { manager } = city.createDepartment({ name: "IT", mission: "keep the systems running" });
+  const at = (i: number) => new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString();
+  const row = (id: string, status: string, i: number) => ({ id, from: "orchestrator", to: manager, kind: "task", goal: id, status, created_at: at(i), updated_at: at(i) }) as never;
+  const open = { id: "t-open" };
+  city.ledger.putTicket(row(open.id, "in_progress", 0));
+  for (let i = 1; i < 7; i++) city.ledger.putTicket(row(`t-${i}`, "done", i));
+  assert.ok(city.agentStatus(manager).current.some((t: { id: string }) => t.id === open.id));
+  city.close();
+});
+
+test("live activity shows a command's program and a URL without its query", async () => {
+  let seen: (tool: string, input: Record<string, unknown>) => unknown = () => {};
+  const events: CityEvent[] = [];
+  const runner = async (req: { guard?: typeof seen }) => { seen = req.guard!; await seen("Bash", { command: 'curl -H "Authorization: Bearer abc" https://x.test' }); await seen("Bash", { command: "TOKEN=abc npm test" }); await seen("WebFetch", { url: "https://x.test/a?token=abc" }); return { text: "ok", sessionId: "s", costUsd: 0 }; };
+  const city = createCity({ runner: runner as never, dataDir: dir(), ledgerPath: ":memory:", policy: basePolicy() });
+  city.on((e) => events.push(e));
+  const { manager } = city.createDepartment({ name: "IT", mission: "keep the systems running" });
+  await tool(city, "orchestrator", "send_ticket")({ ticket: { to: manager, goal: "go" } });
+  await city.idle();
+  const details = events.filter((e) => e.type === "agent.activity").map((e) => (e as { detail: string }).detail);
+  assert.ok(details.includes("curl") && details.includes("a command") && details.includes("x.test/a"));
+  assert.ok(!details.join(" ").includes("abc"));
+  city.close();
 });
 
 test("a worker also waits when the workspace is on its manager's ticket and the model left parent_id out", async () => {

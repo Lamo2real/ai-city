@@ -37,7 +37,14 @@ const TOOL_ACTIVITY: Array<[RegExp, Activity]> = [
 ];
 const activityOfTool = (tool: string): Activity => TOOL_ACTIVITY.find(([re]) => re.test(tool))?.[1] ?? "working";
 const activityOfPrompt = (text: string): Activity => (text.includes("[report from") || text.includes("[review request") ? "reviewing" : text.includes("[question from") ? "answering" : text.includes("[result for the owner") ? "summarizing" : "understanding");
-const detailOfInput = (input: Record<string, unknown>): string => String(input.file_path ?? input.path ?? input.command ?? input.url ?? input.targetUrl ?? input.query ?? "").slice(0, 90);
+// Shown on the HUD and the phone, and a command or URL can carry a secret: a command gives only its program, a URL no query.
+const programOf = (command: string): string => { const word = command.trim().split(/\s+/)[0] ?? ""; return word.includes("=") ? "a command" : word; };
+const siteOf = (raw: string): string => { try { const u = new URL(raw); return u.host + u.pathname; } catch { return "a web page"; } };
+const detailOfInput = (input: Record<string, unknown>): string => {
+  const url = input.url ?? input.targetUrl;
+  const detail = input.file_path ?? input.path ?? (input.command !== undefined ? programOf(String(input.command)) : url !== undefined ? siteOf(String(url)) : input.query) ?? "";
+  return String(detail).slice(0, 90);
+};
 const SIDE_MODEL = "claude-haiku-5-5"; // a side question should be quick
 const SIDE_TIMEOUT_MS = 45_000;
 const MERGE_WAIT_MS = 14 * 24 * 3_600_000; // shortcut: an abandoned branch stops holding its worker after 14 days; give the owner a button if that is ever wrong
@@ -183,7 +190,7 @@ export function createCity(opts: CityOptions) {
   // Between turns: what the agent is waiting for, from the ledger.
   function restingActivity(id: string): Activity {
     if (ledger.getAgent(id)?.worker_state === "review") return "in_review";
-    if (ledger.inbox(id).some((t) => t.to === id && t.status === "waiting_on_owner") || ledger.openQuestions().some((q) => q.question.asked_by === id)) return "waiting_owner";
+    if (ledger.ticketsByStatus("waiting_on_owner").some((t) => t.to === id) || ledger.openQuestions().some((q) => q.question.asked_by === id)) return "waiting_owner";
     return ledger.ticketsFrom(id).some((t) => !TERMINAL.has(t.status)) ? "waiting_team" : "idle";
   }
 
@@ -227,7 +234,10 @@ export function createCity(opts: CityOptions) {
     for (let hops = 0; t && hops < 20; hops++) {
       if (t.workspace) return t.workspace;
       const from: string = t.from, sent: string = t.created_at, self: string = t.id;
-      t = t.parent_id ? ledger.getTicket(t.parent_id) : ledger.recentTicketsFor(from, 20).find((x) => x.id !== self && x.created_at <= sent);
+      if (t.parent_id) { t = ledger.getTicket(t.parent_id); continue; }
+      // Only tickets the sender was holding when it sent this one, and no guess between several.
+      const held = ledger.recentTicketsFor(from, 20).filter((x) => x.id !== self && x.created_at <= sent && (!TERMINAL.has(x.status) || (x.updated_at ?? "") >= sent));
+      t = held.length === 1 ? held[0] : undefined;
     }
     return undefined;
   }
@@ -429,6 +439,7 @@ export function createCity(opts: CityOptions) {
   function callRunner(a: AgentRow, ticket: Ticket | undefined, req: TurnRequest): Promise<TurnResult> {
     const run = a.executor === "openclaw" && opts.openclawRunner ? opts.openclawRunner : opts.runner;
     const ctrl = new AbortController();
+    req.signal?.addEventListener("abort", () => ctrl.abort(), { once: true });
     const id = ticket?.id;
     if (id) aborts.set(id, (aborts.get(id) ?? new Set()).add(ctrl));
     const guard = guardFor(a, ticket);
@@ -508,10 +519,12 @@ export function createCity(opts: CityOptions) {
     setWorker(agentId, "working");
     setActivity(agentId, activityOfPrompt(text), ticket?.goal.slice(0, 90) ?? "", ticket?.id ?? null);
     const model = modelFor(a, ticket);
+    const cwd = cwdFor(ticket);
     const result = await callRunner(a, ticket, {
       agentId, systemPrompt: systemPromptFor(a), model, effort: (a.effort as AgentPrompt["effort"]) ?? p.effort,
-      allowedTools: allowedFor(a), tools: toolsForTurn(a), prompt: text, resume: resumeId, cwd: cwdFor(ticket), onText,
-    });
+      allowedTools: allowedFor(a), tools: toolsForTurn(a), prompt: text, resume: resumeId, cwd, onText,
+      onSession: (id) => { sessions.set(agentId, { id, cwd, live: true }); },
+    }).finally(() => { const s = sessions.get(agentId); if (s) s.live = false; });
     ledger.updateAgent(agentId, { session_id: result.sessionId, session_key: key, context_tokens: result.contextTokens ?? 0, last_active_at: now() });
     const delta = ledger.recordTurn(agentId, ticket?.id ?? null, result.sessionId, result.costUsd, result.usage ?? {}, result.tokens ?? 0, { model: capModel(model), durationMs: result.durationMs });
     emit({ type: "cost.update", agent: agentId, ticket_id: ticket?.id ?? null, usd: delta, tokens: result.tokens ?? 0, today: ledger.usageToday() });
@@ -1070,6 +1083,9 @@ export function createCity(opts: CityOptions) {
     }
     return out.slice(-n).map(({ ts, tool, decision, reason }) => ({ ts, tool, decision, reason }));
   };
+  // The session an agent is in right now, or last ran in. A session can only be resumed from the folder it started in.
+  const sessions = new Map<string, { id: string; cwd: string | undefined; live: boolean }>();
+  const openTicketsFor = (id: string) => ledger.ticketsByStatus("open", "in_progress", "in_review", "waiting_on_owner").filter((t) => t.to === id);
   function agentStatus(id: string) {
     const a = agent(id);
     const tickets = ledger.recentTicketsFor(id, 5);
@@ -1077,7 +1093,7 @@ export function createCity(opts: CityOptions) {
       id: a.id, role: a.role, kind: a.kind, department: a.department ?? null, model: a.model, executor: a.executor ?? "sdk", state: a.state, worker_state: a.worker_state ?? null,
       activity: activities.get(id) ?? { activity: restingActivity(id), detail: "", ticket_id: null, at: a.last_active_at },
       awaiting_merge: a.awaiting_merge ?? null,
-      current: tickets.filter((t) => !TERMINAL.has(t.status)).map((t) => ({ id: t.id, status: t.status, from: t.from, goal: t.goal.slice(0, 300) })),
+      current: openTicketsFor(id).map((t) => ({ id: t.id, status: t.status, from: t.from, goal: t.goal.slice(0, 300) })),
       recent: tickets.filter((t) => TERMINAL.has(t.status)).map((t) => ({ id: t.id, status: t.status, goal: t.goal.slice(0, 160), result: t.result?.summary?.slice(0, 500) ?? null, updated_at: t.updated_at })),
       waiting_for: ledger.ticketsFrom(id).filter((t) => !TERMINAL.has(t.status)).map((t) => ({ id: t.id, to: t.to, status: t.status })),
       questions: ledger.openQuestions().filter((q) => q.question.asked_by === id).map((q) => ({ id: q.id, text: q.question.questions[0]?.text ?? "" })),
@@ -1103,14 +1119,17 @@ export function createCity(opts: CityOptions) {
     emit({ type: "jarvis.visit", to: a.id, kind: "ask" });
     const fromLedger = (note: string) => ({ answered_by: "ledger", note, status: agentStatus(a.id) });
     if (a.executor === "openclaw") return fromLedger("This worker runs one task at a time and cannot be asked between runs, so this is what the ledger shows.");
-    if (a.state === "retired" || !a.session_id) return fromLedger(a.state === "retired" ? "This agent has been released, so this is its record." : "This agent has no session yet, so this is what the ledger shows.");
+    const known = sessions.get(a.id);
+    const session = known && (known.live || known.id === a.session_id) ? known : null;
+    const resume = session?.id ?? a.session_id;
+    if (a.state === "retired" || !resume) return fromLedger(a.state === "retired" ? "This agent has been released, so this is its record." : "This agent has no session yet, so this is what the ledger shows.");
     if (gate.paused) return fromLedger("The city is paused on a usage limit, so this is what the ledger shows.");
-    const current = ledger.recentTicketsFor(a.id, 5).find((t) => !TERMINAL.has(t.status));
+    const current = openTicketsFor(a.id)[0];
     const stop = new AbortController();
     const timer = setTimeout(() => stop.abort(), SIDE_TIMEOUT_MS);
     try {
       const r = await Promise.race([
-        callRunner(a, current, { agentId: a.id, systemPrompt: promptOf(a).body, model: SIDE_MODEL, effort: "low", allowedTools: [], tools: [], resume: a.session_id, forkSession: true, cwd: cwdFor(current),
+        callRunner(a, current, { agentId: a.id, systemPrompt: promptOf(a).body, model: SIDE_MODEL, effort: "low", allowedTools: [], tools: [], resume, forkSession: true, signal: stop.signal, cwd: session ? session.cwd : cwdFor(current),
           prompt: `[A question from Jarvis, for the owner, about your work. Answer from what you already know, in up to three short sentences. Say plainly what is done, what is not, and anything stuck. Do no work here and promise nothing.]\n${question.slice(0, 1000)}` }),
         new Promise<never>((_, no) => stop.signal.addEventListener("abort", () => no(new Error("no answer in time")), { once: true })),
       ]);

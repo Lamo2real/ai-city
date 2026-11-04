@@ -112,6 +112,26 @@ The two executors share one runtime. A worker whose spec has `executor: "opencla
 
 OpenClaw has a second, separate role in this repo: `jarvis/openclaw/` is a Telegram-to-Jarvis relay that does need the Gateway. It is a messaging channel, not an executor, and is described in `jarvis/openclaw/README.md`.
 
+## Jarvis's direct line
+
+Status checks do not go through the Orchestrator. Features and changes still do.
+
+- `city_status` and `agent_status` read the ledger and make no model call.
+- `ask_agent` forks the agent's session on Haiku with no tools and a 45 second limit, on no ticket of its own, so the agent's real turn is not disturbed. It answers from the ledger, and says so, when the agent has no session yet, was released, runs on OpenClaw, the city is paused, or no answer came in time.
+- Only Jarvis has these tools. Each emits a `jarvis.visit` event, which the City view draws as Jarvis running over to that agent.
+
+Live results on 2026-11-04, with a team working on a ticket: a status check took about 5 s, asking a manager about 6 s and asking a worker in the middle of its first turn about 8 s, with no Orchestrator turn. A turn announces its session as it starts, so a worker can be asked before its turn ends.
+
+## The City view
+
+`jarvis/hud/city.js` draws a small pixel world on a canvas from real state, using `city-state.js`. Nothing on it is decorative activity: every figure is a real agent, and a figure with nothing to do is at home.
+
+- **Where an agent stands:** core agents at HQ. Others at a desk in their department while they have open work, are hired and not released, or wait for a merge. Otherwise at home.
+- **What it shows:** `agent.activity` events drive the bubble (understanding, reading, coding, running, delegating, waiting for the team, in review). Clicking a figure opens its panel, which reads `GET /api/city/agent?id=` every 3 s while open.
+- **Waiting for a merge:** a worker whose ticket finished with a branch in a workspace, its own ticket's or the sender's, keeps `awaiting_merge` after its release. Its session has ended, but it stays at its desk. `checkMerges` looks once a minute, and the worker goes home when the branch is merged, deleted or has no commits, or after 14 days. Merged means inside `origin/HEAD` or a merged GitHub PR, or inside `HEAD` for a repo with no remote, so checking a branch out to try it does not count. If the worker's ticket names no parent and its sender held several tickets, the city does not guess, and the worker goes home on release.
+
+Agent-written text reaches the view as text only, after the same scrub as the rest of the snapshot. Live activity shows only a command's program and a URL's host and path, because the scrub cannot recognise every secret.
+
 ## How a ticket flows
 
 1. **In.** The owner talks to Jarvis by text, voice or the relay. Jarvis answers quick personal tasks itself and otherwise calls `send_ticket`, which reaches `sendTicket` in `runtime.ts`.

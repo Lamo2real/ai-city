@@ -43,9 +43,9 @@ export async function branchState(w: Pick<Workspace, "repo" | "branch" | "base">
   let head: string;
   try { head = await git(w.repo, "rev-parse", "--verify", "--quiet", `refs/heads/${w.branch}`); } catch { return "merged"; }
   if (w.base && head === w.base) return "nothing";
-  for (const target of ["HEAD", "refs/remotes/origin/HEAD"]) {
-    try { await git(w.repo, "merge-base", "--is-ancestor", head, target); return "merged"; } catch { /* not there */ }
-  }
+  // HEAD only without a remote: checking a branch out to try it must not count as merging it.
+  const target = await git(w.repo, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/HEAD").then(() => "refs/remotes/origin/HEAD", () => "HEAD");
+  try { await git(w.repo, "merge-base", "--is-ancestor", head, target); return "merged"; } catch { /* not there */ }
   try {
     const { stdout } = await run("gh", ["pr", "list", "--head", w.branch, "--state", "merged", "--json", "number", "--limit", "1"], { cwd: w.repo, timeout: 20_000 });
     if ((JSON.parse(stdout) as unknown[]).length) return "merged";
