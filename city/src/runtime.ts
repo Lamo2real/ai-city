@@ -9,9 +9,9 @@ import { z } from "zod";
 import { AGENTS_DIR, WORKER_TOOLS, loadCorePrompt, parsePrompt, renderTemplate, type AgentPrompt } from "./agents.ts";
 import { checksText, runChecks, type Check, type Exec } from "./checks.ts";
 import { now, openLedger, type AgentRow, type Question, type QuestionRow, type Ticket } from "./ledger.ts";
-import { auditPath, canonDepartment, departmentCap, departmentKey, loadPolicy, type Policy } from "./policy.ts";
+import { auditPath, canonDepartment, contextWindow, departmentCap, departmentKey, loadPolicy, type Policy } from "./policy.ts";
 import { validate } from "./schemas.ts";
-import type { JarvisTool, Runner, TurnResult } from "./sdk.ts";
+import { UsageLimit, type JarvisTool, type Runner, type TurnResult } from "./sdk.ts";
 
 export type CityEvent =
   // For Jarvis: what the owner must hear.
@@ -140,17 +140,108 @@ export function createCity(opts: CityOptions) {
     return run;
   }
 
+  // The root of a ticket's tree. Models often leave parent_id out, so a ticket from an agent
+  // falls back to the ticket that agent is working on.
+  function rootOf(t: Ticket): string {
+    let cur = t;
+    for (let i = 0; i < 20; i++) {
+      const up = cur.parent_id ? ledger.getTicket(cur.parent_id) : OWNER_SIDE.has(cur.from) ? undefined : [...ledger.inbox(cur.from)].reverse().find((x) => x.to === cur.from && x.id !== cur.id);
+      if (!up) return cur.id;
+      cur = up;
+    }
+    return cur.id;
+  }
+
+  const CHARS = 6000; // ~1.5k tokens
+  const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+  // What a fresh session needs to carry on, from the ledger alone.
+  function handover(agentId: string): string {
+    const ids = new Set([agentId, ...ledger.children(agentId).map((c) => c.id)]);
+    const open = ledger.ticketsByStatus("open", "in_progress", "in_review", "waiting_on_owner").filter((t) => ids.has(t.to));
+    const decisions = ledger.answeredQuestions().filter((q) => ids.has(q.question.asked_by)).slice(-5);
+    const artifacts = [...new Set(ledger.ticketsByStatus("done").filter((t) => ids.has(t.to)).flatMap((t) => t.result?.artifacts ?? []))].slice(-8);
+    const parts = [
+      `Open tickets:\n${open.slice(-12).map((t) => `- ${t.id} → ${t.to} [${t.status}] ${clip(t.goal, 150)}`).join("\n") || "- none"}`,
+      decisions.length ? `Recent decisions:\n${decisions.map((q) => `- ${clip(q.question.questions.map((x) => x.text).join(" | "), 120)} → ${clip(q.answer ?? "", 120)}`).join("\n")}` : "",
+      artifacts.length ? `Key artifacts:\n${artifacts.map((p) => `- ${clip(p, 150)}`).join("\n")}` : "",
+    ].filter(Boolean);
+    return clip(`[handover: your earlier session was replaced by a fresh one; this is its state from the ledger]\n${parts.join("\n")}\n\n`, CHARS);
+  }
+
+  // Managers (and core agents) keep a session per root ticket, rotated when it grows too big.
+  // Workers start fresh per ticket; a follow-up on the same ticket (an answer, a reminder) resumes.
+  function sessionKey(a: AgentRow, ticket?: Ticket): string {
+    if (!ticket) return "none";
+    if (a.kind === "worker") return ticket.kind === "direct_instruction" && ticket.parent_id ? ticket.parent_id : ticket.id;
+    return rootOf(ticket);
+  }
+
+  const request = (a: AgentRow, ticket: Ticket | undefined, over: { prompt: string; resume?: string | null; model?: string; tools?: boolean }) => {
+    const p = promptOf(a);
+    return opts.runner({
+      agentId: a.id, systemPrompt: p.body, model: over.model ?? a.model, effort: over.tools === false ? "low" : ((a.effort as AgentPrompt["effort"]) ?? p.effort),
+      allowedTools: over.tools === false ? [] : [...new Set([...p.tools, ...a.tools])], tools: over.tools === false ? [] : toolsFor(a.id), prompt: over.prompt, resume: over.resume, cwd: cwdFor(ticket),
+    });
+  };
+  const KEEP = "Keep: your identity and role, open tickets (id, goal, status), decisions and answered questions, file paths and constraints. Drop raw logs and file dumps.";
+
+  // Compaction. 1) the SDK's own /compact on the resumed session (source: the CLI's built-in slash
+  // command; the SDK reports it with a compact_boundary message). 2) If that fails, a fresh session
+  // seeded with a summary written by Haiku, else the ledger handover alone.
+  async function compact(a: AgentRow, ticket?: Ticket): Promise<{ sessionId: string | null; handover: string }> {
+    const before = a.context_tokens ?? 0;
+    const log2 = (method: string, after: number, sessionAfter: string | null) => ledger.addCompaction({ agent_id: a.id, session_before: a.session_id ?? null, session_after: sessionAfter, tokens_before: before, tokens_after: after, method });
+    try {
+      const r = await request(a, ticket, { prompt: `/compact ${KEEP}`, resume: a.session_id, tools: false });
+      ledger.recordTurn(a.id, ticket?.id ?? null, r.sessionId, r.costUsd, r.usage ?? {}, r.tokens ?? 0);
+      if (r.compact) {
+        ledger.updateAgent(a.id, { session_id: r.sessionId, context_tokens: r.compact.post });
+        log2("sdk_compact", r.compact.post, r.sessionId);
+        return { sessionId: r.sessionId, handover: "" };
+      }
+    } catch (err) {
+      if (err instanceof UsageLimit) throw err;
+      log(`${a.id}: /compact failed: ${(err as Error).message}`);
+    }
+    const ledgerPart = handover(a.id);
+    let summary = "";
+    try {
+      const r = await request(a, ticket, { prompt: `Write a handover summary of this whole session for your successor, under 1000 words. ${KEEP}`, resume: a.session_id, model: "claude-haiku-5-5", tools: false });
+      ledger.recordTurn(a.id, ticket?.id ?? null, r.sessionId, r.costUsd, r.usage ?? {}, r.tokens ?? 0);
+      summary = r.text.trim();
+    } catch (err) {
+      if (err instanceof UsageLimit) throw err;
+      log(`${a.id}: haiku summary failed: ${(err as Error).message}`);
+    }
+    const carried = (summary ? `[summary of your earlier session, written by Haiku]\n${summary}\n\n` : "") + ledgerPart;
+    ledger.updateAgent(a.id, { session_id: null, context_tokens: 0 });
+    log2(summary ? "handover_haiku" : "handover_ledger", Math.ceil(carried.length / 4), null);
+    return { sessionId: null, handover: carried };
+  }
+
   async function turn(agentId: string, text: string, ticket?: Ticket, onText?: (t: string) => void): Promise<TurnResult> {
     const a = agent(agentId);
     const p = promptOf(a);
+    const key = sessionKey(a, ticket);
+    let resumeId = a.session_id && a.session_key === key ? a.session_id : null;
+    // A session at compact_at_context_pct of its model's window is compacted before it runs another turn.
+    let carried = "";
+    if (resumeId && (a.context_tokens ?? 0) >= contextWindow(a.model, policy) * (policy.session?.compact_at_context_pct ?? 60) / 100) {
+      const c = await compact(a, ticket);
+      resumeId = c.sessionId;
+      carried = c.handover;
+    }
+    // A fresh session for an agent that has had one before gets the handover in place of its history.
+    if (!resumeId && !carried && a.session_key != null && a.kind !== "worker") carried = handover(agentId);
+    text = carried + text;
     log(`${agentId}: turn (${text.slice(0, 80).replace(/\s+/g, " ")})`);
     const result = await opts.runner({
       agentId, systemPrompt: p.body, model: a.model, effort: (a.effort as AgentPrompt["effort"]) ?? p.effort,
       // Core agents get exactly their prompt's tools. Hired agents get the prompt's own tools (report, ask_user, …)
       // plus what the spec granted (Bash, Write, …).
-      allowedTools: a.kind === "core" ? [...p.tools] : [...new Set([...p.tools, ...a.tools, ...(a.kind === "worker" ? WORKER_TOOLS : [])])], tools: toolsFor(agentId), prompt: text, resume: a.session_id, cwd: cwdFor(ticket), onText,
+      allowedTools: a.kind === "core" ? [...p.tools] : [...new Set([...p.tools, ...a.tools, ...(a.kind === "worker" ? WORKER_TOOLS : [])])], tools: toolsFor(agentId), prompt: text, resume: resumeId, cwd: cwdFor(ticket), onText,
     });
-    ledger.updateAgent(agentId, { session_id: result.sessionId, last_active_at: now() });
+    ledger.updateAgent(agentId, { session_id: result.sessionId, session_key: key, context_tokens: result.contextTokens ?? 0, last_active_at: now() });
     const delta = ledger.recordTurn(agentId, ticket?.id ?? null, result.sessionId, result.costUsd, result.usage ?? {}, result.tokens ?? 0);
     emit({ type: "cost.update", agent: agentId, ticket_id: ticket?.id ?? null, usd: delta, tokens: result.tokens ?? 0, today: ledger.usageToday() });
     return result;
@@ -429,9 +520,21 @@ export function createCity(opts: CityOptions) {
     return "orchestrator";
   }
 
+  // Orchestrator only: the next turn of that agent starts a fresh session with a handover.
+  function resetSession(by: string, id: string): { reset: string } {
+    if (by !== "orchestrator") throw new Error("reset_session is for the orchestrator only");
+    agent(id);
+    ledger.updateAgent(id, { session_id: null });
+    return { reset: id };
+  }
+
   function toolsFor(agentId: string): JarvisTool[] {
     const obj = z.record(z.string(), z.unknown());
+    const gated: JarvisTool[] = agentId === "orchestrator"
+      ? [{ name: "reset_session", description: "Clear an agent's stored session so its next turn starts fresh with a handover summary.", schema: { agent_id: z.string() }, handler: async ({ agent_id }) => resetSession(agentId, agent_id as string) }]
+      : [];
     return [
+      ...gated,
       { name: "hire_agent", description: "Hire a manager or worker from an agent spec (schemas/agent_spec.schema.json). Reuse from list_registry first.", schema: { spec: obj }, handler: async ({ spec }) => hire(agentId, spec as Record<string, unknown>) },
       { name: "retire_agent", description: "Retire an agent you hired. It stays in the registry for reuse.", schema: { id: z.string() }, handler: async ({ id }) => { retire(agentId, id as string); return { retired: id }; } },
       { name: "list_registry", description: "Find existing agents by role, department, skill or id. Empty query lists all, retired ones included.", schema: { query: z.string() }, handler: async ({ query }) => listRegistry(query as string) },
@@ -475,6 +578,9 @@ export function createCity(opts: CityOptions) {
     pathOf,
     on(fn: (e: CityEvent) => void) { listeners.add(fn); return () => { listeners.delete(fn); }; },
     resume,
+    resetSession,
+    compactions: (agentId?: string) => ledger.compactions(agentId),
+    compactionStats: (since?: string) => ledger.compactionStats(since),
     idle,
     openTickets: () => ledger.ticketsByStatus("open", "in_progress", "in_review", "waiting_on_owner"),
     // Everything the City View needs to draw the current state before events arrive.

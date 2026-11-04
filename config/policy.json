@@ -8,6 +8,10 @@
     "daily_spend_usd_per_department": 20,
     "max_review_rounds": 3
   },
+  "session": {
+    "compact_at_context_pct": 60,
+    "model_context_tokens": { "opus": 200000, "sonnet": 200000, "haiku": 200000, "fable": 200000, "default": 200000 }
+  },
   "rules": [
     { "tool": "^Bash$", "match": "git\\s+push\\b.*(--force|-f\\b)", "decision": "deny", "reason": "Force-push is never allowed." },
     { "tool": "^Bash$", "match": "git\\s+push\\b.*\\b(main|master)\\b", "decision": "deny", "reason": "Never push to main. Open a PR; the Fable reviewer gates merges." },
