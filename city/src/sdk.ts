@@ -23,12 +23,15 @@ export interface TurnRequest {
   cwd?: string;
   onText?: (text: string) => void;
   onTool?: (name: string, input: unknown) => void;
+  onSession?: (id: string) => void; // as soon as the session has an id, so it can be asked about mid-turn
   signal?: AbortSignal;
   fallbackModel?: string;
   attempt?: number;
   // The runtime's policy decision for one tool call (approvals, autonomy levels). Without it: decide() alone.
   guard?: (toolName: string, input: Record<string, unknown>) => { allow: true } | { allow: false; message: string };
   capabilities?: string[];
+  // A side question: reads this session's history in a copy, so it needs no turn slot and leaves the agent's own work alone.
+  forkSession?: boolean;
 }
 
 export interface TurnResult {
@@ -93,6 +96,7 @@ export function createRunner({ policy, env, queryFn = query }: { policy: Policy;
       env,
       abortController: abort,
       resume: req.resume ?? undefined,
+      forkSession: req.forkSession,
       // dontAsk denies anything that would prompt; the hook below gates every call, allowed or not.
       hooks: {
         PreToolUse: [{
@@ -120,7 +124,9 @@ export function createRunner({ policy, env, queryFn = query }: { policy: Policy;
     let compact: TurnResult["compact"];
     let durationMs = 0;
     try {
+    let announced = false;
     for await (const m of queryFn({ prompt: req.prompt, options }) as AsyncIterable<SDKMessage>) {
+      if (!announced && m.session_id) { announced = true; req.onSession?.(m.session_id); }
       if (m.type === "stream_event") {
         const e = m.event as { type: string; delta?: { type?: string; text?: string } };
         if (e.type === "content_block_delta" && e.delta?.type === "text_delta" && e.delta.text) req.onText?.(e.delta.text);

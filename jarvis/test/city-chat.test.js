@@ -70,7 +70,7 @@ test("typed and spoken turns share one Jarvis session and memory", async () => {
   assert.equal(turns[1].agentId, "jarvis");
   assert.equal(turns[1].model, "claude-haiku-5-5");
   assert.ok(turns[1].allowedTools.includes("mcp__jarvis__send_ticket"));
-  assert.deepEqual(turns[1].tools.map((t) => t.name).sort(), ["ask_user", "recall", "remember", "send_ticket"], "Jarvis carries only the tools its prompt lists");
+  assert.deepEqual(turns[1].tools.map((t) => t.name).sort(), ["agent_status", "ask_agent", "ask_user", "city_status", "recall", "remember", "send_ticket"], "Jarvis carries only the tools its prompt lists");
   await chat("hello from the terminal", "cli");
   assert.equal(turns[2].resume, undefined, "another conversation has its own session");
 });
@@ -139,12 +139,24 @@ test("chat.idle waits for relayed turns, so a CLI does not exit before Jarvis ha
   assert.equal(settled, true);
 });
 
+test("one agent's status: a bad id is a 404, and a secret in its work is scrubbed", async () => {
+  assert.equal((await call({ path: "/api/city/agent?id=Bad%20Name" })).status, 404);
+  assert.equal((await call({ path: "/api/city/agent?id=nobody" })).status, 404);
+  const secret = `ghp_${"a".repeat(36)}`;
+  city.ledger.putTicket({ id: "t-secret", created_at: new Date().toISOString(), updated_at: new Date().toISOString(), from: "jarvis", to: "secretary", kind: "task", goal: `use ${secret}`, status: "in_review" });
+  const r = await call({ path: "/api/city/agent?id=secretary" });
+  assert.equal(r.status, 200);
+  assert.ok(JSON.parse(r.text).current.some((t) => t.id === "t-secret"));
+  assert.ok(!r.text.includes(secret));
+  city.ledger.updateTicket("t-secret", { status: "cancelled" });
+});
+
 test("the City View gets a snapshot, an agent's audit tail, and talks back through the bus", async () => {
   const snap = await call({ path: "/api/city" });
   assert.equal(snap.status, 200);
   const s = JSON.parse(snap.text);
   assert.ok(Array.isArray(s.agents) && s.agents.some((a) => a.id === "orchestrator"));
-  assert.deepEqual(Object.keys(s).sort(), ["agents", "caps", "city", "department_agents", "departments", "parked", "questions", "spend", "tickets", "usage"]);
+  assert.deepEqual(Object.keys(s).sort(), ["activities", "agents", "caps", "city", "department_agents", "departments", "parked", "questions", "spend", "tickets", "usage"]);
   assert.equal((await call({ path: "/api/city/audit?agent=Bad%20Name" })).status, 400);
   assert.equal((await call({ path: "/api/city/audit?agent=orchestrator" })).status, 200);
   const noAt = await call({ method: "POST", path: "/api/city/instruct", body: { text: "hello" } });

@@ -9,7 +9,7 @@ import { after, before, test } from "node:test";
 import { createCity, loadPolicy } from "city";
 import { createCityChat } from "../server/city-chat.js";
 import { createServer } from "../server/server.js";
-import { cityCosts, cityHealth, cityIntegrations, cityParked, citySnapshot, cityTrace, cityWorkforce } from "./fixtures/city.js";
+import { cityBusy, cityEmpty, cityCosts, cityHealth, cityIntegrations, cityParked, citySnapshot, cityTrace, cityWorkforce } from "./fixtures/city.js";
 
 // Drives the Google Chrome installed on this Mac (no browser download needed).
 let chromium = null;
@@ -28,7 +28,7 @@ before(async () => {
   server = createServer({ booqyDir: dir, dataDir: dir, port: 0, getState: async () => ({}), chat, speak: async () => null, transcribe: async () => "" });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   port = server.address().port;
-  browser = await chromium.launch({ channel: "chrome", headless: true, args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
+  browser = await chromium.launch({ channel: "chrome", headless: true });
 });
 after(async () => { await browser?.close(); server?.close(); city?.close(); });
 
@@ -822,8 +822,152 @@ test("the panels against the real backend routes, with the fake runner: real sha
   await page.waitForFunction(() => /Nothing is parked/.test(document.querySelector("#citypanel").textContent));
   // The real trace of what just happened, from the agent's panel.
   await page.locator("#citylist button[data-agent='mgr-e2e-dept']").dispatchEvent("click");
+  await page.waitForFunction(() => /Recent results|Working on \(1\)/.test(document.querySelector("#citypanel").textContent));
+  assert.doesNotMatch(await panelText(page), /Live details did not load/, "the real /api/city/agent answers");
   await page.locator("#citypanel button", { hasText: /^Story of/ }).click();
   await page.waitForFunction(() => /mgr-e2e-dept: parked → in_progress/.test(document.querySelector("#citypanel").textContent));
   assert.deepEqual(errors, []);
   await page.close();
+});
+
+// ---- The game ----
+// Where a figure stands, read from the running scene: state the tests may look at, never drive.
+const person = (page, id) => page.evaluate((who) => { const p = window.__city?.people.get(who); return p ? { x: p.x, y: p.y, key: p.key, moving: !!(p.move || p.route), visual: p.visual } : null; }, id);
+
+test("every agent sits where the real state says, and clicking one on the map opens what it is doing, kept fresh", { skip }, async () => {
+  const page = await openCity(cityBusy());
+  let reads = 0;
+  const live = { id: "ios-dev", role: "iOS Developer", kind: "worker", department: "App", model: "claude-sonnet-5-5", executor: "openclaw", state: "active", worker_state: "working", activity: { activity: "coding", detail: "Sources/Habit.swift", ticket_id: "t-ios-dev", at: "" }, awaiting_merge: null, current: [{ id: "t-ios-dev", status: "in_progress", from: "app-manager", goal: "Build the <b>habit</b> screen" }], recent: [{ id: "t-old", status: "done", goal: "Earlier", result: "Shipped the login", updated_at: "" }], waiting_for: [{ id: "t-w", to: "qa-tester", status: "open" }], questions: [{ id: "q1", text: "Dark mode too?" }], recent_tools: [{ tool: "Edit", decision: "allow" }, { tool: "Bash", decision: "deny" }], last_active_at: "", cost_usd_estimate: 0.5 };
+  await page.route("**/api/city/agent?**", (r) => { reads++; return r.fulfill(json(reads > 1 ? { ...live, current: [{ ...live.current[0], goal: "A fresher goal" }] } : live)); });
+  await page.waitForFunction(() => document.querySelector("#city").dataset.people === "27");
+  // A real mouse click on the figure, wherever it stands on screen.
+  const box = await page.evaluate(() => { const p = window.__city.people.get("ios-dev"), v = window.__city.view; return { x: (p.x - v.x) * v.zoom, y: (p.y - 12 - v.y) * v.zoom }; });
+  const root = await page.locator("#city").boundingBox();
+  await page.mouse.click(root.x + box.x, root.y + box.y);
+  await page.waitForSelector("#citypanel[data-kind='agent']");
+  await page.waitForFunction(() => /Writing code: Sources\/Habit\.swift/.test(document.querySelector("#citypanel .doing").textContent));
+  await page.waitForFunction(() => /Shipped the login/.test(document.querySelector("#citypanel").textContent));
+  const text = await panelText(page);
+  for (const part of ["iOS Developer", "Sonnet", "App", "openclaw", "qa-tester: open", "Dark mode too?", "Shipped the login", "Edit", "deny: Bash", "est. $0.500", NOTE]) assert.ok(text.includes(part), part);
+  assert.equal(await page.locator("#citypanel b").count(), 0, "agent text stays text");
+  assert.ok(text.includes("Build the <b>habit</b> screen"));
+  // The panel reads again by itself while open, and an event updates the plain words at once.
+  await page.waitForFunction(() => /A fresher goal/.test(document.querySelector("#citypanel").textContent), null, { timeout: 6000 });
+  await fire(page, { type: "agent.activity", id: "ios-dev", activity: "reading", detail: "notes.md", ticket_id: "t-ios-dev", at: "" });
+  await page.waitForFunction(() => /Reading a file: notes\.md/.test(document.querySelector("#citypanel .doing").textContent));
+  assert.equal((await person(page, "ios-dev")).visual, "reading");
+  await page.keyboard.press("Escape");
+  await page.waitForSelector("#citypanel[hidden]", { state: "attached" });
+  assert.deepEqual(page.errors, []);
+  await page.close();
+});
+
+test("a page load places everyone with no journeys; a prompt dashes a manager from home in well under a second; done, it walks home", { skip }, async () => {
+  const page = await openCity(cityBusy());
+  await page.waitForFunction(() => window.__city?.people.size === 27);
+  for (const id of ["ios-dev", "web-dev", "old-writer", "travel-manager", "jarvis"]) assert.equal((await person(page, id)).moving, false, id);
+  assert.match((await person(page, "ios-dev")).key, /^desk:App:/);
+  assert.match((await person(page, "web-dev")).key, /^desk:App:/, "waiting for the merge holds the desk");
+  assert.equal((await person(page, "old-writer")).key, "home");
+  assert.equal((await person(page, "travel-manager")).key, "home");
+  const start = await person(page, "travel-manager");
+  const t = { id: "t-trip", from: "orchestrator", to: "travel-manager", kind: "task", goal: "Plan the trip", status: "open", created_at: "", updated_at: "" };
+  const t0 = Date.now();
+  await fire(page, { type: "ticket.status", ticket: t, previous: null });
+  await page.waitForFunction(() => { const p = window.__city.people.get("travel-manager"); return p.key.startsWith("desk:Travel") && !p.move; }, null, { timeout: 2000, polling: 20 });
+  assert.ok(Date.now() - t0 < 900, `dash took ${Date.now() - t0} ms`);
+  const atDesk = await person(page, "travel-manager");
+  assert.notEqual(atDesk.y, start.y);
+  await fire(page, { type: "ticket.status", ticket: { ...t, status: "done" }, previous: "in_progress" });
+  assert.equal((await person(page, "travel-manager")).key, "home");
+  assert.equal((await person(page, "travel-manager")).moving, true, "going home is a walk");
+  await page.waitForTimeout(300);
+  const walking = await person(page, "travel-manager");
+  assert.ok(walking.moving && (walking.x !== atDesk.x || walking.y !== atDesk.y), "relaxed, on its way");
+  // Merged: the one who was waiting leaves.
+  await fire(page, { type: "worker.merged", id: "web-dev", branch: "feat/web-login" });
+  assert.match((await person(page, "web-dev")).key, /^desk:/, "still hired and not released, so it keeps the desk");
+  await fire(page, { type: "worker.state", id: "web-dev", state: "released", previous: "completed" });
+  await fire(page, { type: "agent.retired", id: "web-dev" });
+  assert.equal((await person(page, "web-dev")).key, "home");
+  assert.deepEqual(page.errors, []);
+  await page.close();
+});
+
+test("with reduced motion everyone moves instantly and nothing flies", { skip }, async () => {
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+  const page = await ctx.newPage();
+  await page.route("**/api/city", (r) => r.fulfill(json(cityBusy())));
+  await page.goto(`http://localhost:${port}/?view=city`);
+  await page.waitForFunction(() => window.__city?.people.size === 27, null, { timeout: 15000 });
+  const t = { id: "t-trip", from: "orchestrator", to: "travel-manager", kind: "task", goal: "Plan", status: "open", created_at: "", updated_at: "" };
+  await fire(page, { type: "ticket.status", ticket: t, previous: null });
+  const p = await person(page, "travel-manager");
+  assert.match(p.key, /^desk:Travel/);
+  assert.equal(p.moving, false);
+  assert.equal(await page.getAttribute("#city", "data-couriers"), null);
+  await ctx.close();
+});
+
+test("Jarvis's visit: a dash, a word over its head and back; a repeat within a second is not another visit; an unknown agent is none", { skip }, async () => {
+  const page = await openCity(cityBusy());
+  await page.waitForFunction(() => window.__city?.people.size === 27);
+  const home = await person(page, "jarvis");
+  await fire(page, { type: "jarvis.visit", to: "ios-dev", kind: "status" });
+  await fire(page, { type: "jarvis.visit", to: "ios-dev", kind: "status" });
+  assert.equal(await page.getAttribute("#city", "data-visits"), "1");
+  const target = await person(page, "ios-dev");
+  await page.waitForFunction((t) => { const j = window.__city.people.get("jarvis"); return !j.move && Math.abs(j.y - t.y) < 1; }, target, { timeout: 2000 });
+  assert.match(await page.textContent("#cityfeed"), /Jarvis checks in with ios-dev/);
+  await page.waitForFunction((h) => { const j = window.__city.people.get("jarvis"); return !j.move && Math.abs(j.x - h.x) < 1 && Math.abs(j.y - h.y) < 1; }, home, { timeout: 4000 });
+  await page.waitForTimeout(1050);
+  await fire(page, { type: "jarvis.visit", to: "nobody-here", kind: "ask" });
+  assert.equal(await page.getAttribute("#city", "data-visits"), "1");
+  assert.deepEqual(page.errors, []);
+  await page.close();
+});
+
+test("the empty city says what is true, the legend lists every mark, and the keyboard list reaches everyone", { skip }, async () => {
+  const page = await openCity(cityEmpty());
+  await page.waitForSelector("#cityempty:not([hidden])");
+  assert.match(await page.textContent("#cityempty"), /No departments yet/);
+  assert.equal(await page.locator("#citylist button[data-agent]").count(), 4, "the core and no one else");
+  await page.click("#citydepts [data-view='legend']");
+  await page.waitForSelector("#citypanel[data-kind='legend']");
+  assert.equal(await page.locator("#citypanel [data-visual]").count(), 23);
+  for (const word of ["Needs you", "Coding", "Waiting for a merge", "Failed", "Blocked", "Paused"]) assert.ok((await panelText(page)).includes(word), word);
+  await page.keyboard.press("Escape");
+  await page.locator("#citylist button[data-agent='reviewer']").focus();
+  assert.ok(await page.isVisible("#citylist button[data-agent='reviewer']"), "the list shows itself when reached by keyboard");
+  await page.keyboard.press("Enter");
+  await page.waitForSelector("#citypanel[data-kind='agent']");
+  assert.match(await panelText(page), /Reviewer Gate/);
+  await page.close();
+});
+
+test("the view stops drawing while hidden, and a phone selects by touch with the sheet below the figure", { skip }, async () => {
+  const page = await openCity(cityBusy());
+  await page.click("#statusbtn");
+  await page.waitForTimeout(200);
+  const hidden = await page.evaluate(() => new Promise((done) => { const c = document.querySelector("#city canvas"), g = c.getContext("2d"), orig = g.drawImage; let n = 0; g.drawImage = function (...a) { n++; return orig.apply(this, a); }; setTimeout(() => done(n), 500); }));
+  assert.equal(hidden, 0, "no drawing while the City view is hidden");
+  await page.click("#citybtn");
+  await page.waitForFunction(() => { const c = document.querySelector("#city canvas"); return c.width > 10; });
+  await page.close();
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true });
+  const phone = await ctx.newPage();
+  await phone.route("**/api/city", (r) => r.fulfill(json(cityBusy())));
+  await phone.route("**/api/city/agent?**", (r) => r.fulfill(json({ error: "no such agent" }, 404)));
+  await phone.goto(`http://localhost:${port}/?view=city`);
+  await phone.waitForFunction(() => window.__city?.people.size === 27, null, { timeout: 15000 });
+  assert.ok(await noSideways(phone));
+  // Bring the figure into view through the map's own zoom-free pan, then tap it.
+  const spot = await phone.evaluate(() => { const c = window.__city, p = c.people.get("ios-dev"), v = c.view; return { x: (p.x - v.x) * v.zoom, y: (p.y - 12 - v.y) * v.zoom }; });
+  const r = await phone.locator("#city").boundingBox();
+  await phone.touchscreen.tap(r.x + spot.x, r.y + spot.y);
+  await phone.waitForSelector("#citypanel[data-kind='agent']");
+  assert.match(await phone.textContent("#citypanel"), /iOS Developer/);
+  await phone.waitForFunction(() => /Live details did not load/.test(document.querySelector("#citypanel").textContent), null, { timeout: 5000 }); // an unanswered read says so
+  assert.ok(await noSideways(phone));
+  await ctx.close();
 });

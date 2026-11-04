@@ -463,7 +463,7 @@ const portOpen = (port) => new Promise((resolve) => {
 // The City View's data: a snapshot to start from, an agent's last actions, and the two ways the owner
 // talks back through the bus (an @mention direct instruction, an answer to a question).
 // The phone keeps what it had: the view, answering questions and direct instructions. Running the organization needs a trusted listener.
-const PHONE_CITY = new Set(["/api/city", "/api/city/audit", "/api/city/instruct", "/api/city/answer"]);
+const PHONE_CITY = new Set(["/api/city", "/api/city/agent", "/api/city/audit", "/api/city/instruct", "/api/city/answer"]);
 export async function handleCity(req, res, city, path, phone = false) {
   if (!city) return sendJson(res, 404, { error: "the city backend is not running" });
   if (phone && !PHONE_CITY.has(path)) return sendJson(res, 403, { error: "not available from the phone" });
@@ -471,6 +471,11 @@ export async function handleCity(req, res, city, path, phone = false) {
   const url = new URL(req.url, "http://localhost");
   if (req.method === "GET") {
     const { health, loadIntegrations, probeIntegrations, workforce } = await import("city");
+    if (path === "/api/city/agent") {
+      const id = url.searchParams.get("id") ?? "";
+      if (!/^[\w-]{1,64}$/.test(id) || !city.ledger.getAgent(id)) return sendJson(res, 404, { error: "no such agent" });
+      return sendJson(res, 200, scrubDeep(city.agentStatus(id)));
+    }
     if (path === "/api/city/costs") return sendJson(res, 200, city.ledger.costReport());
     if (path === "/api/city/workforce") return sendJson(res, 200, scrubDeep(workforce(city.ledger)));
     if (path === "/api/city/health") return sendJson(res, 200, health(city.ledger, city.gate));

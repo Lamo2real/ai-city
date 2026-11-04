@@ -71,6 +71,9 @@ test("the phone keeps its view, answers and instructions, and cannot run the org
   const [req, res] = fake("GET", "/api/city");
   await handleCity(req, res, city, "/api/city", true);
   assert.equal(res.code, 200);
+  const [one, oneRes] = fake("GET", "/api/city/agent?id=orchestrator");
+  await handleCity(one, oneRes, city, "/api/city/agent", true);
+  assert.equal(oneRes.code, 200, "the status panel works on the phone");
 });
 
 test("an approval cannot be decided from the phone; an ordinary answer can", async () => {
