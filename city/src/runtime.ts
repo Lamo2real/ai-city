@@ -120,6 +120,8 @@ const CORE: Array<{ name: "jarvis" | "orchestrator" | "secretary" | "reviewer"; 
   { name: "secretary", parent: "orchestrator" },
   { name: "reviewer", parent: "orchestrator" },
 ];
+const SPEND_APPROVAL_MAX_MS = 30 * 60 * 1000;
+const OWNER_ONLY_MSG = "spend approvals need the owner's own answer (HUD/phone), not a relay";
 // "automation" is a scheduled or external event: its results reach the owner the same way, through the Secretary and Jarvis.
 const OWNER_SIDE = new Set(["owner", "jarvis", "automation"]);
 export interface CityInboundEvent { source: string; type: string; summary: string; data?: unknown; idempotency_key?: string }
@@ -680,11 +682,45 @@ export function createCity(opts: CityOptions) {
     log(`${agentId}: retired (temporary, work done)`);
   }
 
+  function checkSpendApproval(t: Ticket): void {
+    const a = t.approval;
+    if (t.to !== "jarvis") throw new Error("a spend_approval ticket goes to jarvis");
+    if (!a) throw new Error("a spend_approval ticket needs an approval { origin, max_amount, currency, expires_at, question_id }");
+    let u: URL;
+    try { u = new URL(a.origin); } catch { throw new Error("approval.origin must be a URL origin like https://shop.example"); }
+    if (!/^https?:$/.test(u.protocol) || u.origin !== a.origin) throw new Error("approval.origin must be exactly an http(s) origin: scheme and host, no path");
+    const expires = Date.parse(a.expires_at);
+    const ahead = expires - Date.parse(now());
+    if (!Number.isFinite(expires) || ahead <= 0) throw new Error("approval.expires_at must be in the future");
+    if (ahead > SPEND_APPROVAL_MAX_MS) throw new Error("approval.expires_at must be at most 30 minutes ahead");
+    // The owner must have said yes: a question the orchestrator asked, answered by the owner (or Jarvis relaying his words)
+    // in the last 30 minutes, naming this origin and amount. A manager's answer never counts.
+    const q = a.question_id ? ledger.getQuestion(a.question_id) : undefined;
+    if (!q) throw new Error("approval.question_id must name a question the orchestrator asked the owner");
+    if (q.question.asked_by !== "orchestrator") throw new Error("approval.question_id must be a question the orchestrator asked");
+    if (q.status !== "answered" || !q.answered_by) throw new Error("that question was not answered by the owner");
+    // Jarvis browses the shop, so it must not approve its own purchase: only the owner's direct answer (HUD, phone, answer API) counts.
+    if (q.answered_by !== "owner") throw new Error(OWNER_ONLY_MSG);
+    const answeredAt = Date.parse(q.answered_at ?? "");
+    if (!Number.isFinite(answeredAt) || Date.parse(now()) - answeredAt > SPEND_APPROVAL_MAX_MS || answeredAt > Date.parse(now()) + 60_000) throw new Error("the owner's answer is older than 30 minutes; ask again");
+    const text = q.question.questions.map((x) => x.text).join(" ");
+    const amounts = (text.match(/\d+(?:[.,]\d+)?/g) ?? []).map((n) => Number(n.replace(",", ".")));
+    if (!text.includes(a.origin) || !amounts.includes(a.max_amount)) throw new Error("the question must name the same origin and max_amount as the approval");
+    const ans = (q.answer ?? "").trim();
+    if (!/^(yes|yep|yeah|y|ok|okay|sure|approve[d]?|go ahead|do it|confirm(ed)?)\b/i.test(ans) || /\b(no|not|don't|dont|cancel|never)\b/i.test(ans)) throw new Error("the owner's answer was not a yes");
+  }
+
   function sendTicket(from: string, input: Record<string, unknown>): Ticket {
     // Only Jarvis speaks for the owner, so only Jarvis may name another sender.
     const draft = { id: newId("t"), created_at: now(), kind: "task", ...input, status: "open", from: from === "jarvis" && typeof input.from === "string" && input.from ? input.from : from } as Record<string, unknown>;
     delete draft.gate;
     for (const k of Object.keys(draft)) if (draft[k] === undefined) delete draft[k];
+    // A spend approval is a permission slip, so nobody can forge one: only the Orchestrator sends it, as itself, to Jarvis.
+    if (draft.kind === "spend_approval") {
+      if (from !== "orchestrator") throw new Error("only the orchestrator can send a spend_approval ticket");
+      draft.from = from;
+      draft.status = "done";
+    }
     // Work the owner gives the Orchestrator has to come back as a result, and a direct instruction ends once heard.
     // Only an answer to the Orchestrator's own question stays one.
     if (draft.kind === "direct_instruction" && draft.to === "orchestrator" && from === "jarvis" && !ledger.openQuestions().some((o) => o.question.asked_by === "orchestrator")) draft.kind = "task";
@@ -692,15 +728,18 @@ export function createCity(opts: CityOptions) {
     const ticket = validate<Ticket>("ticket", draft);
     const target = agent(ticket.to);
     for (const d of ticket.depends_on ?? []) if (!ledger.getTicket(d)) throw new Error(`depends_on: no ticket ${d}`);
+    // The spend check comes first: a refused approval must not revive anything.
+    if (ticket.kind === "spend_approval") checkSpendApproval(ticket);
     // A ticket to a retired agent revives it first, through the department cap; refused = no ticket is created.
     if (target.state === "retired" && target.kind !== "core" && !ledger.getTicket(ticket.id)) revive(target);
     if (!ledger.putTicket(ticket)) return ledger.getTicket(ticket.id)!;
     emit({ type: "ticket.status", ticket, previous: null });
+    if (ticket.kind === "spend_approval") return ticket; // read by jarvis-safari from the ledger; there is no work to dispatch
     if (ticket.kind === "direct_instruction" && OWNER_SIDE.has(ticket.from)) {
       // The owner's reply, relayed by Jarvis, is the answer to what that agent asked.
       // An approval is only ever decided by the owner's own answer in the inbox, never by a relayed message.
       for (const q of ledger.openQuestions().filter((o) => o.question.asked_by === ticket.to && !ledger.approvalByQuestion(o.id))) {
-        ledger.answerQuestion(q.id, ticket.goal);
+        ledger.answerQuestion(q.id, ticket.goal, from, now()); // the real caller, not the `from` a tool call put in the draft
         emit({ type: "question.answered", id: q.id, answer: ticket.goal, answered_by: ticket.from, ticket_id: q.question.ticket_id });
         const t = ledger.getTicket(q.question.ticket_id);
         if (t?.status === "waiting_on_owner" && !t.cap_block) setStatus(t.id, "in_progress");
@@ -1000,7 +1039,7 @@ export function createCity(opts: CityOptions) {
         const answers = parseAnswers(r.text);
         if (!answers) return toOwner();
         const answer = answers.join(" | ");
-        ledger.answerQuestion(row.id, answer);
+        ledger.answerQuestion(row.id, answer, parent, now());
         emit({ type: "question.answered", id: row.id, answer, answered_by: parent, ticket_id: q.ticket_id });
         sendTicket(parent, { to: by, kind: "direct_instruction", goal: `Answer to your question (${row.id}): ${answer}`, parent_id: q.ticket_id });
       })
@@ -1036,7 +1075,7 @@ export function createCity(opts: CityOptions) {
     const q = ledger.getQuestion(questionId);
     if (!q) throw new Error(`no question ${questionId}`);
     if (q.status === "answered") throw new Error(`question ${questionId} is already answered`);
-    ledger.answerQuestion(questionId, text);
+    ledger.answerQuestion(questionId, text, "owner", now());
     emit({ type: "question.answered", id: questionId, answer: text, answered_by: "owner", ticket_id: q.question.ticket_id });
     if (CANNOT_RESUME.test(q.question.questions[0]?.text ?? "")) return answerParked(q.question.ticket_id, text);
     const t = ledger.getTicket(q.question.ticket_id);

@@ -203,3 +203,7 @@ Reach Jarvis from your iPhone anywhere, over HTTPS on your private tailnet. Noth
 ## Where to build it
 
 Build it in **Claude Code on your Mac**: it needs your real files, Xcode, audio devices, long-running background processes and git. Use the Claude app for planning, diagrams, research and reviewing results. The city runs on the **Claude Agent SDK**, so it doesn't depend on any chat window.
+
+## Safari spending
+
+Jarvis can only spend with a `spend_approval` ticket the Orchestrator sent after the owner said yes (the ticket cites that question). The approval caps the amount Jarvis states with `--amount`; check the shop total yourself. Where the page shows a total (`[data-total]` or a "Total" line near the button), jarvis-safari also refuses when it exceeds the approved maximum. See docs/safari-setup.md.
