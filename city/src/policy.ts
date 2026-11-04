@@ -31,7 +31,7 @@ export interface Policy {
   // Compact a session before its next turn once its context reaches this share of the model's window.
   session?: { compact_at_context_pct?: number; model_context_tokens?: Record<string, number> };
   rules: Rule[];
-  models?: { simple?: string; standard?: string; complex?: string; fallback?: Record<string, string> };
+  models?: { simple?: string; standard?: string; complex?: string; fallback?: Record<string, string>; prices_per_mtok?: Record<string, { input: number; output: number; cache_read: number; cache_write: number }> };
   autonomy?: { read_tools?: string[] };
   repos_roots?: string[];
 }

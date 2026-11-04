@@ -168,6 +168,10 @@
           "type": "string"
         }
       }
+    },
+    "gate": {
+      "type": "boolean",
+      "description": "A workflow's approval step: it waits for the owner and no agent runs it"
     }
   }
 }

@@ -15,7 +15,13 @@
     "simple": "claude-haiku-5-5",
     "standard": "claude-sonnet-5-5",
     "complex": "claude-opus-5-5",
-    "fallback": { "claude-fable-5-1": "claude-opus-5-5", "claude-opus-5-5": "claude-sonnet-5-5", "claude-sonnet-5-5": "claude-haiku-5-5" }
+    "fallback": { "claude-fable-5-1": "claude-opus-5-5", "claude-opus-5-5": "claude-sonnet-5-5", "claude-sonnet-5-5": "claude-haiku-5-5" },
+    "prices_per_mtok": {
+      "claude-fable-5-1": { "input": 10, "output": 50, "cache_read": 0.25, "cache_write": 20 },
+      "claude-opus-5-5": { "input": 4, "output": 20, "cache_read": 0.2, "cache_write": 8 },
+      "claude-sonnet-5-5": { "input": 2, "output": 10, "cache_read": 0.1, "cache_write": 4 },
+      "claude-haiku-5-5": { "input": 0.1, "output": 0.5, "cache_read": 0.01, "cache_write": 0.2 }
+    }
   },
   "autonomy": { "read_tools": ["Read", "Grep", "Glob", "read", "web_search", "web_fetch", "WebSearch", "WebFetch"] },
   "repos_roots": ["~/projects", "/tmp"],

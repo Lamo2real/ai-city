@@ -27,6 +27,7 @@ export interface Ticket {
   review_rounds?: number;
   result?: { summary?: string; artifacts?: string[]; checks?: { name: string; passed: boolean }[]; cost_usd?: number };
   depends_on?: string[];
+  gate?: boolean;
   project?: string;
   complexity?: "simple" | "standard" | "complex";
   workspace?: { repo: string; path: string; branch: string; base: string };

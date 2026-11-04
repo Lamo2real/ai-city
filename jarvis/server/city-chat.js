@@ -84,6 +84,7 @@ export function createCityChat({ city, runner, dataDir, logger = () => {} }) {
   city.on((e) => {
     if (e.type === "question") relay(questionText(e), e.ticket_id);
     else if (e.type === "result") relay(resultText(e), e.ticket_id);
+    else if (e.type === "tickets.parked") relay(`[${e.ids.length} open tickets had gone stale while the city was down, so they were parked, not resumed. The owner can resume or cancel them in the City view's inbox. Tell the owner in one sentence.]`, e.ids[0]);
     else if (e.type === "log") logger(`city: ${e.text}`);
   });
   return chat;
