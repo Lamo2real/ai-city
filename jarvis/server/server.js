@@ -10,7 +10,7 @@ import { createChat, scrubSecrets } from "./chat.js";
 import { createCityChat, withJarvisBin } from "./city-chat.js";
 import { createTranscriber, isWav, parseWake } from "./listen.js";
 import { createLiveSession, liveAvailable } from "./live.js";
-import { createMailGate } from "./mail-gate.js";
+import { createMailGate, spokenForm } from "./mail-gate.js";
 import { createMergeGate, isConfirmPhrase } from "./merge.js";
 import { FILLERS, allFillers, fillerLanguage, sentenceSplitter, toolFiller } from "./progress.js";
 import { createKeychain } from "./keychain.js";
@@ -143,7 +143,7 @@ async function reply(res, text, voice, speak, gate, sessionId, phone = false) {
   const out = { reply: text, confirm: phone ? null : gate.describe(sessionId) };
   if (voice === true) {
     try {
-      Object.assign(out, await speak(text));
+      Object.assign(out, await speak(spokenForm(text)));
     } catch (err) {
       log(`voice failed: ${err.message}`);
     }
@@ -213,7 +213,6 @@ async function handleChat(req, res, { chat, speak, gate, phone, parsed, mail, ch
   // An email to a business contact is approved only by the owner's own words, matched here.
   const mailTurn = mail?.intercept(message, channel);
   if (mailTurn?.reply) return reply(res, mailTurn.reply, voice, speak, gate, sessionId, phone);
-  const heldBefore = mail?.snapshot();
 
   const started = Date.now();
   const before = gate.current(sessionId)?.id;
@@ -232,7 +231,7 @@ async function handleChat(req, res, { chat, speak, gate, phone, parsed, mail, ch
     text = phone ? PHONE_MERGE : gate.prompt(sessionId);
   }
   // The owner hears the server's own summary of a held or approved email, not the model's description of it.
-  const mailNote = [mail?.newHold(heldBefore), mailTurn?.note].filter(Boolean).join(" ");
+  const mailNote = [mail?.announce(), mailTurn?.note].filter(Boolean).join(" ");
   if (mailNote) text = `${text}\n\n${mailNote}`;
   return reply(res, text, voice, speak, gate, sessionId, phone);
 }
@@ -277,7 +276,7 @@ async function handleChatStream(req, res, { chat, speak, gate, phone, firstWaitM
       let audio = null;
       if (voice === true) {
         try {
-          audio = await (type === "filler" ? cachedSpeech(text, speak) : speak(text));
+          audio = await (type === "filler" ? cachedSpeech(text, speak) : speak(spokenForm(text)));
         } catch (err) {
           log(`voice failed: ${err.message}`);
         }
@@ -310,7 +309,6 @@ async function handleChatStream(req, res, { chat, speak, gate, phone, firstWaitM
     return finish(mailTurn.reply);
   }
 
-  const heldBefore = mail?.snapshot();
   const lines = FILLERS[fillerLanguage(message)];
   const started = Date.now();
   const before = gate.current(sessionId)?.id;
@@ -355,7 +353,7 @@ async function handleChatStream(req, res, { chat, speak, gate, phone, firstWaitM
     say("sentence", text);
   } else if (!spoken && text) say("sentence", text);
   // The owner hears the server's own summary of a held or approved email, not the model's description of it.
-  const mailNote = [mail?.newHold(heldBefore), mailTurn?.note].filter(Boolean).join(" ");
+  const mailNote = [mail?.announce(), mailTurn?.note].filter(Boolean).join(" ");
   if (mailNote) {
     say("sentence", mailNote);
     text = `${text}\n\n${mailNote}`;
@@ -408,7 +406,7 @@ async function handleLogin(req, res, access) {
 
 // What the city says unprompted (questions, results) reaches every open HUD as server-sent events,
 // and so does everything that moves in the city (hires, tickets, questions, reviews, cost) for the City View.
-function createEventStream(talk, speak) {
+function createEventStream(talk, speak, mail) {
   const clients = new Set();
   const listeners = new Set(); // The phone bridge: Jarvis's words only, no audio, no city events.
   talk.city?.on((event) => {
@@ -417,10 +415,13 @@ function createEventStream(talk, speak) {
   });
   talk.on?.(async ({ sessionId, text }) => {
     const event = { type: "jarvis", sessionId, text: scrubSecrets(text) };
+    // An unprompted turn may have held an email: the owner hears the server's summary of it too.
+    const mailNote = mail?.announce();
+    if (mailNote) event.text = `${event.text}\n\n${mailNote}`;
     for (const fn of listeners) fn({ sessionId, text: event.text });
     if (voiceBySession.get(sessionId)) {
       try {
-        Object.assign(event, await speak(event.text));
+        Object.assign(event, await speak(spokenForm(event.text)));
       } catch (err) {
         log(`voice failed: ${err.message}`);
       }
@@ -479,7 +480,7 @@ export function createServer({ booqyDir, dataDir, port, getState, chat, speak = 
   const hear = transcribe ?? createTranscriber({ dataDir });
   const access = createPhoneAccess({ dataDir });
   const mailGate = createMailGate({ dataDir, keychain, logger: log, ...mailGateOptions });
-  const events = createEventStream(talk, speak);
+  const events = createEventStream(talk, speak, mailGate);
   const appApi = createAppApi({
     keychain,
     events,

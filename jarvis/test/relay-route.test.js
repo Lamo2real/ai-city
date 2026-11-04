@@ -167,7 +167,7 @@ test("the relay route exists only on the Mac's own listener, not on the tailnet 
 // ---- email approval over the relay (Telegram) ----
 const MAIL_HASH = "d".repeat(64);
 const MAIL_ID = "mail-relayroute00000000000";
-const holdEmail = () => app.mailGate.register({ confirm_id: MAIL_ID, draft_hash: MAIL_HASH, summary: { to: ["boss@acme.se"], cc: [], bcc: [], subject: "Quote", first_lines: ["Hello"], why: ["boss@acme.se → company domain (acme.se)"] } });
+const holdEmail = () => { app.mailGate.register({ confirm_id: MAIL_ID, draft_hash: MAIL_HASH, summary: { to: ["boss@acme.se"], cc: [], bcc: [], subject: "Quote", first_lines: ["Hello"], why: ["boss@acme.se → company domain (acme.se)"] } }); app.mailGate.announce(); };
 
 test("the owner's Telegram 'I confirm the email' approves the pending email, with the server's summary", async () => {
   holdEmail();

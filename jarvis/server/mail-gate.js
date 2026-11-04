@@ -19,21 +19,31 @@ const normalise = (text) => String(text ?? "").toLowerCase().replace(/[^\p{L}\p{
 export const isEmailConfirm = (text) => normalise(text) === "i confirm the email";
 export const isEmailCancel = (text) => normalise(text) === "cancel the email";
 
-const oneLine = (v, max) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+// One plain line with no quote or bracket characters, so a crafted subject or first line cannot close
+// its delimiters and pass for the server's own words.
+const oneLine = (v, max) => String(v ?? "").replace(/["“”„«»‹›]/g, "").replace(/\s+/g, " ").trim().slice(0, max);
+const bare = (a) => (/<([^<>]+)>/.exec(String(a))?.[1] ?? String(a)).trim();
+
+// What the owner HEARS must not contain the phrase: a speaker playing it could be picked up by the microphone.
+export function spokenForm(text) {
+  return String(text)
+    .replace(/Say exactly: I confirm the email, or: Cancel the email\./g, "Say the email confirmation phrase to send it, or the email cancel phrase to drop it. The exact words are on screen.")
+    .replace(/say exactly: I confirm\./gi, "say the confirmation phrase.");
+}
 
 // What the owner is told, built from the summary jarvis-mail REGISTERED, never from the model's words.
 export function describeEmail(summary) {
   const who = [
-    (summary.to ?? []).join(", "),
-    summary.cc?.length ? `cc ${summary.cc.join(", ")}` : "",
-    summary.bcc?.length ? `bcc ${summary.bcc.join(", ")}` : "",
+    (summary.to ?? []).map(bare).join(", "),
+    summary.cc?.length ? `cc ${summary.cc.map(bare).join(", ")}` : "",
+    summary.bcc?.length ? `bcc ${summary.bcc.map(bare).join(", ")}` : "",
   ].filter(Boolean).join("; ");
   return `email to ${oneLine(who, 300)}, subject "${oneLine(summary.subject, 200)}"`;
 }
 export function holdNotice(item) {
   const first = oneLine(item.summary.first_lines?.[0], 160);
   const why = (item.summary.why ?? []).map((w) => oneLine(w, 160)).join("; ") || "it needs your approval";
-  return `Email to ${describeEmail(item.summary).slice("email to ".length)}${first ? `, starts: ${first}` : ""}, held because ${why}. Say exactly: I confirm the email, or: Cancel the email.`;
+  return `Email to ${describeEmail(item.summary).slice("email to ".length)}${first ? `, starts: «${first}»` : ""}, held because ${why}. Say exactly: I confirm the email, or: Cancel the email.`;
 }
 
 export function createMailGate({ dataDir, keychain, logger = () => {}, now = Date.now, ttlMs = TTL_MS, auditPath }) {
@@ -68,7 +78,7 @@ export function createMailGate({ dataDir, keychain, logger = () => {}, now = Dat
     const existing = items.get(confirm_id);
     if (existing && existing.draft_hash === draft_hash && (existing.status === "pending" || existing.status === "approved")) return true;
     for (const it of items.values()) if (it.status === "pending") items.delete(it.confirm_id);
-    items.set(confirm_id, { confirm_id, draft_hash, summary, status: "pending", expires: now() + ttlMs });
+    items.set(confirm_id, { confirm_id, draft_hash, summary, status: "pending", announced: false, expires: now() + ttlMs });
     save();
     return true;
   }
@@ -96,6 +106,13 @@ export function createMailGate({ dataDir, keychain, logger = () => {}, now = Dat
     if (!CAN_APPROVE.has(channel)) return { reply: "An email to a business contact can only be confirmed on the Mac, in the Jarvis app or on Telegram, sir. Nothing was sent." };
     if (!waiting.length) return { reply: "No email is waiting for confirmation, sir." };
     const item = waiting[0];
+    // Only the draft the owner was TOLD about can be approved. If a newer one slipped in since, tell him now
+    // and approve nothing: his "I confirm the email" was about the draft he last heard.
+    if (!item.announced) {
+      item.announced = true;
+      save();
+      return { reply: `That is a different email from the one you were told about, so nothing was approved. ${holdNotice(item)}` };
+    }
     approve(item, channel);
     return {
       forward: "[Jarvis server] The owner approved the pending email. Send it now by running exactly the same jarvis-mail command again.",
@@ -103,12 +120,16 @@ export function createMailGate({ dataDir, keychain, logger = () => {}, now = Dat
     };
   }
 
-  // Which sends are waiting now, and the server-built notice for any that appeared since `before`.
-  const snapshot = () => new Set(active("pending").map((i) => i.confirm_id));
-  const newHold = (before) => {
-    const fresh = active("pending").filter((i) => !before?.has(i.confirm_id));
-    return fresh.length ? holdNotice(fresh[fresh.length - 1]) : null;
-  };
+  // The server-built notice for a waiting send the owner has not been told about yet. Marking it announced is
+  // what makes it approvable. Called after every turn, including unprompted ones.
+  function announce() {
+    const fresh = active("pending").filter((i) => !i.announced);
+    if (!fresh.length) return null;
+    const item = fresh[fresh.length - 1];
+    item.announced = true;
+    save();
+    return holdNotice(item);
+  }
 
   // One atomic step for jarvis-mail: approved for exactly this hash? Then it is used up, whatever happens next.
   function redeem(confirm_id, draft_hash) {
@@ -169,5 +190,5 @@ export function createMailGate({ dataDir, keychain, logger = () => {}, now = Dat
     return json(res, 404, { error: "not found" });
   }
 
-  return { register, intercept, snapshot, newHold, redeem, approval, handle, pending: () => active("pending") };
+  return { register, intercept, announce, redeem, approval, handle, pending: () => active("pending") };
 }
