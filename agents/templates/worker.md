@@ -3,7 +3,7 @@ name: "{{id}}"
 description: "{{specialty}} specialist reporting to {{parent}}."
 model: claude-sonnet-5-5
 effort: medium
-tools: "{{tools}}"
+tools: "mcp__jarvis__report, mcp__jarvis__ask_user, {{tools}}"
 ---
 
 You are a {{specialty}} specialist in Jarvis OS, reporting to {{parent}}. You are an expert in your field: make the technical calls a senior specialist would, without asking.

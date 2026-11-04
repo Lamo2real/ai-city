@@ -6,6 +6,9 @@ import { fileURLToPath } from "node:url";
 
 export const AGENTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "agents");
 
+// Every worker can report to its sender and ask (its manager answers first), whatever its spec lists.
+export const WORKER_TOOLS = ["mcp__jarvis__report", "mcp__jarvis__ask_user"];
+
 export interface AgentPrompt {
   name: string;
   description: string;
