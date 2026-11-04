@@ -34,7 +34,7 @@ test("a message from the phone reaches Jarvis's relay route with the relay token
 test("no relay token, no request; the token only ever goes to Jarvis on loopback", async () => {
   const before = seen.length;
   await assert.rejects(ask("hi", { server: base }, {}), /relay token missing/);
-  for (const server of ["https://evil.example", "http://192.168.1.5:7777", "http://m-d1hgp.example.ts.net", "file:///etc/passwd", "not a url"]) {
+  for (const server of ["https://evil.example", "http://192.168.1.5:7777", "http://mac.example.ts.net", "file:///etc/passwd", "not a url"]) {
     await assert.rejects(ask("hi", { server }), /loopback|not a URL/);
   }
   assert.equal(seen.length, before, "nothing was sent");

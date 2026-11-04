@@ -396,7 +396,7 @@ test("a total on the page above the approved maximum is refused without spending
   assert.match(pageJs.probe("#b"), /data-total/);
 });
 
-const INTERNAL = ["http://127.0.0.1:7778", "http://127.1:7778", "http://2130706433/", "http://[::1]/", "http://localhost/", "http://x.localhost/", "http://m-d1hgp.tailca48e1.ts.net/", "http://100.100.100.100/", "http://192.168.1.1/", "http://10.0.0.5/", "http://172.20.1.1/", "http://169.254.169.254/", "http://0.0.0.0/", "http://[::ffff:127.0.0.1]/", "http://[::ffff:7f00:1]/", "http://[fd12::1]/", "http://[fe80::1]/", "http://printer.local/", "http://db.internal/", "http://intranet/", "http://m-d1hgp/", "http://M-D1HGP.local/"];
+const INTERNAL = ["http://127.0.0.1:7778", "http://127.1:7778", "http://2130706433/", "http://[::1]/", "http://localhost/", "http://x.localhost/", "http://mac.tail1234.ts.net/", "http://100.100.100.100/", "http://192.168.1.1/", "http://10.0.0.5/", "http://172.20.1.1/", "http://169.254.169.254/", "http://0.0.0.0/", "http://[::ffff:127.0.0.1]/", "http://[::ffff:7f00:1]/", "http://[fd12::1]/", "http://[fe80::1]/", "http://printer.local/", "http://db.internal/", "http://intranet/", "http://mac/", "http://M-D1HGP.local/"];
 
 test("open and navigate refuse local, internal and tailnet addresses; public https still works", async () => {
   for (const bad of INTERNAL) {
