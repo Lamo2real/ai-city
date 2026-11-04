@@ -132,13 +132,33 @@ test("limits counts active non-core agents, the largest team, and flags a depart
   const snap = { ...citySnapshot(T0), spend: { App: 0.91, Marketing: 7.5 } };
   snap.agents.push({ ...snap.agents.find((a) => a.id === "ios-dev"), id: "old", state: "retired" });
   const L = limits(applySnapshot(initialState(T0), snap, T0));
-  assert.deepEqual(L.agents, { active: 9, max: 10 }, "core and retired agents are not counted");
+  assert.deepEqual(L.agents, { active: 9, max: null }, "core and retired agents are not counted; there is no total cap any more");
+  assert.deepEqual(L.agentsByDepartment, [
+    { dept: "App", active: 3, cap: 5, full: false }, { dept: "IT", active: 2, cap: 5, full: false },
+    { dept: "Marketing", active: 2, cap: 5, full: false }, { dept: "Travel", active: 2, cap: 5, full: false },
+  ], "active / cap per department; the retired agent is not counted");
   assert.deepEqual(L.workersPerManager, { largest: 2, max: 4 });
   assert.deepEqual(L.departments.map((d) => [d.dept, d.over]), [["App", false], ["Marketing", true]]);
   assert.equal(L.departments[1].pct, 100);
   assert.equal(Math.round(L.departments[0].pct), 18);
   assert.deepEqual(L.usage, { turns: 31, tokens: 184200, usd: 1.73 });
   assert.equal(L.known, true);
+});
+
+test("a department_caps override wins, and a full department is flagged", () => {
+  const snap = { ...citySnapshot(T0) };
+  snap.caps = { ...snap.caps, department_caps: { App: 3 } };
+  const L = limits(applySnapshot(initialState(T0), snap, T0));
+  assert.deepEqual(L.agentsByDepartment.find((d) => d.dept === "App"), { dept: "App", active: 3, cap: 3, full: true });
+  assert.equal(L.agentsByDepartment.find((d) => d.dept === "IT").cap, 5);
+});
+
+test("a snapshot from before the restart (only max_concurrent_agents) still renders: no per-department cap is guessed", () => {
+  const snap = { ...citySnapshot(T0), caps: { max_concurrent_agents: 10, max_workers_per_manager: 4, daily_spend_usd_per_department: 5, max_review_rounds: 3 } };
+  const L = limits(applySnapshot(initialState(T0), snap, T0));
+  assert.deepEqual(L.agents, { active: 9, max: 10 });
+  assert.ok(L.agentsByDepartment.every((d) => d.cap === null && d.full === false));
+  assert.equal(L.agentCapPerDepartment, null);
 });
 
 test("limits never invent a cap the server did not send", () => {

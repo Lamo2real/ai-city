@@ -2,7 +2,8 @@
   "audit_log": "~/.jarvis/audit.jsonl",
   "caps": {
     "ad_daily_budget_cents": 5000,
-    "max_concurrent_agents": 20,
+    "max_active_agents_per_department": 5,
+    "department_caps": {},
     "max_workers_per_manager": 4,
     "daily_spend_usd_per_department": 20,
     "max_review_rounds": 3

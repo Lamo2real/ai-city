@@ -9,7 +9,7 @@ import { z } from "zod";
 import { AGENTS_DIR, loadCorePrompt, parsePrompt, renderTemplate, type AgentPrompt } from "./agents.ts";
 import { checksText, runChecks, type Check, type Exec } from "./checks.ts";
 import { now, openLedger, type AgentRow, type Question, type QuestionRow, type Ticket } from "./ledger.ts";
-import { auditPath, loadPolicy, type Policy } from "./policy.ts";
+import { auditPath, departmentCap, loadPolicy, type Policy } from "./policy.ts";
 import { validate } from "./schemas.ts";
 import type { JarvisTool, Runner, TurnResult } from "./sdk.ts";
 
@@ -241,16 +241,22 @@ export function createCity(opts: CityOptions) {
     if (spec.parent !== by) throw new Error(`parent must be the hiring agent (${by})`);
     const existing = ledger.getAgent(spec.id);
     if (existing?.state === "active") throw new Error(`${spec.id} is already hired; find it with list_registry`);
+    // Core agents never count; a worker belongs to its manager's department.
+    const activeIn = (dept: string) => ledger.agents("active").filter((a) => a.kind !== "core" && (a.department ?? "other") === dept).length;
+    const checkDepartment = (dept: string) => {
+      const cap = departmentCap(policy, dept);
+      if (activeIn(dept) >= cap) throw new Error(`cap reached: ${dept} already has ${cap} active agents. Retire one or reuse.`);
+    };
     if (existing) {
+      checkDepartment(existing.department ?? "other");
       log(`${spec.id}: revived from the registry`);
       const row = ledger.updateAgent(spec.id, { state: "active", last_active_at: now() });
       emit({ type: "agent.hired", agent: row, revived: true });
       return row;
     }
-    const active = ledger.agents("active").filter((a) => a.kind !== "core").length;
-    if (active >= policy.caps.max_concurrent_agents) throw new Error(`cap reached: ${policy.caps.max_concurrent_agents} agents are already active. Retire one or reuse.`);
+    const department = (spec.kind === "worker" ? agent(by).department : undefined) ?? spec.department ?? agent(by).department ?? "other";
+    checkDepartment(department);
     if (spec.kind === "worker" && ledger.children(by).length >= policy.caps.max_workers_per_manager) throw new Error(`cap reached: ${policy.caps.max_workers_per_manager} workers per manager`);
-    const department = spec.department ?? agent(by).department ?? "other";
     if (ledger.spendToday(department) >= policy.caps.daily_spend_usd_per_department) throw new Error(`cap reached: ${department} has spent today's budget`);
     // shortcut: tools are not checked against a per-department allowlist, policy.json has none yet; add one when departments get scopes.
     const text = spec.kind === "manager"
@@ -419,7 +425,9 @@ export function createCity(opts: CityOptions) {
       const departments = [...new Set(agents.map((a) => a.department).filter((d): d is string => !!d))];
       return { agents, tickets: ledger.ticketsByStatus("open", "in_progress", "in_review", "waiting_on_owner"), questions: ledger.openQuestions(), usage: ledger.usageToday(), spend: Object.fromEntries(departments.map((d) => [d, ledger.spendToday(d)])),
         // The limits the city enforces, read from the loaded policy each time so the HUD never hardcodes them.
-        caps: { max_concurrent_agents: policy.caps.max_concurrent_agents, max_workers_per_manager: policy.caps.max_workers_per_manager, daily_spend_usd_per_department: policy.caps.daily_spend_usd_per_department, max_review_rounds: policy.caps.max_review_rounds } };
+        // department_agents: active (non-core) agents against the cap, per department; the HUD draws "active / cap".
+        department_agents: Object.fromEntries(departments.map((d) => [d, { active: agents.filter((a) => a.kind !== "core" && a.state === "active" && a.department === d).length, cap: departmentCap(policy, d) }])),
+        caps: { max_active_agents_per_department: policy.caps.max_active_agents_per_department, department_caps: policy.caps.department_caps ?? {}, max_workers_per_manager: policy.caps.max_workers_per_manager, daily_spend_usd_per_department: policy.caps.daily_spend_usd_per_department, max_review_rounds: policy.caps.max_review_rounds } };
     },
     // The last n things an agent did, from the policy gate's audit log.
     auditTail(agentId: string, n = 10): Array<{ ts: number; tool: string; decision: string; reason: string }> {

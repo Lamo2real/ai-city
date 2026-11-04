@@ -19,13 +19,17 @@ export interface Policy {
   audit_log: string;
   caps: {
     ad_daily_budget_cents: number;
-    max_concurrent_agents: number;
+    max_active_agents_per_department: number; // active (non-retired, non-core) agents any one department may have
+    department_caps?: Record<string, number>; // per-department overrides of the line above
     max_workers_per_manager: number;
     daily_spend_usd_per_department: number;
     max_review_rounds: number;
   };
   rules: Rule[];
 }
+
+// A department with no override gets the default, so a brand-new department is capped from its first hire.
+export const departmentCap = (policy: Policy, department: string): number => policy.caps.department_caps?.[department] ?? policy.caps.max_active_agents_per_department;
 
 export const POLICY_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "config", "policy.json");
 const BUDGET_KEYS = ["daily_budget", "lifetime_budget"] as const;
