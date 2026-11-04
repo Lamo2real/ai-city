@@ -9,6 +9,7 @@ import { createChat, scrubSecrets } from "./chat.js";
 import { createCityChat, withJarvisBin } from "./city-chat.js";
 import { createTranscriber, isWav, parseWake } from "./listen.js";
 import { createLiveSession, liveAvailable } from "./live.js";
+import { createMailGate } from "./mail-gate.js";
 import { createMergeGate, isConfirmPhrase } from "./merge.js";
 import { FILLERS, allFillers, fillerLanguage, sentenceSplitter, toolFiller } from "./progress.js";
 import { createKeychain } from "./keychain.js";
@@ -141,7 +142,7 @@ async function handleListen(req, res, { transcribe }) {
   }
 }
 
-async function handleChat(req, res, { chat, speak, gate, phone }) {
+async function handleChat(req, res, { chat, speak, gate, phone, mail, channel = phone ? "lan" : "hud" }) {
   let body;
   try {
     body = JSON.parse(await readBody(req));
@@ -163,11 +164,15 @@ async function handleChat(req, res, { chat, speak, gate, phone }) {
     }
   }
 
+  // An email to a business contact is approved only by the owner's own words, matched here.
+  const mailTurn = mail?.intercept(message, channel);
+  if (mailTurn?.reply) return reply(res, mailTurn.reply, voice, speak, gate, sessionId, phone);
+
   const started = Date.now();
   const before = gate.current(sessionId)?.id;
   let text;
   try {
-    text = await chat(message.trim(), sessionId);
+    text = await chat(mailTurn?.forward ?? message.trim(), sessionId);
   } catch (err) {
     log(`chat failed: ${err.message}: ${(err.detail ?? "").slice(0, 300)}`);
     return sendJson(res, 502, { error: "Jarvis could not get an answer from Claude. See ~/Library/Logs/jarvis.log." });
@@ -192,7 +197,7 @@ const pick = (list) => list[Math.floor(Math.random() * list.length)];
 // As /api/chat, but one JSON line per event, so speech can start before the reply is done:
 // filler (a progress line), sentence (part of the reply), then done or error.
 // `parsed` is a body the phone bridge has already read and checked.
-async function handleChatStream(req, res, { chat, speak, gate, phone, firstWaitMs = FIRST_WAIT_MS, parsed }) {
+async function handleChatStream(req, res, { chat, speak, gate, phone, firstWaitMs = FIRST_WAIT_MS, parsed, mail, channel = phone ? "lan" : "hud" }) {
   let body = parsed;
   try {
     body ??= JSON.parse(await readBody(req));
@@ -249,6 +254,12 @@ async function handleChatStream(req, res, { chat, speak, gate, phone, firstWaitM
     }
   }
 
+  const mailTurn = mail?.intercept(message, channel);
+  if (mailTurn?.reply) {
+    say("sentence", mailTurn.reply);
+    return finish(mailTurn.reply);
+  }
+
   const lines = FILLERS[fillerLanguage(message)];
   const started = Date.now();
   const before = gate.current(sessionId)?.id;
@@ -268,7 +279,7 @@ async function handleChatStream(req, res, { chat, speak, gate, phone, firstWaitM
 
   let text;
   try {
-    text = await chat(message.trim(), sessionId, { onEvent, signal: cancel.signal });
+    text = await chat(mailTurn?.forward ?? message.trim(), sessionId, { onEvent, signal: cancel.signal });
     splitter.flush();
   } catch (err) {
     clearInterval(still);
@@ -404,25 +415,26 @@ async function handleCity(req, res, city, path) {
   return sendJson(res, 404, { error: "not found" });
 }
 
-export function createServer({ booqyDir, dataDir, port, getState, chat, speak = synthesize, transcribe, gate, firstWaitMs, startLive = createLiveSession, keychain = createKeychain() }) {
+export function createServer({ booqyDir, dataDir, port, getState, chat, speak = synthesize, transcribe, gate, firstWaitMs, startLive = createLiveSession, keychain = createKeychain(), mailGateOptions = {} }) {
   const state = getState ?? createStateSource({ booqyDir, logger: log });
   const mergeGate = gate ?? createMergeGate({ dataDir, logger: log });
   const talk = chat ?? createChat({ booqyDir, dataDir, gate: mergeGate, logger: log });
   const hear = transcribe ?? createTranscriber({ dataDir });
   const access = createPhoneAccess({ dataDir });
+  const mailGate = createMailGate({ dataDir, keychain, logger: log, ...mailGateOptions });
   const events = createEventStream(talk, speak);
   const appApi = createAppApi({
     keychain,
     events,
     // No merge confirmation from the phone, and the phone speaks, so no audio.
-    chatStream: (req, res, parsed) => handleChatStream(req, res, { chat: talk, speak, gate: mergeGate, phone: true, firstWaitMs, parsed }),
+    chatStream: (req, res, parsed) => handleChatStream(req, res, { chat: talk, speak, gate: mergeGate, phone: true, firstWaitMs, parsed, mail: mailGate, channel: "app" }),
     logger: log,
   });
 
   async function route(req, res, phone) {
     const path = new URL(req.url, "http://localhost").pathname;
-    if (req.method === "POST" && path === "/api/chat") return await handleChat(req, res, { chat: talk, speak, gate: mergeGate, phone });
-    if (req.method === "POST" && path === "/api/chat/stream") return await handleChatStream(req, res, { chat: talk, speak, gate: mergeGate, phone, firstWaitMs });
+    if (req.method === "POST" && path === "/api/chat") return await handleChat(req, res, { chat: talk, speak, gate: mergeGate, phone, mail: mailGate });
+    if (req.method === "POST" && path === "/api/chat/stream") return await handleChatStream(req, res, { chat: talk, speak, gate: mergeGate, phone, firstWaitMs, mail: mailGate });
     // The LAN route is plain HTTP without a microphone, so live voice is not offered there.
     if (req.method === "POST" && path === "/api/live/session") return phone ? sendJson(res, 403, { error: "forbidden" }) : await handleLiveSession(req, res, { startLive });
     if (req.method === "POST" && path === "/api/warm") {
@@ -459,6 +471,8 @@ export function createServer({ booqyDir, dataDir, port, getState, chat, speak = 
     try {
       const localPort = server.address().port ?? port;
       if (!allowedRequest(req, [`localhost:${localPort}`, `127.0.0.1:${localPort}`])) return sendJson(res, 403, { error: "forbidden" });
+      // jarvis-mail's approval endpoints exist on this listener only, never on the tailnet or the LAN.
+      if (new URL(req.url, "http://localhost").pathname.startsWith("/api/mail/")) return await mailGate.handle(req, res);
       return await route(req, res, false);
     } catch (err) {
       fail(res, err);
@@ -497,6 +511,7 @@ export function createServer({ booqyDir, dataDir, port, getState, chat, speak = 
       fail(res, err);
     }
   };
+  server.mailGate = mailGate;
   return server;
 }
 
