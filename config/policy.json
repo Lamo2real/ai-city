@@ -11,7 +11,7 @@
     { "tool": "^Bash$", "match": "git\\s+push\\b.*(--force|-f\\b)", "decision": "deny", "reason": "Force-push is never allowed." },
     { "tool": "^Bash$", "match": "git\\s+push\\b.*\\b(main|master)\\b", "decision": "deny", "reason": "Never push to main. Open a PR; the Fable reviewer gates merges." },
     { "tool": "^Bash$", "match": "(^|[\\s\"';&|(])git\\s+([^;&|]*\\s)?(-c\\s|--output|--ext-diff|--textconv)", "decision": "deny", "reason": "git -c, --output, --ext-diff and --textconv can run programs or write files; not allowed." },
-    { "tool": "^Bash$", "match": "(^|[\\s\"';&|(])git\\s[^;&|]*(?<![0-9&])>", "decision": "deny", "reason": "Redirecting git output into a file is a write path; not allowed." },
+    { "tool": "^Bash$", "match": "(^|[\\s\"';&|(])git\\s[^;&|]*(\\d?>(?!&[0-9-])|&>)", "decision": "deny", "reason": "Redirecting git output into a file (>, >>, 1>, 2>, &>) is a write path; not allowed. 2>&1 and >&2 are fine." },
     { "tool": "^Bash$", "match": "gh\\s+repo\\s+delete", "decision": "deny", "reason": "Deleting repositories needs the owner, by hand." },
     { "tool": "^Bash$", "match": "rm\\s+-[a-zA-Z]*r[a-zA-Z]*f?\\s+(/|~|\\$HOME)/?(\\s|\\\"|$)", "decision": "deny", "reason": "Recursive delete of root or home." },
     { "tool": "^Bash$", "match": "terraform\\s+destroy", "decision": "ask", "reason": "Terraform destroy needs the owner." },
