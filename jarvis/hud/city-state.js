@@ -165,3 +165,15 @@ export function topBar(state) {
 }
 
 export const fmt = (v, digits = 2) => (v === null || v === undefined || Number.isNaN(v) ? "—" : typeof v === "number" ? v.toFixed(digits) : String(v));
+
+// Everything that waits for the owner, as one list: a pending merge confirmation first (it expires),
+// then open agent questions, oldest first. `confirm` is { id, ..., expiresAt } (epoch ms) or null.
+// An expired confirmation is not listed. Pure: nothing here sends or answers anything.
+export function inboxItems(state, confirm, now = Date.now()) {
+  const items = [];
+  if (confirm && Number(confirm.expiresAt) > now) items.push({ kind: "merge", id: confirm.id, confirm });
+  const qs = Object.values(state?.questions ?? {}).filter((q) => q.status === "open" && q.question)
+    .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? "") || String(a.id).localeCompare(String(b.id)));
+  for (const q of qs) items.push({ kind: "question", id: q.id, path: q.question.path ?? "", questions: q.question.questions ?? [], created_at: q.created_at });
+  return items;
+}

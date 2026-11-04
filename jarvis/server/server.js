@@ -1,4 +1,5 @@
 // Jarvis OS local server. Listens on 127.0.0.1, on the LAN only if the iPhone option is on (phone.js), and takes tailnet traffic only if that is on (tailnet.js).
+import { appendFileSync, mkdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { createServer as createHttpServer } from "node:http";
@@ -14,6 +15,50 @@ import { createMergeGate, isConfirmPhrase } from "./merge.js";
 import { FILLERS, allFillers, fillerLanguage, sentenceSplitter, toolFiller } from "./progress.js";
 import { createKeychain } from "./keychain.js";
 import { createAppApi } from "./app-api.js";
+import { bearer, createTokenCheck } from "./token-check.js";
+
+// The OpenClaw relay's own route and Keychain item (see jarvis/openclaw/README.md).
+export const RELAY_PATH = "/api/relay/chat";
+export const RELAY_SERVICE = "jarvis.openclaw-relay";
+const RELAY_SESSION = "owner"; // the shared conversation, like the HUD, voice and the phone
+export const RELAY_AUDIT = "telegram-audit.jsonl";
+
+// The outcome of a merge confirmed from Telegram, as its own audit line: merged (at the PR head SHA the
+// gate required), failed (GitHub refused it or the branch moved), or refused (nothing valid was pending,
+// e.g. the confirmation window had expired).
+export function auditRelayOutcome(dataDir, item, result) {
+  const outcome = !item || result == null ? "refused" : result.ok ? "merged" : "failed";
+  const entry = {
+    ts: new Date().toISOString(), via: "telegram", who: "owner (allowlisted Telegram account)", kind: "merge_outcome", outcome,
+    ...(item && { merge: { repo: item.repo, number: item.number, head: item.head } }),
+    ...(outcome === "refused" && { reason: "no merge was awaiting confirmation (none requested, or it expired)" }),
+    ...(outcome === "failed" && { reason: "GitHub refused the merge or the branch changed after the confirmation" }),
+  };
+  writeAudit(dataDir, entry);
+}
+
+function writeAudit(dataDir, entry) {
+  try {
+    mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+    appendFileSync(join(dataDir, RELAY_AUDIT), `${JSON.stringify(entry)}\n`, { mode: 0o600 });
+  } catch (err) {
+    log(`telegram audit failed: ${err.message}`);
+  }
+}
+
+// Anything token-shaped the owner pastes into a chat stays out of the audit file: known token prefixes
+// (GitHub, Slack, OpenAI/Anthropic-style keys), Telegram bot tokens, Bearer values and long random strings.
+const TOKEN_PATTERNS = [/\b(?:ghp|gho|ghu|ghs|ghr|github_pat|xox[abprs]|sk|sk-ant|AKIA)[-_][A-Za-z0-9_-]{8,}/g, /\b\d{6,12}:[A-Za-z0-9_-]{30,}\b/g, /Bearer\s+\S+/gi, /\b[A-Za-z0-9+/_-]{32,}={0,2}/g];
+export const redactTokens = (text) => TOKEN_PATTERNS.reduce((out, re) => out.replace(re, "[redacted]"), text);
+
+// What arrived through Telegram, so the owner can see what was approved there: who, when, what.
+// Merge confirmations and cancellations name the pull request. Text is scrubbed of secrets and capped.
+export function auditRelay(dataDir, message, pending) {
+  const text = message.trim();
+  const kind = pending && isConfirmPhrase(text) ? "merge_confirm" : pending && /^\s*(cancel|avbryt)[.!]?\s*$/i.test(text) ? "merge_cancel" : "message";
+  const entry = { ts: new Date().toISOString(), via: "telegram", who: "owner (allowlisted Telegram account)", kind, ...(pending && kind !== "message" && { merge: { repo: pending.repo, number: pending.number } }), text: redactTokens(scrubSecrets(text)).slice(0, 500) };
+  writeAudit(dataDir, entry);
+}
 import { LOGIN_PAGE, createPhoneAccess, inSubnet, startPhoneListener } from "./phone.js";
 import { createStateSource } from "./state.js";
 import { isOwner, startTailnetListener } from "./tailnet.js";
@@ -142,17 +187,18 @@ async function handleListen(req, res, { transcribe }) {
   }
 }
 
-async function handleChat(req, res, { chat, speak, gate, phone, mail, channel = phone ? "lan" : "hud" }) {
-  let body;
+// `parsed` is a body a restricted channel (the OpenClaw relay) has already read and checked.
+async function handleChat(req, res, { chat, speak, gate, phone, parsed, mail, channel = phone ? "lan" : "hud" }) {
+  let body = parsed;
   try {
-    body = JSON.parse(await readBody(req));
+    body ??= JSON.parse(await readBody(req));
   } catch (err) {
     return sendJson(res, err.status ?? 400, { error: "bad request" });
   }
   const { message, sessionId, voice } = body ?? {};
   if (typeof message !== "string" || !message.trim() || message.length > MAX_MESSAGE) return sendJson(res, 400, { error: "bad message" });
   if (typeof sessionId !== "string" || !SESSION_ID.test(sessionId)) return sendJson(res, 400, { error: "bad sessionId" });
-  voiceBySession.set(sessionId, voice === true);
+  if (!parsed) voiceBySession.set(sessionId, voice === true); // A relayed turn must not switch the voice session's audio off.
 
   // Handled here so the model is never part of the confirmation. The phone route
   // is plain HTTP on a shared network, so it can never confirm a merge to main.
@@ -430,6 +476,34 @@ export function createServer({ booqyDir, dataDir, port, getState, chat, speak = 
     chatStream: (req, res, parsed) => handleChatStream(req, res, { chat: talk, speak, gate: mergeGate, phone: true, firstWaitMs, parsed, mail: mailGate, channel: "app" }),
     logger: log,
   });
+  const relayToken = createTokenCheck({ keychain, service: RELAY_SERVICE, logger: log });
+  // The merge gate as the relay sees it: the same gate, but every confirmation's outcome is audited too.
+  const relayGate = {
+    ...mergeGate,
+    async confirm(sessionId, id) {
+      const item = mergeGate.current(sessionId);
+      const result = await mergeGate.confirm(sessionId, id);
+      auditRelayOutcome(dataDir, item, result);
+      return result;
+    },
+  };
+
+  // The OpenClaw relay: Telegram direct messages from the owner's own allowlisted account only (the
+  // allowlist is enforced by OpenClaw, see jarvis/openclaw/openclaw.json). By the owner's decision it has
+  // the HUD's rights, including confirming a merge to main. Localhost listener only, and only with the
+  // relay token, so no other local program can pass as the relay. Every relayed turn is audited.
+  async function handleRelay(req, res) {
+    if (!(await relayToken(bearer(req)))) return sendJson(res, 401, { error: "relay not authorised" });
+    let body;
+    try {
+      body = JSON.parse(await readBody(req));
+    } catch (err) {
+      return sendJson(res, err.status ?? 400, { error: "bad request" });
+    }
+    const message = body?.message;
+    if (typeof message === "string" && message.trim() && message.length <= MAX_MESSAGE) auditRelay(dataDir, message, mergeGate.current(RELAY_SESSION));
+    return handleChat(req, res, { chat: talk, speak, gate: relayGate, phone: false, mail: mailGate, channel: "telegram", parsed: { message, sessionId: RELAY_SESSION, voice: false } });
+  }
 
   async function route(req, res, phone) {
     const path = new URL(req.url, "http://localhost").pathname;
@@ -471,6 +545,7 @@ export function createServer({ booqyDir, dataDir, port, getState, chat, speak = 
     try {
       const localPort = server.address().port ?? port;
       if (!allowedRequest(req, [`localhost:${localPort}`, `127.0.0.1:${localPort}`])) return sendJson(res, 403, { error: "forbidden" });
+      if (req.method === "POST" && new URL(req.url, "http://localhost").pathname === RELAY_PATH) return await handleRelay(req, res);
       // jarvis-mail's approval endpoints exist on this listener only, never on the tailnet or the LAN.
       if (new URL(req.url, "http://localhost").pathname.startsWith("/api/mail/")) return await mailGate.handle(req, res);
       return await route(req, res, false);

@@ -2,15 +2,26 @@
   "id": "jarvis-relay",
   "name": "Jarvis relay",
   "description": "Forwards every message to Jarvis, the front door of AI City, and returns the reply.",
-  "categories": ["other"],
-  "contracts": { "tools": ["ask_jarvis"] },
-  "activation": { "onStartup": true },
+  "categories": [
+    "other"
+  ],
+  "contracts": {
+    "tools": [
+      "ask_jarvis"
+    ]
+  },
+  "activation": {
+    "onStartup": true
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "server": { "type": "string", "description": "The Jarvis server, loopback only.", "default": "http://127.0.0.1:7777" },
-      "sessionId": { "type": "string", "description": "The shared conversation id.", "default": "owner" }
+      "server": {
+        "type": "string",
+        "description": "The Jarvis server, loopback only.",
+        "default": "http://127.0.0.1:7777"
+      }
     }
   }
 }

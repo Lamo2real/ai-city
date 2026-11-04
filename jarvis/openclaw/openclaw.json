@@ -1,7 +1,7 @@
 {
-  // OpenClaw as a messaging channel into AI City. Run with:
-  //   OPENCLAW_CONFIG_PATH=jarvis/openclaw/openclaw.json OPENCLAW_STATE_DIR=~/.jarvis/openclaw \
-  //   OPENCLAW_GATEWAY_TOKEN=<token> npx openclaw gateway
+  // OpenClaw as a messaging channel into AI City. Start it only with jarvis/openclaw/bin/gateway
+  // (or bin/telegram-on for the LaunchAgent): it loads every secret from the Keychain, so no token
+  // is ever typed on a command line or written into this file.
   // Loopback only, token required, no tunnels, no proxies, no discovery.
   gateway: {
     mode: "local",
@@ -35,6 +35,13 @@
       "exec", "process", "read", "write", "edit", "apply_patch", "browser", "canvas", "cron", "gateway", "image", "nodes", "sessions_spawn", "sessions_send", "openclaw", "plugins",
     ],
     sessions: { visibility: "self" },
+    // Defence in depth on top of the Telegram allowlist: only the owner may use ask_jarvis at all.
+    // bin/gateway writes the real numeric ID into this key in openclaw.runtime.json (OpenClaw substitutes
+    // ${VARS} in values, not in keys). If it ever stays unresolved, the owner is denied too: fails closed.
+    toolsBySender: {
+      "*": { deny: ["ask_jarvis"] },
+      "channel:telegram:${TELEGRAM_OWNER_ID}": {},
+    },
     elevated: { enabled: false },
   },
 
@@ -44,17 +51,21 @@
     allow: ["jarvis-relay"],
     load: { paths: ["./plugins/jarvis-relay"] },
     entries: {
-      "jarvis-relay": { enabled: true, config: { server: "http://127.0.0.1:7777", sessionId: "owner" } },
+      "jarvis-relay": { enabled: true, config: { server: "http://127.0.0.1:7777" } },
     },
   },
 
-  // One channel, prepared but not paired. The owner enables it:
-  //   OPENCLAW_CONFIG_PATH=... npx openclaw channels add --channel telegram --token <bot token>
-  // then pairs their own Telegram account (see jarvis/openclaw/README.md).
+  // Telegram: direct messages from the owner's own account only. dmPolicy "allowlist" with his numeric
+  // user ID, which bin/gateway exports as TELEGRAM_OWNER_ID from Keychain item jarvis.openclaw-telegram-owner.
+  // Anyone else is dropped by OpenClaw before the agent sees it. If the ID is missing it stays an unresolved
+  // literal that matches nobody, and bin/gateway refuses to start. No groups, no owner commands.
+  // The bot token is NEVER written here (no botToken or tokenFile): bin/gateway exports TELEGRAM_BOT_TOKEN
+  // from Keychain item jarvis.openclaw-telegram. Never run `channels add --token`: it writes the token here.
   channels: {
     telegram: {
-      enabled: false,
-      dmPolicy: "pairing",
+      enabled: true,
+      dmPolicy: "allowlist",
+      allowFrom: ["${TELEGRAM_OWNER_ID}"],
       groupPolicy: "disabled",
     },
   },
