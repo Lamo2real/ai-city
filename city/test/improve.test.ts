@@ -1,12 +1,12 @@
 // The self-improvement gate: what it merges, and everything it sends to the owner instead.
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { EvalRun } from "../src/evals.ts";
-import { createImprover, evalsHold, IMPROVE_GOAL, parseRawDiff, protectedChanges, reviewerPassed } from "../src/improve.ts";
+import { createImprover, evalsHold, IMPROVE_GOAL, reviewerPassed } from "../src/improve.ts";
+import { departmentReport, formatReport } from "../src/measure.ts";
 import { loadPolicy } from "../src/policy.ts";
 import { createCity } from "../src/runtime.ts";
 import type { Runner } from "../src/sdk.ts";
@@ -15,59 +15,6 @@ const policy = { ...loadPolicy(), audit_log: join(mkdtempSync(join(tmpdir(), "au
 const SHA = "a".repeat(40), SHA2 = "b".repeat(40), BASE = "c".repeat(40);
 const REPO = "owner/city";
 const URL_ = `https://github.com/${REPO}/pull/7`;
-const change = (path: string, status = "M", mode = "100644") => ({ path, status, mode });
-const barred = (path: string, status = "M", mode = "100644") => protectedChanges([change(path, status, mode)]).length === 1;
-
-test("the hard limit: everything the owner named can never merge by itself", () => {
-  for (const p of ["config/policy.json", ".claude/hooks/policy_gate.py", "city/src/policy.ts", "city/src/runtime.ts", "config/evals/support.json", "config/evals/new.json", "city/src/evals.ts", "city/src/improve.ts"]) {
-    assert.ok(barred(p), p);
-    assert.ok(barred(p, "D"), `${p} deleted`);
-    assert.ok(barred(p, "A"), `${p} added`);
-  }
-});
-
-test("the hard limit: the other ways to the same place are closed too", () => {
-  for (const p of [
-    "city/src/ledger.ts", "city/src/sdk.ts", "city/src/openclaw.ts", "city/openclaw-plugin/index.js", // approvals and where the guard is called
-    "agents/core/reviewer.md", ".github/workflows/ci.yml", ".claude/settings.json", // the other two gates
-    "package.json", "city/package.json", "package-lock.json", "jarvis/voice/pyproject.toml", "jarvis/voice/uv.lock", ".npmrc", // what CI and the runtime execute
-    "city/src/memory.ts", "city/src/workflows.ts", "city/src/workspaces.ts", "config/workflows/software-delivery.json", "config/automations.json", "schemas/ticket.schema.json", // other protections
-    "skills/self-improvement/SKILL.md", "jarvis/bin/jarvis.js", "jarvis/bin/jarvis-env", "jarvis/server/server.js", "CLAUDE.md", "docs/.gitattributes", "skills/x/.gitattributes", "some/new/place.txt",
-    "docs/ai-city.drawio", "CITY/SRC/POLICY.TS", "Config/Policy.json", // the owner's disk ignores case
-  ]) assert.ok(barred(p), p);
-  assert.ok(barred("skills/x/SKILL.md", "M", "120000"), "a link can point anywhere");
-  assert.ok(barred("city/src/sub", "A", "160000"), "a submodule can hold anything");
-  assert.ok(barred("skills/x/SKILL.md", "T"), "a file turned into something else");
-});
-
-test("the hard limit: a test may be added, never changed or removed", () => {
-  assert.ok(!barred("city/test/new.test.ts", "A"));
-  assert.ok(!barred("jarvis/test/new.test.js", "A"));
-  assert.ok(barred("city/test/policy.test.ts", "M"));
-  assert.ok(barred("city/test/security.test.ts", "D"));
-  assert.ok(barred("jarvis/test/server.test.js", "M"));
-});
-
-test("prompts, skills, docs and ordinary code stay open to the loop", () => {
-  assert.deepEqual(protectedChanges(["agents/templates/worker.md", "agents/core/orchestrator.md", "agents/core/secretary.md", "skills/python/SKILL.md", "docs/ROADMAP.md", "city/src/scheduler.ts", "city/src/measure.ts", "city/src/new-thing.ts", "jarvis/hud/city.js"].map((p) => change(p))), []);
-});
-
-test("one barred file in a big change bars the change, and a move counts at both ends (real git)", () => {
-  assert.deepEqual(protectedChanges([change("skills/python/SKILL.md"), change("config/policy.json")]), ["config/policy.json"]);
-  const repo = mkdtempSync(join(tmpdir(), "repo-"));
-  const git = (...a: string[]) => execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...a], { encoding: "utf8" });
-  git("init", "-q", "-b", "main");
-  mkdirSync(join(repo, "config"));
-  mkdirSync(join(repo, "docs"));
-  writeFileSync(join(repo, "config", "policy.json"), "{}\n".repeat(50));
-  git("add", "."); git("commit", "-qm", "base");
-  renameSync(join(repo, "config", "policy.json"), join(repo, "docs", "notes file.md"));
-  git("add", "-A"); git("commit", "-qm", "move");
-  const changes = parseRawDiff(git("diff", "--raw", "--no-renames", "--no-abbrev", "-z", "HEAD~1...HEAD"));
-  assert.deepEqual(changes.map((c) => [c.status, c.path]).sort(), [["A", "docs/notes file.md"], ["D", "config/policy.json"]]);
-  assert.deepEqual(protectedChanges(changes), ["config/policy.json"]);
-});
-
 test("who can merge: the gate's limit does not bind a worker, which the owner has freed from the rules", async () => {
   const data = mkdtempSync(join(tmpdir(), "city-"));
   const city = createCity({ runner: async (req) => ({ text: "", sessionId: `s-${req.agentId}`, costUsd: 0, tokens: 0 }), dataDir: data, ledgerPath: join(data, "l.db"), policy });
@@ -122,7 +69,7 @@ function world(w: World = {}) {
     if (cmd === "gh" && args[0] === "api") return JSON.stringify({ check_runs: w.ci ?? [{ name: "test", status: "completed", conclusion: "success", app: { slug: "github-actions" } }] });
     if (cmd === "gh" && args[1] === "merge") { if (w.mergeFails) throw new Error("not mergeable"); merges.push(args); return ""; }
     if (args[2] === "rev-parse") return `${args[3].includes("main") ? BASE : state.head}\n`;
-    if (args[2] === "diff" && args.includes("--raw")) return w.diff ?? `:100644 100644 ${"0".repeat(40)} ${"1".repeat(40)} M\0skills/python/SKILL.md\0`;
+    if (args[2] === "diff" && args.includes("--name-only")) return w.diff ?? "skills/python/SKILL.md\0";
     if (args[2] === "diff") return w.patch ?? "+a small change";
     return "";
   };
@@ -186,11 +133,38 @@ test("the Reviewer always starts fresh, so an earlier request in the same ticket
   city.close();
 });
 
-test("a protected path stops it before anything is spent, whatever else says yes", async () => {
-  const x = await refused({ diff: `:100644 100644 ${"0".repeat(40)} ${"1".repeat(40)} M\0skills/python/SKILL.md\0:100644 100644 ${"0".repeat(40)} ${"1".repeat(40)} M\0config/policy.json\0` }, /may never change.*config\/policy\.json/);
-  assert.deepEqual(x.reviewed, []);
-  assert.deepEqual(x.evals, []);
-  assert.ok(!x.calls.some((c) => c.includes("check-runs")));
+test("by the owner's decision a change to the rules or scoring merges under the same three conditions, and is named", async () => {
+  const x = world({ diff: "skills/python/SKILL.md\0config/policy.json\0.claude/hooks/policy_gate.py\0city/src/policy.ts\0city/src/runtime.ts\0config/evals/support.json\0city/src/evals.ts\0" });
+  x.event();
+  await x.settle();
+  assert.equal(x.merges.length, 1);
+  assert.deepEqual(x.questions(), [], "no question to the owner");
+  const names = "config/policy.json, .claude/hooks/policy_gate.py, city/src/policy.ts, city/src/runtime.ts, config/evals/support.json, city/src/evals.ts";
+  assert.equal(x.improver.get(7).rule_changes, names, "skills/python is not one of them");
+  assert.ok(x.told[0].includes(names));
+  assert.match(x.told[0], /not comparable/);
+  const report = departmentReport(x.city.ledger);
+  assert.deepEqual(report.rule_changes.map((c) => [c.pr, c.rule_changes]), [[7, names]]);
+  assert.match(formatReport(report), /PR #7 changed the rules or scoring.*not comparable/);
+  x.end();
+});
+
+test("the three conditions still hold for such a change: a Reviewer FAIL or worse evals do not merge it", async () => {
+  const diff = "config/policy.json\0";
+  await refused({ diff, reviewer: '{"verdict":"FAIL","findings":[],"summary":"weakens a rule"}' }, /Reviewer did not pass/);
+  await refused({ diff, after: run(3) }, /evals did not hold/);
+  await refused({ diff, ci: [{ name: "test", status: "completed", conclusion: "failure", app: { slug: "github-actions" } }] }, /CI/);
+});
+
+test("an ordinary change is not named as one, and an empty one goes to the owner", async () => {
+  const x = world();
+  x.event();
+  await x.settle();
+  assert.equal(x.improver.get(7).rule_changes, "");
+  assert.doesNotMatch(x.told[0], /not comparable/);
+  assert.deepEqual(departmentReport(x.city.ledger).rule_changes, []);
+  x.end();
+  await refused({ diff: "" }, /changes nothing/);
 });
 
 test("the wrong kind of PR never goes further: a fork, another base, another branch, a draft", async () => {

@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { evalCli, formatRun, loadRuns, loadSuites, recordRun, runEvals, scoreTask, type EvalSuite, type EvalTask } from "../src/evals.ts";
+import { evalCli, formatRun, isRuleOrScoring, loadRuns, loadSuites, recordRun, rulesFingerprint, runEvals, scoreTask, type EvalSuite, type EvalTask } from "../src/evals.ts";
 import { loadPolicy } from "../src/policy.ts";
 import { UsageLimit, type Runner, type TurnRequest } from "../src/sdk.ts";
 
@@ -135,4 +135,22 @@ test("the command: a full run is recorded and compared, a filtered one is not, a
     console.log = write;
     if (before === undefined) delete process.env.JARVIS_HOME; else process.env.JARVIS_HOME = before;
   }
+});
+
+test("scores across a change to the rules or scoring are marked not comparable, and the files are named", () => {
+  const run = { at: "2026-11-04T00:00:00Z", label: "a", passed: 1, total: 2, score: 0.5, cost_usd: 1, ms: 60_000, limit: false, tasks: [] };
+  const same = formatRun({ ...run, rules: { "config/policy.json": "1" } }, { ...run, rules: { "config/policy.json": "1" } });
+  assert.match(same, /same as the last run/);
+  const moved = formatRun({ ...run, passed: 2, score: 1, rules: { "city/src/evals.ts": "2", "config/policy.json": "1" } }, { ...run, rules: { "city/src/evals.ts": "1", "config/policy.json": "1", "config/evals/x.json": "1" } });
+  assert.match(moved, /Not comparable with the last run \(a\).*city\/src\/evals\.ts, config\/evals\/x\.json/);
+  assert.doesNotMatch(moved, /better than/);
+  assert.doesNotMatch(moved, /policy\.json/);
+});
+
+test("the fingerprint really covers the rules and the scoring, and the list matches by path", () => {
+  const f = rulesFingerprint();
+  for (const p of ["config/policy.json", ".claude/hooks/policy_gate.py", "city/src/policy.ts", "city/src/runtime.ts", "config/evals/support.json", "city/src/evals.ts"]) { assert.ok(f[p], p); assert.ok(isRuleOrScoring(p), p); }
+  assert.ok(isRuleOrScoring("Config/Policy.json"));
+  assert.ok(!isRuleOrScoring("skills/python/SKILL.md"));
+  assert.ok(!isRuleOrScoring("config/policy.json.bak"));
 });

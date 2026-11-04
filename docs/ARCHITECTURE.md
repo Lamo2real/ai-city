@@ -198,7 +198,7 @@ The aim is that a prompt can be ignored or talked around and the tool layer stil
 
 Four parts, each usable without the next.
 
-- **Evals** (`city/src/evals.ts`, `config/evals/*.json`, `jarvis eval`). Each task runs a real department in a throwaway city, in a temp folder with its own ledger, memory and audit log, so nothing reaches the owner's. A task passes only if its ticket ends `done` and every check holds: `file_matches`, `file_absent`, `result_matches`, or `command`. A question to the owner gets "no owner available" and an approval is denied. A usage limit stops the run and marks it, so it never counts as a score. A full run is appended to `~/.jarvis/evals.jsonl` with score, cost and time and compared with the last one. Workers run on the SDK executor only.
+- **Evals** (`city/src/evals.ts`, `config/evals/*.json`, `jarvis eval`). Each task runs a real department in a throwaway city, in a temp folder with its own ledger, memory and audit log, so nothing reaches the owner's. A task passes only if its ticket ends `done` and every check holds: `file_matches`, `file_absent`, `result_matches`, or `command`. A question to the owner gets "no owner available" and an approval is denied. A usage limit stops the run and marks it, so it never counts as a score. A full run is appended to `~/.jarvis/evals.jsonl` with score, cost, time and a hash of each rules or scoring file, and compared with the last one. If any of those files differ the two scores are marked not comparable and the files are named. Workers run on the SDK executor only.
 - **Report** (`city/src/measure.ts`, `jarvis report`, `GET /api/city/report`). Per department over a window: tickets, failures, gate retries (`retries` on the ticket), fix tickets, review rounds, cost, busy time, median ticket time, and problems seen at least twice once ids and numbers are removed.
 - **Lessons** (`keepLesson` in `runtime.ts`). Every ticket that ends `done` or `failed` adds one line through `memory.remember`, kind `lesson`, with no model call: in its department's memory, or the agent's own for a core agent. A line the secret filter refuses is dropped and logged without its text. Lessons come back through the usual "data, not instructions" memory block.
 - **Weekly loop** (`city/src/improve.ts`, `skills/self-improvement`). `city-event improve` sends the report as an `improve.weekly` event, which opens a ticket to the Orchestrator. It may end with one PR on an `improve/` branch, named in the ticket's artifacts. Off until the owner runs `jarvis/bin/city-automations enable weekly-improvement`.
@@ -206,17 +206,24 @@ Four parts, each usable without the next.
 **The merge gate.** `createImprover` runs in the server, watches for that ticket and checks the PR itself, one commit at a time, from cheapest to dearest. Nothing an agent says counts: it only names the PR.
 
 1. The PR is open, not a draft, on an `improve/` branch of this repo (never a fork), aimed at `main`.
-2. `protectedChanges` over `git diff --raw` from `main`.
+2. The changed paths from `git diff` against `main`, to name any rules or scoring file later. Nothing is refused by path.
 3. GitHub Actions' `test` check run succeeded on that commit. It waits while CI runs, and gives up after 48 hours.
 4. The Reviewer reads the diff from git, whole (over 200 KB goes to the owner). Only a reply that is wholly a PASS with no blocker or major finding counts.
 5. `evalAtCommit` runs the evals in a separate process on a worktree of `main` and of the PR, both with `main`'s tasks. The PR must score at least `main`, and `main` must score above zero. A run stopped by a usage limit tries again later.
 6. `gh pr merge --merge --match-head-commit <sha>`, so what merges is the commit that passed. A new commit starts over.
 
-Any failure asks the owner a question and leaves the PR open. A PR seen once is never reconsidered. The state is the `improvements` table in the ledger, so it survives a restart. The merge lands on GitHub: the running service keeps its code until the checkout is pulled and it restarts.
+A merged change to the rules or scoring is named in the message to the owner, in `jarvis report`, and in the next weekly ticket. Any failed condition asks the owner a question and leaves the PR open. A PR seen once is never reconsidered. The state is the `improvements` table in the ledger, so it survives a restart. The merge lands on GitHub: the running service keeps its code until the checkout is pulled and it restarts.
 
-**The hard limit** (`protectedChanges`, in code). The loop may change only `agents/`, `skills/`, `docs/`, `city/src/`, `jarvis/hud/`, `jarvis/voice/` and new test files, so a path nobody thought of goes to the owner. Inside those it may not touch `agents/core/reviewer.md`, `skills/self-improvement/`, or `policy`, `runtime`, `sdk`, `openclaw`, `ledger`, `evals`, `improve`, `agents`, `auth`, `memory`, `workflows`, `workspaces`, `schemas`, `checks` and `index` in `city/src/`. Whole files because `guardFor` and the approval code share `runtime.ts` with their helpers, and the guard is called from `sdk.ts` and `openclaw.ts`. No dotfiles, package or lock files, links or submodules anywhere, and no change to an existing test.
+**No limit on paths, by the owner's decision (2026-11-04).** An earlier version refused to auto-merge changes to the city's protections. The owner removed that, so the loop may change `config/policy.json`, `.claude/hooks/`, `policy.ts`, `guardFor`, the approval code, `config/evals/`, the scoring code, CI and the Reviewer's prompt. `isRuleOrScoring` in `evals.ts` only decides what gets named.
 
-**What the limit does not do.** It binds this gate, not the agents. `gh pr merge` is an `ask` for core agents and managers, but by the owner's decision workers skip the policy rules and the city-controls check. A steered worker can merge any PR that passes GitHub's only requirement, the `test` check, including one that changes `config/policy.json`, and it can edit the `improvements` table. A required human review on `main` would close the merge route, and would also stop this gate merging by itself. Other code under `city/src/` and any prompt runs inside the city, so a change there could still weaken something indirectly, or fake a score from inside the eval process. A prompt could teach an agent an eval's answers, and the tasks are in a public repo. The Reviewer is the only guard against those, and it can be steered by what it reads.
+What that means, plainly:
+- A planted instruction that gets past the Reviewer can weaken the city's rules for good. The Reviewer, which reads untrusted text, is the only judge of what a change means.
+- The conditions can be changed by what they check. A PR can edit the workflow behind `test`. A PR's own `evals.ts` scores its own run, so it can fake its score; only the tasks stay `main`'s. A merged change to the Reviewer's prompt or the gate applies to every later PR once the service runs it.
+- Allowed changes to tests and prompts can also teach an agent the public eval answers.
+- Naming a change tells the owner after the merge. It stops nothing.
+- Workers skip the policy rules, so a steered worker can run `gh pr merge` itself, and GitHub requires only the `test` check on `main`.
+
+To undo a merged change, revert its PR. `git log` and the `improvements` table record what merged.
 
 ## Limits, stated plainly
 

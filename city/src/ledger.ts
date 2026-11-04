@@ -96,6 +96,8 @@ CREATE TABLE IF NOT EXISTS costs (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id
 -- The SDK's total_cost_usd is cumulative per session; this remembers the last one so each costs row is a delta.
 -- Keyed by "<agentId>:<sessionId>" so two agents can never share a baseline.
 CREATE TABLE IF NOT EXISTS session_baselines (key TEXT PRIMARY KEY, cumulative_usd REAL NOT NULL);
+-- The self-improvement gate's PRs (city/src/improve.ts). rule_changes names what a merged PR changed in the rules or scoring.
+CREATE TABLE IF NOT EXISTS improvements (pr INTEGER PRIMARY KEY, ticket_id TEXT NOT NULL, sha TEXT NOT NULL DEFAULT '', reviewed_sha TEXT, state TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', errors INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, rule_changes TEXT NOT NULL DEFAULT '', merged_at TEXT);
 `;
 
 export const sessionKey = (agentId: string, sessionId: string) => `${agentId}:${sessionId}`;

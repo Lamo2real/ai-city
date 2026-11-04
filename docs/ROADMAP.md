@@ -67,7 +67,7 @@ Run live on 2026-11-04 on scratch data (`JARVIS_HOME` in a temp folder, `JARVIS_
 - Non-Anthropic providers are not used.
 - Lobster is not used: it is single-agent tool pipelines, and workflows here span departments.
 - No third-party skills are installed.
-- Self-improvement's gate never auto-merges a change to the city's protections (`protectedChanges` in `city/src/improve.ts`); such a PR goes to the owner. A worker can still merge one itself, because workers skip the policy rules.
+- By the owner's decision, self-improvement may change and auto-merge the city's own rules and scoring. Those changes are named, not stopped. A worker can also merge by itself, because workers skip the policy rules.
 - Schedules are off until the owner enables them, and they need the Gateway, which is not running.
 - Cost figures are estimates at API list prices, not charges.
 - `ANTHROPIC_API_KEY` is refused. Everything runs on the Claude subscription.

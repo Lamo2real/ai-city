@@ -59,6 +59,8 @@ export function departmentReport(ledger: Ledger, { days = 7, now = Date.now() }:
     since, days, estimated: true,
     departments: [...rows.values()].sort((a, b) => b.failed - a.failed || b.cost_usd - a.cost_usd),
     repeated: [...problems.values()].filter((p) => p.count >= 2).sort((a, b) => b.count - a.count).slice(0, 10),
+    // Merged by the self-improvement gate in this window and touching the rules or scoring, named so the owner sees it.
+    rule_changes: ledger.db.prepare("SELECT pr, rule_changes, merged_at FROM improvements WHERE state = 'merged' AND rule_changes != '' AND merged_at >= ? ORDER BY merged_at").all(since) as unknown as Array<{ pr: number; rule_changes: string; merged_at: string }>,
   };
 }
 
@@ -78,7 +80,7 @@ export function formatReport(report: ReturnType<typeof departmentReport>): strin
   const widths = head.map((h, i) => Math.max(h.length, ...body.map((b) => b[i].length)));
   const line = (cells: string[]) => cells.map((c, i) => c.padEnd(widths[i])).join("  ").trimEnd();
   const repeated = report.repeated.map((p) => `  ${p.count}x ${p.department}: ${p.problem}`);
-  return [`The last ${report.days} days. Dollar figures are estimates at API list prices, not charges.`, line(head), ...body.map(line), ...(repeated.length ? ["Repeated problems:", ...repeated] : ["No repeated problems."])].join("\n");
+  return [`The last ${report.days} days. Dollar figures are estimates at API list prices, not charges.`, line(head), ...body.map(line), ...(repeated.length ? ["Repeated problems:", ...repeated] : ["No repeated problems."]), ...report.rule_changes.map((c) => `PR #${c.pr} changed the rules or scoring on ${c.merged_at.slice(0, 10)}: ${c.rule_changes}. Scores from before and after it are not comparable.`)].join("\n");
 }
 
 // jarvis report [--days N] [--json]

@@ -31,8 +31,8 @@ const commands = {
   },
   // Repeated problems first: an event keeps only the first 2000 characters of its data.
   async improve() {
-    const { repeated, departments } = await call("/api/city/report?days=7");
-    await send({ source: "schedule", type: "improve.weekly", summary: `Weekly self-improvement, week ending ${today}`, data: { repeated, departments, estimated: true }, idempotency_key: `improve-${today}` });
+    const { repeated, rule_changes, departments } = await call("/api/city/report?days=7");
+    await send({ source: "schedule", type: "improve.weekly", summary: `Weekly self-improvement, week ending ${today}`, data: { repeated, rule_changes, departments, estimated: true }, idempotency_key: `improve-${today}` });
   },
   async "watch-github"() {
     for (const repo of config.github_repos ?? []) {

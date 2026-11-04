@@ -256,11 +256,11 @@ Gaps:
 Evidence:
 - `jarvis eval`, `config/evals/` (five tasks across Engineering, Research, Marketing and Support), recorded in `evals.jsonl`. Tests: `evals.test.ts`.
 - `jarvis report` and `/api/city/report`; lessons through `memory.remember`. Tests: `measure.test.ts`.
-- The weekly schedule and the merge gate, with its hard limit in `protectedChanges`. Tests: `improve.test.ts`.
+- The weekly schedule and the merge gate, which names rule and scoring changes. Tests: `improve.test.ts`.
 
 Gaps:
 - The merge gate has only run against fake `git`, `gh` and evals, apart from `evalAtCommit`. It has not merged a real PR, and the weekly schedule is off.
 - The eval set is small and known, so it catches a broken department and little else. One live task proves little about quality.
 - A failed gate does not try again: a PR that fails review goes to the owner, with no fix round.
 - A merge does not reach the running service until the checkout is pulled and it restarts.
-- A worker can merge a PR itself, around the gate, because workers skip the policy rules by the owner's decision. See "What the limit does not do" in `docs/ARCHITECTURE.md`.
+- By the owner's decision nothing stops this loop changing the city's rules, its CI or its scoring, and a worker can merge a PR itself. See "No limit on paths" in `docs/ARCHITECTURE.md`.

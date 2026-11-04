@@ -18,8 +18,8 @@ The ticket carries a report of the last week per department: failures, retries, 
 
 ## What the merge gate does
 
-The runtime reads the PR itself. It merges with no person only if the change stays inside what this loop may change, CI's `test` passes, the Reviewer passes the exact diff, and the evals in `config/evals/` score at least what `main` scores. Otherwise the owner gets a question and the PR stays open.
+The runtime reads the PR itself. It merges with no person only if CI's `test` passes, the Reviewer passes the exact diff, and the evals in `config/evals/` score at least what `main` scores. Otherwise the owner gets a question and the PR stays open.
 
 ## What this loop may change
 
-`agents/` (not the Reviewer), `skills/` (not this one), `docs/`, `jarvis/hud/`, `jarvis/voice/`, new tests, and `city/src/` except the files that hold the protections. The list is `protectedChanges` in `city/src/improve.ts`. A PR outside it goes to the owner, so if the fix belongs there, say so in your report instead of working around it. Never make a task easier to pass by teaching an agent the eval's answers.
+Anything, by the owner's decision, including the city's rules and how it is scored. A change to those is named to the owner in the run's report and marks scores from before and after it as not comparable, so never hide one inside another change. Never make a task easier to pass by teaching an agent the eval's answers.

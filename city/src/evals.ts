@@ -2,7 +2,8 @@
 // runs a real department in a throwaway city, so a run never touches the owner's ledger or memory.
 // shortcut: workers run on the SDK executor only, an openclaw hire is refused; add the runner if an eval needs a browser.
 import { execFile, execFileSync } from "node:child_process";
-import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +13,24 @@ import { createCity } from "./runtime.ts";
 import { createRunner, type Runner } from "./sdk.ts";
 
 export const EVALS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "config", "evals");
+// The city's rules and how it is scored. A change here may merge by itself, but it is named to the owner and splits the score history.
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const RULES_AND_SCORING = ["config/policy.json", ".claude/hooks", ".claude/settings.json", ".github", "agents/core/reviewer.md", "skills/self-improvement", "config/evals", "city/openclaw-plugin", "city/src/policy.ts", "city/src/runtime.ts", "city/src/ledger.ts", "city/src/sdk.ts", "city/src/openclaw.ts", "city/src/evals.ts", "city/src/improve.ts"];
+export const isRuleOrScoring = (path: string) => RULES_AND_SCORING.some((p) => path.toLowerCase() === p || path.toLowerCase().startsWith(`${p}/`)); // lowercase: the owner's disk ignores case
+// Each of those files by name, with a hash of its contents, so two runs can say what differs between them.
+export function rulesFingerprint(root = ROOT): Record<string, string> {
+  const out: Record<string, string> = {};
+  const add = (path: string) => {
+    const full = join(root, path);
+    if (!existsSync(full)) return;
+    if (statSync(full).isDirectory()) { for (const f of readdirSync(full)) if (f !== "node_modules" && f !== "__pycache__") add(join(path, f)); return; }
+    out[path] = createHash("sha256").update(readFileSync(full)).digest("hex").slice(0, 16);
+  };
+  for (const p of RULES_AND_SCORING) add(p);
+  return out;
+}
+export const rulesChanged = (a: EvalRun, b: EvalRun): string[] => [...new Set([...Object.keys(a.rules ?? {}), ...Object.keys(b.rules ?? {})])].filter((p) => a.rules?.[p] !== b.rules?.[p]).sort();
+
 export type PassCheck =
   | { type: "file_matches"; path: string; pattern: string }
   | { type: "file_absent"; path: string }
@@ -20,7 +39,7 @@ export type PassCheck =
 export interface EvalTask { id: string; goal: string; setup?: Record<string, string>; acceptance_criteria?: string[]; complexity?: "simple" | "standard" | "complex"; timeout_minutes?: number; pass: PassCheck[] }
 export interface EvalSuite { department: string; mission: string; tasks: EvalTask[] }
 export interface TaskResult { id: string; department: string; passed: boolean; status: string; failures: string[]; cost_usd: number; ms: number; kept?: string }
-export interface EvalRun { at: string; label: string; passed: number; total: number; score: number; cost_usd: number; ms: number; limit: boolean; tasks: TaskResult[] }
+export interface EvalRun { at: string; label: string; passed: number; total: number; score: number; cost_usd: number; ms: number; limit: boolean; tasks: TaskResult[]; rules?: Record<string, string> }
 
 const NO_OWNER = "No owner is available during this eval. Decide for yourself and carry on; anything that needs approval is denied.";
 const inside = (p: string) => !isAbsolute(p) && !normalize(p).startsWith("..");
@@ -138,8 +157,10 @@ const time = (ms: number) => `${(ms / 60_000).toFixed(1)}m`;
 const pct = (r: EvalRun) => `${r.passed}/${r.total} (${Math.round(r.score * 100)}%)`;
 export function formatRun(run: EvalRun, previous?: EvalRun): string {
   const lines = run.tasks.map((t) => `${t.passed ? "PASS" : "FAIL"}  ${t.department} / ${t.id}  ${money(t.cost_usd)}  ${time(t.ms)}${t.failures.length ? `\n      ${t.failures.join("; ")}${t.kept ? `\n      kept: ${t.kept}` : ""}` : ""}`);
-  const verdict = !previous ? "" : run.score > previous.score ? ", better than" : run.score < previous.score ? ", worse than" : ", same as";
-  lines.push(`Score ${pct(run)}, estimated ${money(run.cost_usd)} at API list prices (not a charge), ${time(run.ms)}${previous ? `${verdict} the last run: ${pct(previous)}, ${money(previous.cost_usd)}, ${time(previous.ms)} (${previous.label || previous.at})` : ""}.`);
+  const changed = previous ? rulesChanged(previous, run) : [];
+  const verdict = !previous || changed.length ? "" : run.score > previous.score ? ", better than" : run.score < previous.score ? ", worse than" : ", same as";
+  lines.push(`Score ${pct(run)}, estimated ${money(run.cost_usd)} at API list prices (not a charge), ${time(run.ms)}${verdict ? `${verdict} the last run: ${pct(previous!)}, ${money(previous!.cost_usd)}, ${time(previous!.ms)} (${previous!.label || previous!.at})` : ""}.`);
+  if (changed.length) lines.push(`Not comparable with the last run (${previous!.label || previous!.at}): the rules or scoring changed: ${changed.join(", ")}.`);
   if (run.limit) lines.push("Stopped on a usage limit, so this score says nothing about the city.");
   return lines.join("\n");
 }
@@ -162,7 +183,7 @@ export async function evalCli(argv: string[], runner?: Runner): Promise<number> 
     run = createRunner({ policy: loadPolicy(), env: await sdkEnv(process.env) });
   }
   const label = await git("-C", dirname(fileURLToPath(import.meta.url)), "rev-parse", "--short", "HEAD");
-  const result = await runEvals({ runner: run, suites, label, log: process.env.JARVIS_VERBOSE === "1" ? (l) => console.error(`  · ${l}`) : undefined });
+  const result = { ...(await runEvals({ runner: run, suites, label, log: process.env.JARVIS_VERBOSE === "1" ? (l) => console.error(`  · ${l}`) : undefined })), rules: rulesFingerprint() };
   if (out) writeFileSync(out, JSON.stringify(result));
   const previous = department || only ? undefined : loadRuns().filter((r) => !r.limit && r.total === result.total).at(-1); // only a like-for-like run compares
   // A partial or limit-stopped run says nothing about the whole set, so it stays out of the history.
