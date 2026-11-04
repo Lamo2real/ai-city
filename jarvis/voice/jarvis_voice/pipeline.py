@@ -26,7 +26,7 @@ from .timing import TimingLog, TurnTimer
 
 ROOT = Path(__file__).resolve().parents[3]
 CONFIG = ROOT / "config" / "voice.json"
-SUMMARIZER_PROMPT = ROOT / "agents" / "core" / "voice-summarizer.md"
+SUMMARIZER_PROMPT = ROOT / "agents" / "voice" / "summarizer.md"
 NO_ANSWER = {"en": "I can't reach Claude right now, sir.", "sv": "Jag når inte Claude just nu."}
 
 

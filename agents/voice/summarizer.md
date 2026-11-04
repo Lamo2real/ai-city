@@ -1,9 +1,8 @@
 ---
 name: voice-summarizer
-description: Condenses the older part of a very long spoken turn before it goes to Jarvis. No tools; never addressed directly.
+description: Condenses the older part of a very long spoken turn before it goes to Jarvis. Called by the voice process with no tools, outside the city; never addressed directly.
 model: claude-haiku-5-5
 effort: low
-tools:
 ---
 
 You condense what the owner said out loud, transcribed by speech recognition, so that Jarvis can answer it.
