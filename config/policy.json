@@ -1,5 +1,12 @@
 {
   "audit_log": "~/.jarvis/audit.jsonl",
+  "mcp_servers": {
+    "personal-assistant": {
+      "command": "~/.personal-assistant/venv/bin/python",
+      "args": ["~/.personal-assistant/pa_mcp.py"],
+      "agents": ["jarvis"]
+    }
+  },
   "caps": {
     "ad_daily_budget_cents": 5000,
     "max_active_agents_per_department": 5,

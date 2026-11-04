@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { loadPolicy } from "../src/policy.ts";
 import { createCity, type CityEvent } from "../src/runtime.ts";
-import { createRunner, type Runner, type TurnRequest } from "../src/sdk.ts";
+import { createRunner, outsideServers, type Runner, type TurnRequest } from "../src/sdk.ts";
 import { allocateWorkspace, branchState } from "../src/workspaces.ts";
 
 const dir = () => mkdtempSync(join(tmpdir(), "city-"));
@@ -121,6 +121,23 @@ test("ask_agent falls back to the record, and says so, when the agent cannot be 
   assert.match(r.note, /could not answer directly/);
   assert.equal(r.status.id, manager);
   city.close();
+});
+
+test("an outside MCP server reaches only the named agent, only when its tools are allowed, and only if installed", () => {
+  const policy = { ...basePolicy(), mcp_servers: {
+    pa: { command: process.execPath, args: ["~/pa.py"], agents: ["jarvis"] },
+    gone: { command: "/no/such/python", args: [], agents: ["jarvis"] },
+  } };
+  const servers = outsideServers("jarvis", ["mcp__pa__reminders_list", "mcp__gone__x"], policy);
+  assert.deepEqual(Object.keys(servers), ["pa"]);
+  assert.ok(!JSON.stringify(servers).includes("~"), "the home folder is spelled out");
+  assert.deepEqual(outsideServers("eng-1", ["mcp__pa__mail_read"], policy), {}, "a worker hired with the tool's name still gets no server");
+  assert.deepEqual(outsideServers("jarvis", [], policy), {}, "a side question with no tools starts no server");
+});
+
+test("the real policy gives the personal-assistant server to Jarvis alone", () => {
+  const servers = loadPolicy().mcp_servers ?? {};
+  assert.deepEqual(servers["personal-assistant"]?.agents, ["jarvis"]);
 });
 
 test("the SDK runner passes the fork through", async () => {

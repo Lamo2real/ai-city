@@ -1,6 +1,8 @@
 // One turn of one agent through the Claude Agent SDK. Everything the runtime
 // needs from the SDK goes through `Runner`, so tests can swap in a fake.
 import { USAGE_LIMIT_ERROR_PREFIXES, createSdkMcpServer, query, tool, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import type { z } from "zod";
 import { audit, decide, type Policy } from "./policy.ts";
 
@@ -65,6 +67,13 @@ type QueryFn = typeof query;
 // "Bash(osascript:*)" → "Bash"; MCP tools are not built-ins. An agent whose prompt lists none gets none.
 export const builtinTools = (allowed: string[]) => [...new Set(allowed.map((t) => t.replace(/\(.*$/, "")).filter((t) => !t.startsWith("mcp__")))];
 
+// An outside server reaches only the agents policy.json names, and only when this turn may use one of its tools.
+const atHome = (s: string) => s.replace(/^~(?=\/)/, homedir());
+export function outsideServers(agentId: string, allowedTools: string[], policy: Policy): NonNullable<Options["mcpServers"]> {
+  const usable = Object.entries(policy.mcp_servers ?? {}).filter(([name, s]) => s.agents.includes(agentId) && allowedTools.some((t) => t.startsWith(`mcp__${name}__`)) && existsSync(atHome(s.command)));
+  return Object.fromEntries(usable.map(([name, s]) => [name, { type: "stdio" as const, command: atHome(s.command), args: s.args.map(atHome) }]));
+}
+
 export function createRunner({ policy, env, queryFn = query }: { policy: Policy; env: Record<string, string>; queryFn?: QueryFn }): Runner {
   return async (req) => {
     const abort = new AbortController();
@@ -88,7 +97,7 @@ export function createRunner({ policy, env, queryFn = query }: { policy: Policy;
       tools: builtinTools(req.allowedTools),
       permissionMode: "dontAsk",
       settingSources: [],
-      mcpServers: { jarvis },
+      mcpServers: { ...outsideServers(req.agentId, req.allowedTools, policy), jarvis },
       strictMcpConfig: true,
       includePartialMessages: true,
       persistSession: true,
