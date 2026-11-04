@@ -1,6 +1,8 @@
 # Morning report — AI City, night of 3 November 2026
 
 > Note added 2026-11-03: demo mode has since been removed from the HUD and City view. This file is a dated record; see README.md for current instructions.
+> Note added 2026-11-04: `caps.max_concurrent_agents` is now 10 (the owner's decision, was 20). See `config/policy.json`.
+
 
 Everything below was done unattended on your Claude Max subscription. No merges, no pushes to main after the initial import you asked for, no Keychain changes, no API key anywhere.
 
