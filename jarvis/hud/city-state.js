@@ -192,9 +192,24 @@ export function limits(state) {
   const workersMax = agents.filter((a) => a.kind === "manager").reduce((m, mgr) => Math.max(m, agents.filter((a) => a.parent === mgr.id && a.state === "active").length), 0);
   const spendCap = cap("daily_spend_usd_per_department");
   const departments = Object.entries(state.spend ?? {}).map(([dept, usd]) => ({ dept, usd, cap: spendCap, over: spendCap !== null && usd > spendCap, pct: spendCap ? Math.min(100, (usd / spendCap) * 100) : null }));
+  // Active agents against the cap, per department. The cap is department_caps[dept] ?? the default; a snapshot from
+  // before the restart (only max_concurrent_agents) has neither, so the cap is null, never guessed.
+  const defaultCap = cap("max_active_agents_per_department");
+  const deptCaps = caps.department_caps ?? {};
+  const names = [...new Set(agents.filter((a) => a.kind !== "core" && a.department).map((a) => a.department))].sort();
+  const agentsByDepartment = names.map((dept) => {
+    const n = agents.filter((a) => a.kind !== "core" && a.state === "active" && a.department === dept).length;
+    const c = typeof deptCaps[dept] === "number" ? deptCaps[dept] : defaultCap;
+    return { dept, active: n, cap: c, full: c !== null && n >= c };
+  });
   return {
     known: state.caps !== null && state.caps !== undefined,
+    // Total across departments. `max` is only set by an older server that still enforces a total cap.
     agents: { active, max: cap("max_concurrent_agents") },
+    // Only a server that sends the per-department cap says "no total cap"; an older snapshot keeps the plain label.
+    agentsLabel: defaultCap !== null ? "AGENTS ACTIVE (no total cap; per department below)" : "AGENTS ACTIVE",
+    agentsByDepartment,
+    agentCapPerDepartment: defaultCap,
     workersPerManager: { largest: workersMax, max: cap("max_workers_per_manager") },
     departments,
     usage: state.usage ? { turns: state.usage.turns, tokens: state.usage.tokens, usd: state.usage.usd } : null,

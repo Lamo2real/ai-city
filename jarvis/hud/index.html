@@ -231,8 +231,9 @@
   #ailimits .lim b{font-family:Orbitron,sans-serif;font-size:14px;color:var(--txt)}
   #ailimits .lim.over,#ailimits .dept.over{border-color:var(--bad)}
   #ailimits .lim.over b,#ailimits .dept.over .amt{color:var(--bad)}
-  #ailimits .dept{font-size:12px;padding:4px 0}
-  #ailimits .dept .top2{display:flex;justify-content:space-between;gap:8px}
+  #ailimits .dept,#ailimits .agdept{font-size:12px;padding:4px 0}
+  #ailimits .dept .top2,#ailimits .agdept .top2{display:flex;justify-content:space-between;gap:8px}
+  #ailimits .agdept.full .amt{color:var(--bad)}
   #ailimits .dept .bar i.over{background:var(--bad);box-shadow:0 0 8px var(--bad)}
   #ailimits .overtag{color:#fff;background:var(--bad);font-size:10px;letter-spacing:.12em;padding:0 5px;margin-left:6px}
   #aicity .grp{margin-bottom:8px}#aicity .grp h4{font-size:10px;letter-spacing:.2em;color:var(--o2);margin:6px 0 2px}
@@ -937,10 +938,21 @@ function renderLimits() {
   const of = (n, max) => (max === null ? `${n} active` : `${n} / ${max}`);
   const withNote = (el, max) => { if (max === null) el.append(mk("span", "", UNKNOWN)); return el; };
   const strip = mk("div", "strip");
-  strip.append(withNote(lim("AGENTS ACTIVE", of(L.agents.active, L.agents.max), L.agents.max !== null && L.agents.active >= L.agents.max), L.agents.max),
+  // The total cap is gone: the limit is per department (below). An old server still sending max_concurrent_agents keeps the old tile.
+  const legacyTotal = L.agents.max !== null;
+  strip.append(legacyTotal ? lim("AGENTS ACTIVE", of(L.agents.active, L.agents.max), L.agents.active >= L.agents.max) : lim(L.agentsLabel, `${L.agents.active} active`),
     withNote(lim("WORKERS PER MANAGER (MOST)", L.workersPerManager.max === null ? String(L.workersPerManager.largest) : of(L.workersPerManager.largest, L.workersPerManager.max), L.workersPerManager.max !== null && L.workersPerManager.largest >= L.workersPerManager.max), L.workersPerManager.max));
   if (L.usage) { const u = lim("USAGE TODAY", `${L.usage.turns} turns · ${Number(L.usage.tokens).toLocaleString("en-US")} tokens`); u.append(mk("span", "", `${fmtUsd(L.usage.usd)} (SDK cost estimate)`)); strip.append(u); } else strip.append(lim("USAGE TODAY", "—"));
   parts.push(strip);
+  if (L.agentsByDepartment.length) {
+    const ha = mk("h4", "", "AGENTS PER DEPARTMENT" + (L.agentCapPerDepartment === null ? " · cap: unknown until Jarvis restarts" : "")); ha.style.cssText = "font-size:10px;letter-spacing:.2em;color:var(--o2);margin:4px 0";
+    parts.push(ha);
+    for (const d of L.agentsByDepartment) {
+      const row = mk("div", d.full ? "agdept full" : "agdept"), top = mk("div", "top2");
+      const name = mk("span", "", d.dept); if (d.full) name.append(mk("span", "overtag", "FULL"));
+      top.append(name, mk("span", "amt", of(d.active, d.cap))); row.append(top); parts.push(row);
+    }
+  }
   const h = mk("h4", "", "SPEND TODAY PER DEPARTMENT" + (L.departments[0]?.cap != null ? ` (cap ${fmtUsd(L.departments[0].cap)} each)` : " · cap: unknown until Jarvis restarts")); h.style.cssText = "font-size:10px;letter-spacing:.2em;color:var(--o2);margin:4px 0";
   parts.push(h);
   if (!L.departments.length) parts.push(mk("div", "mute", "No spend recorded today."));
