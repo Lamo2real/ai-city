@@ -386,12 +386,20 @@ async function handleLogin(req, res, access) {
 
 // What the city says unprompted (questions, results) reaches every open HUD as server-sent events,
 // and so does everything that moves in the city (hires, tickets, questions, reviews, cost) for the City View.
+// Agents write free text (goals, summaries, questions) and the HUD shows it, so every string leaving for the HUD is scrubbed here.
+export function scrubDeep(value) {
+  if (typeof value === "string") return scrubSecrets(value);
+  if (Array.isArray(value)) return value.map(scrubDeep);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, scrubDeep(v)]));
+  return value;
+}
+
 function createEventStream(talk, speak) {
   const clients = new Set();
   const listeners = new Set(); // The phone bridge: Jarvis's words only, no audio, no city events.
   talk.city?.on((event) => {
     if (event.type === "log") return;
-    for (const res of clients) res.write(`data: ${JSON.stringify({ type: "city", event })}\n\n`);
+    for (const res of clients) res.write(`data: ${JSON.stringify({ type: "city", event: scrubDeep(event) })}\n\n`);
   });
   talk.on?.(async ({ sessionId, text }) => {
     const event = { type: "jarvis", sessionId, text: scrubSecrets(text) };
@@ -422,7 +430,7 @@ function createEventStream(talk, speak) {
 // talks back through the bus (an @mention direct instruction, an answer to a question).
 async function handleCity(req, res, city, path) {
   if (!city) return sendJson(res, 404, { error: "the city backend is not running" });
-  if (req.method === "GET" && path === "/api/city") return sendJson(res, 200, city.snapshot());
+  if (req.method === "GET" && path === "/api/city") return sendJson(res, 200, scrubDeep(city.snapshot()));
   if (req.method === "GET" && path === "/api/city/audit") {
     const agent = new URL(req.url, "http://localhost").searchParams.get("agent") ?? "";
     return /^[a-z][a-z0-9-]{0,40}$/.test(agent) ? sendJson(res, 200, city.auditTail(agent)) : sendJson(res, 400, { error: "bad agent" });
