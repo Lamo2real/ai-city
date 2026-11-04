@@ -9,7 +9,7 @@ import { z } from "zod";
 import { AGENTS_DIR, loadCorePrompt, parsePrompt, renderTemplate, type AgentPrompt } from "./agents.ts";
 import { checksText, runChecks, type Check, type Exec } from "./checks.ts";
 import { now, openLedger, type AgentRow, type Question, type QuestionRow, type Ticket } from "./ledger.ts";
-import { auditPath, loadPolicy, type Policy } from "./policy.ts";
+import { auditPath, canonDepartment, departmentCap, departmentKey, loadPolicy, type Policy } from "./policy.ts";
 import { validate } from "./schemas.ts";
 import type { JarvisTool, Runner, TurnResult } from "./sdk.ts";
 
@@ -220,7 +220,9 @@ export function createCity(opts: CityOptions) {
     const draft = { id: newId("t"), status: "open", created_at: now(), kind: "task", ...input, from: typeof input.from === "string" && input.from ? input.from : from } as Record<string, unknown>;
     for (const k of Object.keys(draft)) if (draft[k] === undefined) delete draft[k];
     const ticket = validate<Ticket>("ticket", draft);
-    agent(ticket.to);
+    const target = agent(ticket.to);
+    // A ticket to a retired agent revives it first, through the department cap; refused = no ticket is created.
+    if (target.state === "retired" && target.kind !== "core" && !ledger.getTicket(ticket.id)) revive(target);
     if (!ledger.putTicket(ticket)) return ledger.getTicket(ticket.id)!;
     emit({ type: "ticket.status", ticket, previous: null });
     if (ticket.kind === "direct_instruction" && OWNER_SIDE.has(ticket.from)) {
@@ -236,21 +238,36 @@ export function createCity(opts: CityOptions) {
     return ticket;
   }
 
+  // Core agents never count; a worker belongs to its manager's department.
+  const activeIn = (dept: string) => ledger.agents("active").filter((a) => a.kind !== "core" && departmentKey(a.department ?? "other") === departmentKey(dept)).length;
+  // The one spelling a department is stored under: the first one the ledger has seen, else the cleaned-up name.
+  const displayDepartment = (name: string): string => ledger.agents().map((a) => a.department).find((d): d is string => !!d && departmentKey(d) === departmentKey(name)) ?? canonDepartment(name);
+  const checkDepartment = (dept: string) => {
+    const cap = departmentCap(policy, dept);
+    if (activeIn(dept) >= cap) throw new Error(`cap reached: ${dept} already has ${cap} active agents. Retire one or reuse.`);
+  };
+  // A retired agent comes back through the same department check, whether hire_agent or a ticket brings it back.
+  function revive(a: AgentRow): AgentRow {
+    checkDepartment(a.department ?? "other");
+    log(`${a.id}: revived from the registry`);
+    const row = ledger.updateAgent(a.id, { state: "active", last_active_at: now() });
+    emit({ type: "agent.hired", agent: row, revived: true });
+    return row;
+  }
+
   function hire(by: string, input: Record<string, unknown>): AgentRow {
     const spec = validate<AgentSpec>("agent_spec", input);
     if (spec.parent !== by) throw new Error(`parent must be the hiring agent (${by})`);
     const existing = ledger.getAgent(spec.id);
     if (existing?.state === "active") throw new Error(`${spec.id} is already hired; find it with list_registry`);
-    if (existing) {
-      log(`${spec.id}: revived from the registry`);
-      const row = ledger.updateAgent(spec.id, { state: "active", last_active_at: now() });
-      emit({ type: "agent.hired", agent: row, revived: true });
-      return row;
-    }
-    const active = ledger.agents("active").filter((a) => a.kind !== "core").length;
-    if (active >= policy.caps.max_concurrent_agents) throw new Error(`cap reached: ${policy.caps.max_concurrent_agents} agents are already active. Retire one or reuse.`);
+    if (existing) return revive(existing);
+    // Only the orchestrator (or the owner side) may hire managers or choose a department. Whatever a manager
+    // hires, of any kind, lands in the manager's own department; a manager cannot hire a manager.
+    const privileged = by === "orchestrator" || OWNER_SIDE.has(by);
+    if (!privileged && spec.kind === "manager") throw new Error(`only the orchestrator can hire managers; ${by} cannot hire the manager ${spec.id}`);
+    const department = displayDepartment(privileged ? spec.department ?? agent(by).department ?? "other" : agent(by).department ?? "other");
+    checkDepartment(department);
     if (spec.kind === "worker" && ledger.children(by).length >= policy.caps.max_workers_per_manager) throw new Error(`cap reached: ${policy.caps.max_workers_per_manager} workers per manager`);
-    const department = spec.department ?? agent(by).department ?? "other";
     if (ledger.spendToday(department) >= policy.caps.daily_spend_usd_per_department) throw new Error(`cap reached: ${department} has spent today's budget`);
     // shortcut: tools are not checked against a per-department allowlist, policy.json has none yet; add one when departments get scopes.
     const text = spec.kind === "manager"
@@ -269,6 +286,15 @@ export function createCity(opts: CityOptions) {
     emit({ type: "agent.hired", agent: row, revived: false });
     log(`${spec.id}: hired by ${by} (${spec.kind}, ${department})`);
     return row;
+  }
+
+  // retire_agent: never a core agent, and only by whoever hired it (its parent) or the orchestrator. Auto-retire when work is done is internal and skips this.
+  function retire(by: string, id: string): void {
+    const a = agent(id);
+    if (a.kind === "core") throw new Error(`${id} is a core agent and cannot be retired`);
+    if (a.parent !== by && by !== "orchestrator" && !OWNER_SIDE.has(by)) throw new Error(`${by} did not hire ${id}; only ${a.parent} or the orchestrator can retire it`);
+    ledger.updateAgent(id, { state: "retired" });
+    emit({ type: "agent.retired", id });
   }
 
   function listRegistry(query: string): Array<Pick<AgentRow, "id" | "role" | "kind" | "department" | "parent" | "model" | "skills" | "lifecycle" | "state">> {
@@ -307,12 +333,37 @@ export function createCity(opts: CityOptions) {
     return { id: row.id };
   }
 
+  // A ticket parked because its agent's department is full: ask the owner (once per ticket while the question is open).
+  const CANNOT_RESUME = /cannot resume: .+ is at its cap of \d+/;
+  const reasked = new Set<string>();
+  function askParked(t: Ticket, target: AgentRow): void {
+    const dept = target.department ?? "other";
+    const text = `Ticket ${t.id} to ${t.to} cannot resume: ${dept} is at its cap of ${departmentCap(policy, dept)}. Retire an agent, raise department_caps, or cancel?`;
+    ask("orchestrator", { ticket_id: t.id, blocking: false, questions: [{ text, options: ["retry now", "cancel"], default: "retry now" }] })
+      .catch((err: Error) => log(`could not ask about parked ticket ${t.id}: ${err.message}`));
+  }
+  function answerParked(ticketId: string, text: string): Ticket {
+    const t = ledger.getTicket(ticketId);
+    if (!t) throw new Error(`no ticket ${ticketId}`);
+    if (t.status !== "waiting_on_owner") return t;
+    if (/cancel/i.test(text)) return setStatus(t.id, "cancelled", { result: { ...t.result, summary: "Cancelled by the owner: its department was at its agent cap." } });
+    const target = agent(t.to);
+    try { if (target.state === "retired") revive(target); } catch (err) {
+      log(`${t.to}: ticket ${t.id} still parked: ${(err as Error).message}`);
+      if (!reasked.has(t.id)) { reasked.add(t.id); askParked(t, target); } // re-ask once; after that it stays parked
+      return t;
+    }
+    dispatch(t, "[the department cap no longer blocks you; continue] ");
+    return ledger.getTicket(t.id)!;
+  }
+
   function answer(questionId: string, text: string): Ticket {
     const q = ledger.getQuestion(questionId);
     if (!q) throw new Error(`no question ${questionId}`);
     if (q.status === "answered") throw new Error(`question ${questionId} is already answered`);
     ledger.answerQuestion(questionId, text);
     emit({ type: "question.answered", id: questionId, answer: text, answered_by: "owner", ticket_id: q.question.ticket_id });
+    if (CANNOT_RESUME.test(q.question.questions[0]?.text ?? "")) return answerParked(q.question.ticket_id, text);
     const t = ledger.getTicket(q.question.ticket_id);
     if (t?.status === "waiting_on_owner") setStatus(t.id, "in_progress");
     const asker = agent(q.question.asked_by);
@@ -381,7 +432,7 @@ export function createCity(opts: CityOptions) {
     const obj = z.record(z.string(), z.unknown());
     return [
       { name: "hire_agent", description: "Hire a manager or worker from an agent spec (schemas/agent_spec.schema.json). Reuse from list_registry first.", schema: { spec: obj }, handler: async ({ spec }) => hire(agentId, spec as Record<string, unknown>) },
-      { name: "retire_agent", description: "Retire an agent you hired. It stays in the registry for reuse.", schema: { id: z.string() }, handler: async ({ id }) => { ledger.updateAgent(id as string, { state: "retired" }); emit({ type: "agent.retired", id: id as string }); return { retired: id }; } },
+      { name: "retire_agent", description: "Retire an agent you hired. It stays in the registry for reuse.", schema: { id: z.string() }, handler: async ({ id }) => { retire(agentId, id as string); return { retired: id }; } },
       { name: "list_registry", description: "Find existing agents by role, department, skill or id. Empty query lists all, retired ones included.", schema: { query: z.string() }, handler: async ({ query }) => listRegistry(query as string) },
       { name: "send_ticket", description: "Send a ticket (schemas/ticket.schema.json) to an agent. id, from, status and created_at are filled in if missing.", schema: { ticket: obj }, handler: async ({ ticket }) => sendTicket(agentId, ticket as Record<string, unknown>) },
       { name: "ask_user", description: "Ask the owner (schemas/question.schema.json). Your manager answers first if it can. Keep working on the default unless blocking.", schema: { question: obj }, handler: async ({ question }) => ask(agentId, question as Record<string, unknown>) },
@@ -393,7 +444,19 @@ export function createCity(opts: CityOptions) {
   // After a restart: open questions are asked again, unfinished tickets go back to their agents.
   async function resume(): Promise<void> {
     for (const q of ledger.openQuestions()) emit({ type: "question", id: q.id, question: q.question, ticket_id: q.question.ticket_id });
-    for (const t of ledger.ticketsByStatus("open", "in_progress", "in_review")) dispatch(t, "[resumed after a restart; continue where you left off] ");
+    for (const t of ledger.ticketsByStatus("open", "in_progress", "in_review")) {
+      const target = ledger.getAgent(t.to);
+      if (target && target.state === "retired" && target.kind !== "core") {
+        try { revive(target); } catch (err) {
+          // Over the department cap: park the ticket with a note rather than throw out of resume or bypass the cap.
+          log(`${t.to}: ticket ${t.id} parked: ${(err as Error).message}`);
+          setStatus(t.id, "waiting_on_owner", { result: { ...t.result, summary: `Not resumed after the restart: ${(err as Error).message}` } });
+          askParked(t, target);
+          continue;
+        }
+      }
+      dispatch(t, "[resumed after a restart; continue where you left off] ");
+    }
   }
 
   async function idle(): Promise<void> {
@@ -419,7 +482,9 @@ export function createCity(opts: CityOptions) {
       const departments = [...new Set(agents.map((a) => a.department).filter((d): d is string => !!d))];
       return { agents, tickets: ledger.ticketsByStatus("open", "in_progress", "in_review", "waiting_on_owner"), questions: ledger.openQuestions(), usage: ledger.usageToday(), spend: Object.fromEntries(departments.map((d) => [d, ledger.spendToday(d)])),
         // The limits the city enforces, read from the loaded policy each time so the HUD never hardcodes them.
-        caps: { max_concurrent_agents: policy.caps.max_concurrent_agents, max_workers_per_manager: policy.caps.max_workers_per_manager, daily_spend_usd_per_department: policy.caps.daily_spend_usd_per_department, max_review_rounds: policy.caps.max_review_rounds } };
+        // department_agents: active (non-core) agents against the cap, per department; the HUD draws "active / cap".
+        department_agents: Object.fromEntries(departments.map((d) => [d, { active: agents.filter((a) => a.kind !== "core" && a.state === "active" && a.department === d).length, cap: departmentCap(policy, d) }])),
+        caps: { max_active_agents_per_department: policy.caps.max_active_agents_per_department, department_caps: policy.caps.department_caps ?? {}, max_workers_per_manager: policy.caps.max_workers_per_manager, daily_spend_usd_per_department: policy.caps.daily_spend_usd_per_department, max_review_rounds: policy.caps.max_review_rounds } };
     },
     // The last n things an agent did, from the policy gate's audit log.
     auditTail(agentId: string, n = 10): Array<{ ts: number; tool: string; decision: string; reason: string }> {

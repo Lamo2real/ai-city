@@ -111,3 +111,9 @@ The city button in the dock opens the City View; http://localhost:7778/?demo=1&v
 ## 6. Subscription usage
 
 About 25 live calls in total, all on Haiku and Sonnet (`JARVIS_MODEL_CAP=claude-sonnet-5-5`): one `9+9` call and six runs of the hire scenario (the first five found real bugs, fixed in Phase 1; the sixth went end to end: Jarvis → Orchestrator → hired manager → repo with one commit → report → Secretary → Jarvis told the owner "The hello-world repository is ready, sir"). No usage-limit message appeared. Phases 2–5 made no live calls.
+
+## Note, 2026-11-04: per-department agent cap replaces the total cap
+
+By owner decision the total `max_concurrent_agents` cap is gone. `config/policy.json` now has `caps.max_active_agents_per_department: 5` and `caps.department_caps: {}` (per-department overrides); a new department automatically gets 5. Hiring and reviving are refused when the department already has that many active (non-retired) agents: `cap reached: <department> already has 5 active agents. Retire one or reuse.` Core agents never count; a worker counts in its manager's department. The HUD shows active / cap per department (an older server snapshot without the new keys still renders, with the cap shown as unknown until the restart).
+
+With no total cap, usage protection relies on the daily spend caps (`daily_spend_usd_per_department`, optional `daily_spend_usd_global`) and the per-turn limit check (FIX 1).

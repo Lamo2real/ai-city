@@ -19,12 +19,23 @@ export interface Policy {
   audit_log: string;
   caps: {
     ad_daily_budget_cents: number;
-    max_concurrent_agents: number;
+    max_active_agents_per_department: number; // active (non-retired, non-core) agents any one department may have
+    department_caps?: Record<string, number>; // per-department overrides of the line above
     max_workers_per_manager: number;
     daily_spend_usd_per_department: number;
     max_review_rounds: number;
   };
   rules: Rule[];
+}
+
+// A department with no override gets the default, so a brand-new department is capped from its first hire.
+// Department names compare trimmed, with inner whitespace collapsed, case-insensitively: "it", "IT " and "IT" are one department.
+export const canonDepartment = (name: string): string => name.trim().replace(/\s+/g, " ");
+export const departmentKey = (name: string): string => canonDepartment(name).toLowerCase();
+export function departmentCap(policy: Policy, department: string): number {
+  const caps = policy.caps.department_caps ?? {};
+  const k = Object.keys(caps).find((name) => departmentKey(name) === departmentKey(department));
+  return (k !== undefined ? caps[k] : undefined) ?? policy.caps.max_active_agents_per_department;
 }
 
 export const POLICY_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "config", "policy.json");

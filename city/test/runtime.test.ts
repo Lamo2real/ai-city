@@ -75,41 +75,70 @@ test("a ticket from Jarvis flows orchestrator → manager → worker and back th
   city.close();
 });
 
-test("the real max_concurrent_agents is a positive integer, at most the owner's decided 10; raise only with the owner's decision", () => {
-  const cap = policy.caps.max_concurrent_agents;
-  assert.ok(Number.isInteger(cap) && cap >= 1, `max_concurrent_agents is ${cap}; it must be a positive integer`);
-  assert.ok(cap <= 10, `max_concurrent_agents is ${cap}, above 10: raise only with the owner's decision`);
+test("the real per-department cap is a positive integer, at most 5", () => {
+  const caps = [policy.caps.max_active_agents_per_department, ...Object.values(policy.caps.department_caps ?? {})];
+  for (const cap of caps) {
+    assert.ok(Number.isInteger(cap) && cap >= 1, `a department cap is ${cap}; it must be a positive integer`);
+    assert.ok(cap <= 5, `a department cap is ${cap}, above 5: raise only with the owner's decision`);
+  }
+  assert.equal((policy.caps as Record<string, unknown>).max_concurrent_agents, undefined, "the total cap was replaced by the per-department cap");
 });
 
 // The caps are pinned here, so this proves enforcement whatever config/policy.json says.
-const capped = { ...policy, caps: { ...policy.caps, max_concurrent_agents: 4, max_workers_per_manager: 4 } };
+const capped = { ...policy, caps: { ...policy.caps, max_active_agents_per_department: 5, department_caps: {}, max_workers_per_manager: 4 } };
 
-test("caps block the agent over max_concurrent_agents and the 5th worker of one manager", async () => {
+test("the 6th agent in a department is refused, other and new departments still hire, core agents are not counted, revival is checked", async () => {
   const { runner } = fakeRunner({});
   const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: capped });
   const hire = (by: string, s: Record<string, unknown>) => city.toolsFor(by).find((t) => t.name === "hire_agent")!.handler({ spec: s });
   const retire = (by: string, id: string) => city.toolsFor(by).find((t) => t.name === "retire_agent")!.handler({ id });
-  await hire("orchestrator", spec("mgr-a", "manager", "orchestrator"));
-  await hire("mgr-a", spec("wk-1", "worker", "mgr-a"));
-  await hire("mgr-a", spec("wk-2", "worker", "mgr-a"));
-  await hire("mgr-a", spec("wk-3", "worker", "mgr-a"));
-  await assert.rejects(hire("orchestrator", spec("mgr-b", "manager", "orchestrator")), /cap reached: 4 agents/);
-  await assert.rejects(hire("mgr-a", spec("wk-4", "worker", "mgr-a")), /cap reached: 4 agents/);
-  await retire("mgr-a", "wk-3");
-  await hire("mgr-a", spec("wk-4", "worker", "mgr-a"));
-  await assert.rejects(hire("orchestrator", { ...spec("bad", "manager", "orchestrator"), extra: 1 }), /unknown field extra/);
-  await assert.rejects(hire("orchestrator", spec("mgr-c", "manager", "someone-else")), /parent must be the hiring agent/);
-  assert.equal((await city.toolsFor("mgr-a").find((t) => t.name === "list_registry")!.handler({ query: "wk" }) as unknown[]).length, 4, "retired agents stay in the registry");
+  // IT: a manager and four workers (one team of five) fills the department; the four core agents did not count.
+  await hire("orchestrator", spec("it-mgr", "manager", "orchestrator"));
+  for (const id of ["wrk-1", "wrk-2", "wrk-3"]) await hire("it-mgr", spec(id, "worker", "it-mgr"));
+  await hire("orchestrator", spec("it-mgr-2", "manager", "orchestrator")); // 5th active in IT
+  await assert.rejects(hire("orchestrator", spec("it-mgr-3", "manager", "orchestrator")), /^Error: cap reached: IT already has 5 active agents\. Retire one or reuse\.$/);
+  await assert.rejects(hire("it-mgr", spec("wrk-4", "worker", "it-mgr")), /cap reached: IT already has 5 active agents/, "a worker counts in its manager's department");
+  // Another department, and a brand-new one, are not affected.
+  await hire("orchestrator", spec("hr-mgr", "manager", "orchestrator", { department: "HR" }));
+  await hire("orchestrator", spec("new-mgr", "manager", "orchestrator", { department: "Brand New" }));
+  // Revival is checked: retire one, fill the slot, then the retired one cannot come back.
+  await retire("it-mgr", "wrk-3");
+  await hire("it-mgr", spec("wrk-5", "worker", "it-mgr"));
+  await assert.rejects(hire("it-mgr", spec("wrk-3", "worker", "it-mgr")), /cap reached: IT already has 5 active agents/);
+  await retire("it-mgr", "wrk-5");
+  assert.equal((await hire("it-mgr", spec("wrk-3", "worker", "it-mgr")) as { state: string }).state, "active", "revived once there is room");
   city.close();
+});
 
-  const roomy = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: { ...capped, caps: { ...capped.caps, max_concurrent_agents: 10 } } });
-  const h = (by: string, s: Record<string, unknown>) => roomy.toolsFor(by).find((t) => t.name === "hire_agent")!.handler({ spec: s });
+test("a department_caps override beats the default, and the snapshot shows active/cap per department", async () => {
+  const { runner } = fakeRunner({});
+  const custom = { ...capped, caps: { ...capped.caps, department_caps: { IT: 2 } } };
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: custom });
+  const hire = (by: string, s: Record<string, unknown>) => city.toolsFor(by).find((t) => t.name === "hire_agent")!.handler({ spec: s });
+  await hire("orchestrator", spec("aaa-mgr", "manager", "orchestrator"));
+  await hire("orchestrator", spec("bbb-mgr", "manager", "orchestrator"));
+  await assert.rejects(hire("orchestrator", spec("ccc-mgr", "manager", "orchestrator")), /cap reached: IT already has 2 active agents/);
+  await hire("orchestrator", spec("hr-mgr", "manager", "orchestrator", { department: "HR" }));
+  const snap = city.snapshot();
+  assert.deepEqual(snap.department_agents, { IT: { active: 2, cap: 2 }, HR: { active: 1, cap: 5 } });
+  assert.equal(snap.caps.max_active_agents_per_department, 5);
+  assert.deepEqual(snap.caps.department_caps, { IT: 2 });
+  city.close();
+});
+
+test("the 5th worker of one manager is refused (max_workers_per_manager)", async () => {
+  const { runner } = fakeRunner({});
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: { ...capped, caps: { ...capped.caps, max_active_agents_per_department: 20, max_workers_per_manager: 4 } } });
+  const h = (by: string, s: Record<string, unknown>) => city.toolsFor(by).find((t) => t.name === "hire_agent")!.handler({ spec: s });
   await h("orchestrator", spec("mgr-a", "manager", "orchestrator"));
   for (const id of ["wk-1", "wk-2", "wk-3", "wk-4"]) await h("mgr-a", spec(id, "worker", "mgr-a"));
   await assert.rejects(h("mgr-a", spec("wk-5", "worker", "mgr-a")), /4 workers per manager/);
-  await roomy.toolsFor("mgr-a").find((t) => t.name === "retire_agent")!.handler({ id: "wk-1" });
+  await assert.rejects(h("orchestrator", { ...spec("bad", "manager", "orchestrator"), extra: 1 }), /unknown field extra/);
+  await assert.rejects(h("orchestrator", spec("mgr-c", "manager", "someone-else")), /parent must be the hiring agent/);
+  await city.toolsFor("mgr-a").find((t) => t.name === "retire_agent")!.handler({ id: "wk-1" });
   assert.equal((await h("mgr-a", spec("wk-1", "worker", "mgr-a")) as { state: string }).state, "active", "a retired specialist is revived, not re-hired");
-  roomy.close();
+  assert.equal((await city.toolsFor("mgr-a").find((t) => t.name === "list_registry")!.handler({ query: "wk" }) as unknown[]).length, 4, "retired agents stay in the registry");
+  city.close();
 });
 
 test("@id from the owner is a direct instruction to that agent with its manager cc'd", async () => {
@@ -418,10 +447,142 @@ test("an existing install's core rows are refreshed from the prompts: old tools 
 });
 
 test("snapshot carries the caps from the loaded policy, not a copy", () => {
-  const custom = { ...policy, caps: { ...policy.caps, max_concurrent_agents: 7, max_workers_per_manager: 3, daily_spend_usd_per_department: 12.5, max_review_rounds: 4 } };
+  const custom = { ...policy, caps: { ...policy.caps, max_active_agents_per_department: 3, department_caps: { IT: 2 }, max_workers_per_manager: 3, daily_spend_usd_per_department: 12.5, max_review_rounds: 4 } };
   const c = createCity({ runner: fakeRunner({}).runner, dataDir: dir(), ledgerPath: ":memory:", policy: custom });
-  assert.deepEqual(c.snapshot().caps, { max_concurrent_agents: 7, max_workers_per_manager: 3, daily_spend_usd_per_department: 12.5, max_review_rounds: 4 });
+  assert.deepEqual(c.snapshot().caps, { max_active_agents_per_department: 3, department_caps: { IT: 2 }, max_workers_per_manager: 3, daily_spend_usd_per_department: 12.5, max_review_rounds: 4 });
   const real = createCity({ runner: fakeRunner({}).runner, dataDir: dir(), ledgerPath: ":memory:", policy });
-  assert.equal(real.snapshot().caps.max_concurrent_agents, policy.caps.max_concurrent_agents);
+  assert.equal(real.snapshot().caps.max_active_agents_per_department, policy.caps.max_active_agents_per_department);
   c.close(); real.close();
+});
+
+test("a ticket to a retired agent revives it through the department cap: refused when full, revived and run when not", async () => {
+  const { runner, calls } = fakeRunner({});
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: capped });
+  const events: CityEvent[] = [];
+  city.on((e) => events.push(e));
+  const hire = (id: string) => city.toolsFor("orchestrator").find((t) => t.name === "hire_agent")!.handler({ spec: spec(id, "manager", "orchestrator") });
+  const retire = (id: string) => city.toolsFor("orchestrator").find((t) => t.name === "retire_agent")!.handler({ id });
+  for (const id of ["mgr-one", "mgr-two", "mgr-three", "mgr-four", "mgr-five"]) await hire(id);
+  await retire("mgr-five");
+  await hire("mgr-six"); // IT is full again: five active
+  const before = city.ledger.ticketsByStatus("open", "in_progress").length;
+  assert.throws(() => city.sendTicket({ to: "mgr-five", goal: "x" }), /^Error: cap reached: IT already has 5 active agents\. Retire one or reuse\.$/);
+  assert.equal(city.ledger.ticketsByStatus("open", "in_progress").length, before, "no ticket was created or dispatched");
+  assert.equal(city.ledger.getAgent("mgr-five")?.state, "retired");
+  await retire("mgr-six");
+  const t = city.sendTicket({ to: "mgr-five", goal: "x" });
+  await city.idle();
+  assert.equal(city.ledger.getAgent("mgr-five")?.state, "active");
+  assert.ok(events.some((e) => e.type === "agent.hired" && e.revived && e.agent.id === "mgr-five"));
+  assert.ok(calls.some((c) => c.agentId === "mgr-five" && c.prompt.includes(t.id)));
+  city.close();
+});
+
+test("resume over the department cap parks the ticket instead of crashing or bypassing the cap", async () => {
+  const { runner, calls } = fakeRunner({});
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: capped });
+  const hire = (id: string) => city.toolsFor("orchestrator").find((t) => t.name === "hire_agent")!.handler({ spec: spec(id, "manager", "orchestrator") });
+  for (const id of ["mgr-one", "mgr-two", "mgr-three", "mgr-four", "mgr-five"]) await hire(id);
+  await city.toolsFor("orchestrator").find((t) => t.name === "retire_agent")!.handler({ id: "mgr-five" });
+  await hire("mgr-six");
+  city.ledger.putTicket({ id: "t-parked", from: "orchestrator", to: "mgr-five", kind: "task", goal: "g", status: "in_progress", created_at: new Date().toISOString() });
+  await city.resume();
+  await city.idle();
+  const t = city.ledger.getTicket("t-parked")!;
+  assert.equal(t.status, "waiting_on_owner");
+  assert.match(t.result?.summary ?? "", /cap reached: IT already has 5 active agents/);
+  assert.equal(calls.filter((c) => c.agentId === "mgr-five").length, 0);
+  assert.equal(city.ledger.getAgent("mgr-five")?.state, "retired");
+  city.close();
+});
+
+const tool = (city: ReturnType<typeof createCity>, by: string, name: string) => city.toolsFor(by).find((t) => t.name === name)!.handler;
+
+test("a manager cannot hire a manager; what a manager hires inherits its department", async () => {
+  const { runner } = fakeRunner({});
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: capped });
+  await tool(city, "orchestrator", "hire_agent")({ spec: spec("mgr-it", "manager", "orchestrator", { department: "IT" }) });
+  await assert.rejects(tool(city, "mgr-it", "hire_agent")({ spec: spec("mgr-two", "manager", "mgr-it", { department: "HR" }) }), /only the orchestrator can hire managers/);
+  const w = await tool(city, "mgr-it", "hire_agent")({ spec: spec("wrk-one", "worker", "mgr-it", { department: "Other" }) }) as { department: string };
+  assert.equal(w.department, "IT", "a manager's hire cannot pick another department");
+  city.close();
+});
+
+test("'it', 'IT ' and ' I T' style variants are one department: the cap is shared and the first spelling is kept", async () => {
+  const { runner } = fakeRunner({});
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: { ...capped, caps: { ...capped.caps, department_caps: { "it": 3 } } } });
+  const hire = tool(city, "orchestrator", "hire_agent");
+  await hire({ spec: spec("agt-one", "manager", "orchestrator", { department: "IT" }) });
+  await hire({ spec: spec("agt-two", "manager", "orchestrator", { department: "it" }) });
+  const third = await hire({ spec: spec("agt-three", "manager", "orchestrator", { department: "IT " }) }) as { department: string };
+  assert.equal(third.department, "IT");
+  await assert.rejects(hire({ spec: spec("agt-four", "manager", "orchestrator", { department: " It" }) }), /cap reached: IT already has 3 active agents/);
+  assert.deepEqual([...new Set(city.ledger.agents().map((a) => a.department).filter(Boolean))], ["IT"]);
+  city.close();
+});
+
+test("retire_agent refuses core agents and agents the caller did not hire; the parent and the orchestrator may", async () => {
+  const { runner } = fakeRunner({});
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: capped });
+  await tool(city, "orchestrator", "hire_agent")({ spec: spec("mgr-one", "manager", "orchestrator") });
+  await tool(city, "orchestrator", "hire_agent")({ spec: spec("mgr-two", "manager", "orchestrator") });
+  await tool(city, "mgr-one", "hire_agent")({ spec: spec("wrk-one", "worker", "mgr-one") });
+  await assert.rejects(tool(city, "orchestrator", "retire_agent")({ id: "reviewer" }), /core agent/);
+  await assert.rejects(tool(city, "mgr-two", "retire_agent")({ id: "wrk-one" }), /did not hire wrk-one/);
+  assert.equal(city.ledger.getAgent("wrk-one")?.state, "active");
+  await tool(city, "mgr-one", "retire_agent")({ id: "wrk-one" });
+  assert.equal(city.ledger.getAgent("wrk-one")?.state, "retired");
+  await tool(city, "orchestrator", "retire_agent")({ id: "mgr-two" });
+  assert.equal(city.ledger.getAgent("mgr-two")?.state, "retired");
+  city.close();
+});
+
+async function parkedCity() {
+  const { runner, calls } = fakeRunner({});
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: capped });
+  const hire = tool(city, "orchestrator", "hire_agent");
+  for (const id of ["mgr-one", "mgr-two", "mgr-three", "mgr-four", "mgr-five"]) await hire({ spec: spec(id, "manager", "orchestrator") });
+  await tool(city, "orchestrator", "retire_agent")({ id: "mgr-five" });
+  await hire({ spec: spec("mgr-six", "manager", "orchestrator") });
+  city.ledger.putTicket({ id: "t-parked", from: "orchestrator", to: "mgr-five", kind: "task", goal: "g", status: "in_progress", created_at: new Date().toISOString() });
+  await city.resume();
+  await city.idle();
+  return { city, calls };
+}
+const parkedQuestions = (city: ReturnType<typeof createCity>) => city.ledger.openQuestions().filter((q) => q.question.ticket_id === "t-parked");
+
+test("resume over the cap asks the owner once; 'retry now' after freeing a slot resumes the ticket", async () => {
+  const { city, calls } = await parkedCity();
+  const qs = parkedQuestions(city);
+  assert.equal(qs.length, 1);
+  assert.equal(qs[0].question.asked_by, "orchestrator");
+  assert.notEqual(qs[0].question.blocking, true);
+  assert.equal(qs[0].question.questions[0].text, "Ticket t-parked to mgr-five cannot resume: IT is at its cap of 5. Retire an agent, raise department_caps, or cancel?");
+  assert.deepEqual(qs[0].question.questions[0].options, ["retry now", "cancel"]);
+  await city.resume(); // a second resume does not duplicate while the ticket is parked
+  assert.equal(parkedQuestions(city).length, 1);
+  // Still full: retry re-asks once.
+  city.answer(qs[0].id, "retry now");
+  assert.equal(city.ledger.getTicket("t-parked")?.status, "waiting_on_owner");
+  const again = parkedQuestions(city);
+  assert.equal(again.length, 1);
+  city.answer(again[0].id, "retry now");
+  assert.equal(parkedQuestions(city).length, 0, "re-asked only once");
+  // Free a slot and retry through a fresh question.
+  await tool(city, "orchestrator", "retire_agent")({ id: "mgr-six" });
+  city.ledger.putQuestion({ id: "q-manual", status: "open", question: { ...qs[0].question }, created_at: new Date().toISOString() });
+  city.answer("q-manual", "retry now");
+  await city.idle();
+  assert.equal(city.ledger.getAgent("mgr-five")?.state, "active");
+  assert.ok(calls.some((c) => c.agentId === "mgr-five" && c.prompt.includes("t-parked")));
+  assert.notEqual(city.ledger.getTicket("t-parked")?.status, "waiting_on_owner");
+  city.close();
+});
+
+test("answering 'cancel' closes the parked ticket", async () => {
+  const { city, calls } = await parkedCity();
+  city.answer(parkedQuestions(city)[0].id, "cancel");
+  assert.equal(city.ledger.getTicket("t-parked")?.status, "cancelled");
+  assert.equal(calls.filter((c) => c.agentId === "mgr-five").length, 0);
+  city.close();
 });
