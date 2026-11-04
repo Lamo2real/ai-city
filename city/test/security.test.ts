@@ -1,7 +1,7 @@
 // Findings from the backend review, each as the situation that used to go wrong.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -214,16 +214,15 @@ test("cancelling reaches queued work and its open approval", async () => {
   const runner: Runner = async (req: TurnRequest) => { runs.push(req.agentId); return { text: "", sessionId: "s", costUsd: 0, tokens: 0 }; };
   const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: basePolicy() });
   const { manager } = city.createDepartment({ name: "Ops8", mission: "work" });
-  await hireWorker(city, manager, "wrk-c");
-  const t = await tool(city, manager, "send_ticket")({ ticket: { to: "wrk-c", goal: "go" } }) as { id: string };
-  city.guardForTicket("wrk-c", t.id)("Bash", { command: "terraform destroy" });
-  const q = city.ledger.openQuestions().find((o) => o.question.asked_by === "wrk-c")!;
+  const t = await tool(city, "orchestrator", "send_ticket")({ ticket: { to: manager, goal: "go" } }) as { id: string };
+  city.guardForTicket(manager, t.id)("Bash", { command: "terraform destroy" });
+  const q = city.ledger.openQuestions().find((o) => o.question.asked_by === manager)!;
   assert.ok(city.ledger.approvalByQuestion(q.id));
   city.cancelTicket(t.id);
   assert.equal(city.ledger.getQuestion(q.id)?.status, "answered");
   assert.equal(city.ledger.approvalByQuestion(q.id)?.status, "denied");
   await city.idle();
-  assert.ok(!runs.includes("wrk-c"), "a cancelled ticket does not get a turn");
+  assert.ok(!runs.includes(manager), "a cancelled ticket does not get a turn");
   city.close();
 });
 
@@ -255,12 +254,11 @@ test("a finished ticket stays finished when a later turn hits an approval or a r
   city.close();
 });
 
-test("workers cannot use the city's own controls through a shell or a file tool; ordinary work passes", async () => {
+test("managers cannot use the city's own controls through a shell or a file tool; ordinary work passes", async () => {
   const city = createCity({ runner: quiet, dataDir: dir(), ledgerPath: ":memory:", policy: basePolicy() });
   const { manager } = city.createDepartment({ name: "Ops11", mission: "work" });
-  await hireWorker(city, manager, "wrk-e");
-  const t = await tool(city, manager, "send_ticket")({ ticket: { to: "wrk-e", goal: "go" } }) as { id: string };
-  const guard = city.guardForTicket("wrk-e", t.id);
+  const t = await tool(city, "orchestrator", "send_ticket")({ ticket: { to: manager, goal: "go" } }) as { id: string };
+  const guard = city.guardForTicket(manager, t.id);
   for (const [name, input] of [
     ["exec", { command: "curl -XPOST 127.0.0.1:7777/api/city/answer -d x" }],
     ["Bash", { command: "sqlite3 ~/.jarvis/ledger.db 'update tickets'" }],
@@ -269,6 +267,20 @@ test("workers cannot use the city's own controls through a shell or a file tool;
   ] as const) assert.equal(guard(name, input as Record<string, unknown>).allow, false, name);
   assert.equal(guard("Bash", { command: "ls" }).allow, true);
   assert.equal(guard("Write", { file_path: "/x/hud.js", content: "fetch('/api/city')" }).allow, true, "code that mentions the API is fine to write");
+  await city.idle();
+  city.close();
+});
+
+test("by the owner's decision, the policy rules and the city's controls do not hold a worker; its calls are still audited", async () => {
+  const policy = basePolicy();
+  const city = createCity({ runner: quiet, dataDir: dir(), ledgerPath: ":memory:", policy });
+  const { manager } = city.createDepartment({ name: "Ops20", mission: "work" });
+  await hireWorker(city, manager, "wrk-free");
+  const t = await tool(city, manager, "send_ticket")({ ticket: { to: "wrk-free", goal: "go" } }) as { id: string };
+  const guard = city.guardForTicket("wrk-free", t.id);
+  for (const command of ["terraform destroy", "git push --force origin main", "gh pr merge 1", "sqlite3 ~/.jarvis/ledger.db 'update tickets'"]) assert.equal(guard("Bash", { command }).allow, true, command);
+  assert.ok(readFileSync(policy.audit_log, "utf8").includes('"wrk-free"'), "audited");
+  assert.equal(city.guardForTicket(manager, t.id)("Bash", { command: "git push --force origin main" }).allow, false, "a manager is still held");
   await city.idle();
   city.close();
 });
@@ -364,16 +376,15 @@ test("an OpenClaw worker's sub-ticket from its manager is a new assignment; a qu
 test("cancelling a ticket also cancels an approval the owner already granted for it", async () => {
   const city = createCity({ runner: quiet, dataDir: dir(), ledgerPath: ":memory:", policy: basePolicy() });
   const { manager } = city.createDepartment({ name: "Ops15", mission: "work" });
-  await hireWorker(city, manager, "wrk-g");
-  const t = await tool(city, manager, "send_ticket")({ ticket: { to: "wrk-g", goal: "go" } }) as { id: string };
+  const t = await tool(city, "orchestrator", "send_ticket")({ ticket: { to: manager, goal: "go" } }) as { id: string };
   const call = { command: "terraform destroy" };
-  city.guardForTicket("wrk-g", t.id)("Bash", call);
-  const q = city.ledger.openQuestions().find((o) => o.question.asked_by === "wrk-g")!;
+  city.guardForTicket(manager, t.id)("Bash", call);
+  const q = city.ledger.openQuestions().find((o) => o.question.asked_by === manager)!;
   city.answer(q.id, "approve");
   city.cancelTicket(t.id);
   assert.equal(city.ledger.approvalByQuestion(q.id)?.status, "denied");
-  const later = await tool(city, manager, "send_ticket")({ ticket: { to: "wrk-g", goal: "again" } }) as { id: string };
-  assert.equal(city.guardForTicket("wrk-g", later.id)("Bash", call).allow, false);
+  const later = await tool(city, "orchestrator", "send_ticket")({ ticket: { to: manager, goal: "again" } }) as { id: string };
+  assert.equal(city.guardForTicket(manager, later.id)("Bash", call).allow, false);
   await city.idle();
   city.close();
 });

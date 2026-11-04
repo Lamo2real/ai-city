@@ -559,3 +559,12 @@ test("the map says what is true when it is empty", () => {
   assert.match(cityMessage(seed([agent("mgr", "manager", "App")])), /Nobody is at a desk/);
   assert.equal(cityMessage(applySnapshot(initialState(T0), cityBusy(T0), T0)), null);
 });
+
+test("workers talking across departments show in the Activity feed, and so does the limit", () => {
+  const talk = { from: "ios-dev", to: "data-eng", ticket_id: "t-1" };
+  let s = reduce(initialState(T0), { type: "colleague.ask", ...talk, question: "which schema?" }, T0);
+  s = reduce(s, { type: "colleague.answer", ...talk, answered_by: "data-eng", answer: "v2" }, T0);
+  s = reduce(s, { type: "colleague.answer", ...talk, answered_by: "ledger", answer: "no session yet" }, T0);
+  s = reduce(s, { type: "colleague.ask", ...talk, question: "again", refused: true }, T0);
+  assert.deepEqual(s.feed.map((f) => f.text), ["ios-dev and data-eng have asked each other too much; ios-dev was told to stop", "ios-dev got data-eng's record, not an answer", "data-eng answers ios-dev: v2", "ios-dev asks data-eng: which schema?"]);
+});

@@ -108,7 +108,7 @@ The two executors share one runtime. A worker whose spec has `executor: "opencla
 | SDK executor | `city/src/sdk.ts` | One `query()` per turn, resumed by session id. Built-in tools limited to what the agent's prompt lists. City tools come from an in-process MCP server named `jarvis`. |
 | OpenClaw executor | `city/src/openclaw.ts` | One `openclaw agent exec --json` process per turn with a pinned per-agent config. Needs no Gateway. |
 | Bridge | `createBridge` in `openclaw.ts` | One HTTP server on `127.0.0.1`, random port, one random bearer token per run. Two routes: `/policy` and `/tool/<name>`. Body limit 1 MiB. The token is deleted when the run ends. |
-| OpenClaw plugin | `city/openclaw-plugin/index.js` | Registers `city_report`, `city_ask_user`, `city_remember`, `city_recall`, `city_read_skill`, and a `before_tool_call` hook at priority 1000 that asks the bridge for every tool call. If the bridge cannot be reached, the call is blocked. |
+| OpenClaw plugin | `city/openclaw-plugin/index.js` | Registers `city_report`, `city_ask_user`, `city_remember`, `city_recall`, `city_read_skill`, `city_ask_colleague`, and a `before_tool_call` hook at priority 1000 that asks the bridge for every tool call. If the bridge cannot be reached, the call is blocked. |
 
 OpenClaw has a second, separate role in this repo: `jarvis/openclaw/` is a Telegram-to-Jarvis relay that does need the Gateway. It is a messaging channel, not an executor, and is described in `jarvis/openclaw/README.md`.
 
@@ -121,6 +121,18 @@ Status checks do not go through the Orchestrator. Features and changes still do.
 - Only Jarvis has these tools. Each emits a `jarvis.visit` event, which the City view draws as Jarvis running over to that agent.
 
 Live results on 2026-11-04, with a team working on a ticket: a status check took about 5 s, asking a manager about 6 s and asking a worker in the middle of its first turn about 8 s, with no Orchestrator turn. A turn announces its session as it starts, so a worker can be asked before its turn ends.
+
+## Workers talking to each other
+
+A worker can ask any other agent a question with `ask_colleague(name, question)`, across departments and without going through the Orchestrator. Work itself still moves by tickets through managers: a worker that needs another department to do something asks its own manager.
+
+- It finds the agent by id, role or department (a department means its manager) and uses the same read-only fork and ledger fallback as `ask_agent`, so the colleague's real turn is not disturbed. The fork's cost goes to the agent that answers.
+- It cannot reach core agents or itself. Managers do not have this tool.
+- **Who is told:** both managers get a note, quoted as data, added to their next turn's input; no turn is spent on it. If the agent asked is a manager, it gets the note itself. Unread notes are lost on a restart.
+- **The record:** `colleague.ask` and `colleague.answer` events appear in the City view's Activity feed and in `events.jsonl`, under the asker's ticket. The call is in the audit log. Text that looks like a secret is withheld from the notes and events, and each is cut to 200 characters.
+- **The loop guard:** at most 6 questions between any two agents, in either direction, per 10 minutes. After that the call is refused and the asker is told to carry on or ask its manager. A fork has no tools, so a question can never set off another question. The count is in memory and resets on a restart.
+
+Live result on 2026-11-04, on scratch data capped at Sonnet: a worker in Survey asked a worker in Archives for a codeword only the second one had been told. The answer came back in about 4 s, word for word, from a fork. The exchange showed in the Activity feed, the trace and the audit log, and the Archives manager had the note on its next turn. OpenClaw workers and the loop guard have unit tests only.
 
 ## The City view
 
@@ -154,7 +166,7 @@ The aim is that a prompt can be ignored or talked around and the tool layer stil
 
 **SDK agents** (`city/src/sdk.ts`, `runtime.ts`):
 - `permissionMode: "dontAsk"`, `settingSources: []`, `strictMcpConfig: true`. Anything not on the allow list is denied rather than prompted.
-- Built-in tools are limited to those the agent's prompt frontmatter lists (`builtinTools(allowedTools)`). A worker also gets `WORKER_TOOLS` (report, ask_user, remember, recall, read_skill) whatever its spec says.
+- Built-in tools are limited to those the agent's prompt frontmatter lists (`builtinTools(allowedTools)`). A worker also gets `WORKER_TOOLS` (report, ask_user, remember, recall, read_skill, ask_colleague) whatever its spec says.
 - City tools are filtered per agent (`toolsForTurn`): an agent whose prompt does not list `mcp__jarvis__hire_agent` is not given the tool at all.
 - A `PreToolUse` hook calls `guardFor` for every tool call. It runs `decide()`; then, for tools outside the city's own and a short read-only list, the department's autonomy level (`read_only` denies, `supervised` asks); then the approvals table.
 - Rules inside handlers: only the Orchestrator or owner side may create departments or hire managers; only a parent or the Orchestrator may retire an agent; `reset_session` is the Orchestrator's alone; `cancel_ticket` needs the sender, the manager or the owner side.
@@ -183,7 +195,7 @@ The aim is that a prompt can be ignored or talked around and the tool layer stil
 
 ## Limits, stated plainly
 
-- **No OS sandbox, by the owner's decision (2026-11-04).** Workers get full tools by default and can read anything the owner's account can, including credentials. The policy rules are the only check on a call, and they are regular expressions, so a script file gets past them. Agents read outside content, so a planted instruction can reach all of this.
+- **Workers run free, by the owner's decision (2026-11-04).** No OS sandbox, full tools by default, and `guardFor` applies neither the policy rules nor the city-controls check to a worker, so a worker can force-push, merge, read the Keychain, pay, destroy infrastructure, and change the ledger, audit log or policy file. Calls are still audited, though a worker could change that log too. Department autonomy levels still apply, and GitHub's protection of `main` is enforced outside the Mac, so pushes and merges to `main` still need a PR with CI passing. Agents read outside content, so a planted instruction can reach all of this.
 - **No inbound webhooks.** They would need the Gateway to be publicly reachable, which the owner has forbidden. Events come from schedules and from a local `POST /api/city/events` on `127.0.0.1`.
 - **Schedules are off.** `jarvis/bin/city-automations enable <id>` installs one in OpenClaw's scheduler, and it needs the Gateway. The Gateway is not running (nothing listens on port 18789 as of this writing). Nothing runs on a schedule today.
 - **Anthropic models only.** No non-Anthropic provider is configured or used.
