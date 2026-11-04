@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { z } from "zod";
 import { loadPolicy } from "../src/policy.ts";
-import { UsageLimit, capModel, createRunner } from "../src/sdk.ts";
+import { UsageLimit, capModel, createRunner, createWarmRunner } from "../src/sdk.ts";
 
 const policy = loadPolicy();
 type Captured = { prompt: unknown; options: Record<string, any> };
@@ -86,4 +86,178 @@ test("tokens include the cache split", async () => {
   const r = await runner({ agentId: "a", systemPrompt: "s", model: "claude-haiku-5-5", effort: "low", allowedTools: [], tools: [], prompt: "p" });
   assert.deepEqual(r.usage, { input: 10, output: 5, cacheRead: 1000, cacheWrite: 200 });
   assert.equal(r.tokens, 1215);
+});
+
+// A fake long-lived process: one reply per user message, with interrupt() and the options it was started with.
+function fakeProcesses(reply: (text: string, proc: any) => AsyncGenerator<unknown> | unknown[]) {
+  const procs: any[] = [];
+  const queryFn = ((params: { prompt: AsyncIterable<any>; options: Record<string, any> }) => {
+    const proc: any = { options: params.options, said: [], interrupts: 0, onInterrupt: () => {}, closed: false };
+    params.options.abortController.signal.addEventListener("abort", () => { proc.closed = true; });
+    procs.push(proc);
+    const gen = (async function* () {
+      for await (const m of params.prompt) {
+        proc.said.push(m.message.content);
+        yield* reply(m.message.content, proc) as any;
+      }
+    })();
+    return Object.assign(gen, { interrupt: async () => { proc.interrupts++; proc.onInterrupt(); } });
+  }) as any;
+  return { queryFn, procs };
+}
+
+const delta = (text: string) => ({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text } } });
+const ok = (text: string, session = "sess-1") => ({ type: "result", subtype: "success", result: text, session_id: session, total_cost_usd: 0.001, usage: { input_tokens: 1, output_tokens: 1 } });
+const base = { agentId: "jarvis", systemPrompt: "", model: "claude-haiku-5-5", effort: "low" as const, allowedTools: [], tools: [] };
+
+test("warm: one process serves turn after turn, and each turn gets its own streaming callbacks", async () => {
+  const { queryFn, procs } = fakeProcesses((text) => [{ type: "system", subtype: "init", session_id: "sess-1" }, delta(`to ${text}`), { type: "stream_event", event: { type: "content_block_stop" } }, ok(`to ${text}`)]);
+  const warm = createWarmRunner({ policy, env: {}, queryFn });
+  warm.warmUp("hud", { ...base, prompt: "" });
+  assert.equal(procs.length, 1, "started before any turn");
+  const seen: string[] = [];
+  const first = await warm.run("hud", { ...base, prompt: "a", onText: (t) => seen.push(t), onTextEnd: () => seen.push("|") });
+  const second = await warm.run("hud", { ...base, prompt: "b", resume: first.sessionId, onText: (t) => seen.push(t), onTextEnd: () => seen.push("|") });
+  assert.equal(second.text, "to b");
+  assert.deepEqual(seen, ["to a", "|", "to b", "|"]);
+  assert.equal(procs.length, 1);
+  assert.deepEqual(procs[0].said, ["a", "b"]);
+  warm.close();
+  assert.equal(procs[0].closed, true);
+});
+
+test("warm: the policy hook is on the long-lived process too", async () => {
+  const { queryFn, procs } = fakeProcesses(() => [ok("x")]);
+  const warm = createWarmRunner({ policy, env: {}, queryFn });
+  warm.warmUp("hud", { ...base, agentId: "py-dev", allowedTools: ["Bash"], prompt: "" });
+  const hook = procs[0].options.hooks.PreToolUse[0].hooks[0];
+  const deny = await hook({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "git push origin main" } }, "id", { signal: new AbortController().signal });
+  assert.equal(deny.hookSpecificOutput.permissionDecision, "deny");
+  assert.deepEqual(procs[0].options.tools, ["Bash"]);
+  warm.close();
+});
+
+test("warm: a process on another session is replaced, and a new one resumes the session asked for", async () => {
+  const { queryFn, procs } = fakeProcesses(() => [ok("x", "other")]);
+  const warm = createWarmRunner({ policy, env: {}, queryFn });
+  warm.warmUp("hud", { ...base, prompt: "", resume: "old" });
+  await warm.run("hud", { ...base, prompt: "a", resume: "new" });
+  assert.equal(procs.length, 2);
+  assert.equal(procs[0].closed, true);
+  assert.equal(procs[1].options.resume, "new");
+  warm.close();
+});
+
+test("warm: barge-in stops the turn at once and the next turn finds the same process", async () => {
+  const { queryFn, procs } = fakeProcesses(async function* (text: string, proc: any) {
+    if (text === "long") {
+      yield delta("Once upon");
+      await new Promise<void>((r) => { proc.onInterrupt = r; });
+      yield { type: "result", subtype: "error_during_execution", errors: [], session_id: "sess-1" };
+    } else yield ok("short");
+  } as any);
+  const warm = createWarmRunner({ policy, env: {}, queryFn });
+  const cancel = new AbortController();
+  const turn = warm.run("hud", { ...base, prompt: "long", signal: cancel.signal, onText: () => cancel.abort() });
+  await assert.rejects(turn, (err: any) => err.cancelled === true);
+  const next = await warm.run("hud", { ...base, prompt: "next" });
+  assert.equal(next.text, "short");
+  assert.equal(procs.length, 1);
+  assert.equal(procs[0].interrupts, 1);
+  warm.close();
+});
+
+test("warm: a process that cannot be interrupted is dropped, and the next turn starts a new one", async () => {
+  const { queryFn, procs } = fakeProcesses(async function* (text: string) {
+    yield delta("x");
+    if (text === "long") throw new Error("gone");
+    yield ok("fine");
+  } as any);
+  const warm = createWarmRunner({ policy, env: {}, queryFn });
+  const cancel = new AbortController();
+  await assert.rejects(warm.run("hud", { ...base, prompt: "long", signal: cancel.signal, onText: () => cancel.abort() }), (err: any) => err.cancelled === true);
+  assert.equal((await warm.run("hud", { ...base, prompt: "next" })).text, "fine");
+  assert.equal(procs.length, 2);
+  warm.close();
+});
+
+test("warm: a parked process that died is replaced without losing the turn, whether it threw or just ended", async () => {
+  for (const die of [async function* () { throw new Error("exit 1"); }, async function* () {}]) {
+    const started: unknown[] = [];
+    const queryFn = ((params: { prompt: AsyncIterable<any> }) => {
+      const n = started.push(params) - 1;
+      return Object.assign(n === 0 ? die() : (async function* () { for await (const m of params.prompt) { void m; yield ok("alive"); } })(), { interrupt: async () => {} });
+    }) as any;
+    const warm = createWarmRunner({ policy, env: {}, queryFn });
+    warm.warmUp("hud", { ...base, prompt: "" });
+    assert.equal((await warm.run("hud", { ...base, prompt: "a" })).text, "alive");
+    assert.equal(started.length, 2);
+    warm.close();
+  }
+});
+
+test("warm: an expired session reaches the caller after one retry, for it to start over", async () => {
+  const { queryFn, procs } = fakeProcesses(async function* () { throw new Error("No conversation found with session ID x"); } as any);
+  const warm = createWarmRunner({ policy, env: {}, queryFn });
+  warm.warmUp("hud", { ...base, prompt: "", resume: "x" });
+  await assert.rejects(warm.run("hud", { ...base, prompt: "a", resume: "x" }), /no conversation found/i);
+  assert.equal(procs.length, 2);
+  warm.close();
+});
+
+test("warm: a process that dies mid-turn is not retried, so nothing runs twice", async () => {
+  const { queryFn, procs } = fakeProcesses(async function* () { yield delta("half"); } as any);
+  const ending = ((params: any) => {
+    const inner = queryFn(params);
+    return Object.assign((async function* () { yield (await inner.next()).value; })(), { interrupt: inner.interrupt });
+  }) as any;
+  const warm = createWarmRunner({ policy, env: {}, queryFn: ending });
+  warm.warmUp("hud", { ...base, prompt: "" });
+  await assert.rejects(warm.run("hud", { ...base, prompt: "a" }), /warm process ended/);
+  assert.equal(procs.length, 1);
+  warm.close();
+});
+
+test("warm: usage limits and error results fail the turn the same way as the plain runner", async () => {
+  const { queryFn } = fakeProcesses((text) => (text === "limit" ? [ok("You've hit your limit for today")] : [{ type: "result", subtype: "error_max_turns", errors: ["too many turns"], session_id: "s" }]));
+  const warm = createWarmRunner({ policy, env: {}, queryFn });
+  await assert.rejects(warm.run("hud", { ...base, prompt: "limit" }), UsageLimit);
+  await assert.rejects(warm.run("hud", { ...base, prompt: "other" }), /jarvis: error_max_turns: too many turns/);
+  warm.close();
+});
+
+test("warm: at most two processes are kept, the least recently used goes", async () => {
+  const { queryFn, procs } = fakeProcesses(() => [ok("x", "s")]);
+  const warm = createWarmRunner({ policy, env: {}, queryFn });
+  await warm.run("a", { ...base, prompt: "1" });
+  await warm.run("b", { ...base, prompt: "1" });
+  await warm.run("a", { ...base, prompt: "2", resume: "s" });
+  await warm.run("c", { ...base, prompt: "1" });
+  assert.deepEqual(procs.map((p) => p.closed), [false, true, false]);
+  assert.equal(procs.length, 3);
+  warm.close();
+});
+
+test("warm: a process in the middle of a turn is never evicted", async () => {
+  let release = () => {};
+  const { queryFn, procs } = fakeProcesses(async function* (text: string) {
+    if (text === "long") await new Promise<void>((r) => { release = r; });
+    yield ok(`to ${text}`, "s");
+  } as any);
+  const warm = createWarmRunner({ policy, env: {}, queryFn });
+  const long = warm.run("a", { ...base, prompt: "long" });
+  await warm.run("b", { ...base, prompt: "1" });
+  warm.warmUp("c", { ...base, prompt: "" });
+  assert.deepEqual(procs.map((p) => p.closed), [false, true, false], "the idle one goes, the busy one stays");
+  release();
+  assert.equal((await long).text, "to long");
+  warm.close();
+});
+
+test("warm: a turn cancelled while it waited is never sent to the model", async () => {
+  const { queryFn, procs } = fakeProcesses(() => [ok("x")]);
+  const warm = createWarmRunner({ policy, env: {}, queryFn });
+  await assert.rejects(warm.run("hud", { ...base, prompt: "gone", signal: AbortSignal.abort() }), (err: any) => err.cancelled === true);
+  assert.deepEqual(procs[0].said, []);
+  warm.close();
 });

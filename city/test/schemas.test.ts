@@ -34,3 +34,11 @@ test("the validator reports every problem, with paths", () => {
   assert.ok(problems.some((p) => p.startsWith("$.kind: must be one of")));
   assert.ok(problems.some((p) => p === "$: missing goal"));
 });
+
+test("a spend_approval ticket needs a complete approval and nothing else in it", () => {
+  const t = { id: "t1", from: "orchestrator", to: "jarvis", kind: "spend_approval", goal: "g", status: "done", created_at: "2026-01-01T00:00:00Z" };
+  const approval = { origin: "https://shop.test", max_amount: 10, currency: "EUR", expires_at: "2026-01-01T00:20:00Z", question_id: "q1" };
+  assert.deepEqual(errors(loadSchema("ticket"), { ...t, approval }), []);
+  assert.ok(errors(loadSchema("ticket"), { ...t, approval: { ...approval, extra: 1 } }).some((p) => /unknown field/.test(p)));
+  assert.ok(errors(loadSchema("ticket"), { ...t, approval: { origin: "https://shop.test" } }).some((p) => /missing max_amount/.test(p)));
+});

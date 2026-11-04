@@ -29,3 +29,12 @@ test("templates fill every placeholder and refuse a missing one", () => {
   assert.match(p.body, /@ios-dev/);
   assert.throws(() => renderTemplate("manager", { id: "m" }), /needs \{\{department\}\}/);
 });
+
+test("lean-context skill exists; opus only for orchestrator-hired managers", async () => {
+  const { loadSkills, modelFor } = await import("../src/agents.ts");
+  assert.match(loadSkills(), /at most 15 lines/);
+  assert.equal(modelFor("manager", "orchestrator", "claude-opus-5-5"), "claude-opus-5-5");
+  assert.equal(modelFor("manager", "mgr-a", "claude-opus-5-5"), "claude-sonnet-5-5");
+  assert.equal(modelFor("worker", "mgr-a", "claude-opus-5-5"), "claude-sonnet-5-5");
+  assert.equal(modelFor("worker", "mgr-a", "claude-sonnet-5-5"), "claude-sonnet-5-5");
+});

@@ -1,9 +1,12 @@
 """The shared Jarvis conversation. Voice is a client of the same server route the
 HUD's text box uses, with the same session id, so spoken and typed turns land in
 one conversation and Jarvis keeps its context when the owner switches."""
+import http.client
 import json
+import socket
 import urllib.request
 from collections.abc import Iterator
+from urllib.parse import urlsplit
 
 DEFAULT_SESSION = "owner"
 
@@ -17,15 +20,21 @@ class JarvisSession:
         self.base_url = base_url.rstrip("/")
         self.session_id = session_id
         self.timeout = timeout
-
-    def _post(self, path: str, body: dict) -> urllib.request.addinfourl:
-        req = urllib.request.Request(f"{self.base_url}{path}", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"}, method="POST")
-        return urllib.request.urlopen(req, timeout=self.timeout)
+        self._sock: socket.socket | None = None
 
     def turn(self, text: str) -> Iterator[dict]:
         """Send the owner's words; yield the server's events: filler, sentence, done, error.
         voice=False: this pipeline speaks through its own TTS, the server sends no audio."""
-        with self._post("/api/chat/stream", {"message": text, "sessionId": self.session_id, "voice": False}) as res:
+        url = urlsplit(self.base_url)
+        conn = http.client.HTTPConnection(url.hostname, url.port, timeout=self.timeout)
+        sock = None
+        try:
+            conn.connect()
+            self._sock = sock = conn.sock  # held here: http.client lets go of it once a response will close
+            conn.request("POST", "/api/chat/stream", json.dumps({"message": text, "sessionId": self.session_id, "voice": False}), {"Content-Type": "application/json"})
+            res = conn.getresponse()
+            if res.status != 200:
+                raise SessionError(f"server said {res.status}")
             for raw in res:
                 line = raw.decode("utf-8").strip()
                 if not line:
@@ -34,6 +43,22 @@ class JarvisSession:
                 if event.get("type") == "error":
                     raise SessionError(event.get("error", "unknown error"))
                 yield event
+        except (OSError, http.client.HTTPException):
+            if self._sock is sock:  # not cancelled: a real failure
+                raise
+        finally:
+            conn.close()
+            if self._sock is sock:
+                self._sock = None
+
+    def cancel(self) -> None:
+        """Barge-in: drop the running turn. The server sees the close and stops the model."""
+        sock, self._sock = self._sock, None
+        if sock:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
 
     def sentences(self, text: str) -> Iterator[str]:
         for event in self.turn(text):

@@ -24,6 +24,7 @@ export interface Policy {
     department_caps?: Record<string, number>; // per-department overrides of the line above
     max_workers_per_manager: number;
     daily_spend_usd_per_department: number;
+    daily_spend_usd_global?: number; // optional, off when absent: caps all departments together per UTC day
     max_review_rounds: number;
     max_concurrent_turns?: number;
     turn_timeout_minutes?: number;

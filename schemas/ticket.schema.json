@@ -42,7 +42,8 @@
         "task",
         "fix",
         "direct_instruction",
-        "review"
+        "review",
+        "spend_approval"
       ]
     },
     "goal": {
@@ -177,6 +178,42 @@
     "gate": {
       "type": "boolean",
       "description": "A workflow's approval step: it waits for the owner and no agent runs it"
+    },
+    "approval": {
+      "type": "object",
+      "description": "Only on kind spend_approval, sent by the Orchestrator to Jarvis after the owner approved a purchase. Single use; jarvis-safari checks the page origin and expiry.",
+      "required": [
+        "origin",
+        "max_amount",
+        "currency",
+        "expires_at",
+        "question_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "origin": {
+          "type": "string",
+          "description": "Scheme and host of the site the purchase may happen on, e.g. https://shop.example"
+        },
+        "max_amount": {
+          "type": "number",
+          "minimum": 0
+        },
+        "currency": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 3
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "At most 30 minutes after the ticket is sent"
+        },
+        "question_id": {
+          "type": "string",
+          "description": "The question the orchestrator asked the owner (naming this origin and max_amount) that the owner answered yes, in the last 30 minutes"
+        }
+      }
     }
   }
 }

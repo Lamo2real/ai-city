@@ -16,16 +16,18 @@ export interface Ticket {
   from: string;
   to: string;
   cc?: string[];
-  kind: "task" | "fix" | "direct_instruction" | "review";
+  kind: "task" | "fix" | "direct_instruction" | "review" | "spend_approval";
   goal: string;
   owner_words?: string;
   acceptance_criteria?: string[];
   scope?: string[];
   budget_usd?: number;
   deadline?: string | null;
+  approval?: { origin: string; max_amount: number; currency: string; expires_at: string; question_id: string };
   status: TicketStatus;
   review_rounds?: number;
   retries?: number; // turns the reliability gate ran again after a transient error
+  cap_block?: string | null; // set while a daily spend cap (a department or "global") is holding the ticket
   result?: { summary?: string; artifacts?: string[]; checks?: { name: string; passed: boolean }[]; cost_usd?: number };
   depends_on?: string[];
   gate?: boolean;
@@ -85,6 +87,8 @@ export interface QuestionRow {
   question: Question;
   created_at: string;
   answer?: string;
+  answered_by?: string;
+  answered_at?: string;
 }
 
 const SCHEMA = `
@@ -227,11 +231,11 @@ export function openLedger(path: string, log: (line: string) => void = () => {})
     getQuestion: (id: string) => one<QuestionRow>("SELECT json FROM questions WHERE id = ?", id),
     openQuestions: () => rows<QuestionRow>("SELECT json FROM questions WHERE status = 'open'"),
     answeredQuestions: () => rows<QuestionRow>("SELECT json FROM questions WHERE status = 'answered'"),
-    answerQuestion(id: string, answer: string): QuestionRow {
+    answerQuestion(id: string, answer: string, answeredBy?: string, answeredAt?: string): QuestionRow {
       return inTx(() => {
         const q = one<QuestionRow>("SELECT json FROM questions WHERE id = ?", id);
         if (!q) throw new Error(`no question ${id}`);
-        const next: QuestionRow = { ...q, status: "answered", answer };
+        const next: QuestionRow = { ...q, status: "answered", answer, ...(answeredBy && { answered_by: answeredBy }), answered_at: answeredAt ?? new Date().toISOString() };
         db.prepare("UPDATE questions SET status = 'answered', json = ? WHERE id = ?").run(JSON.stringify(next), id);
         return next;
       });

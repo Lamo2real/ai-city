@@ -75,3 +75,8 @@ test("deny wins over ask, and reasons come from policy.json", () => {
 test("the matched text is JSON with sorted keys, like Python's json.dumps(sort_keys=True)", () => {
   assert.equal(sortedJson({ b: 1, a: [true, null, "x"] }), '{"a": [true, null, "x"], "b": 1}');
 });
+
+test("the global daily cap is optional and off in config/policy.json", () => {
+  assert.equal(policy.caps.daily_spend_usd_global, undefined);
+  assert.equal(typeof policy.caps.daily_spend_usd_per_department, "number");
+});

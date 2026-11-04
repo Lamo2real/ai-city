@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { RETIRED_SHOWN, TILE, VISUALS, assignSlots, cityMessage, doingWords, homeSpot, identity, placement, residents, seatSpot, visitAllowed, visualState, walkRoute, agentRows, ageText, applyLive, checkText, courierFor, departmentNames, estUsd, gateStatus, inboxItems, integrationGroups, limits, parkedRows, relTime, ticketGroups, traceLines, workforceGroups, agentPanel, agentStatus, applySnapshot, departmentPanel, initialState, layout, propFor, reduce, topBar } from "../hud/city-state.js";
+import { RETIRED_SHOWN, agentsAtWork, walksOut, TILE, VISUALS, assignSlots, cityMessage, doingWords, homeSpot, identity, placement, residents, seatSpot, visitAllowed, visualState, walkRoute, agentRows, ageText, applyLive, checkText, courierFor, departmentNames, estUsd, gateStatus, inboxItems, integrationGroups, limits, parkedRows, relTime, ticketGroups, traceLines, workforceGroups, agentPanel, agentStatus, applySnapshot, departmentPanel, initialState, layout, propFor, reduce, topBar } from "../hud/city-state.js";
 import { cityBusy, cityEmpty, cityEvent, cityIntegrations, cityParked, citySnapshot, cityTrace, cityWorkforce } from "./fixtures/city.js";
 
 const T0 = 1_000_000;
@@ -390,14 +390,15 @@ test("placement: core is at HQ, always; a hired worker is at its station", () =>
   assert.equal(placement(s, "nobody"), null);
 });
 
-test("placement: a manager with no open work is home; a ticket calls it in; it goes home when the ticket ends", () => {
+test("placement: an idle manager stays in its window; a ticket makes it work; it stays when the ticket ends", () => {
   let s = seed([agent("mgr", "manager", "App")]);
-  assert.equal(placement(s, "mgr").place, "home");
+  assert.deepEqual(placement(s, "mgr"), { place: "station", dept: "App", why: "hired" });
   const t = (status, previous) => ({ type: "ticket.status", ticket: { id: "t1", from: "orchestrator", to: "mgr", kind: "task", goal: "Lead", status, created_at: "", updated_at: "" }, previous });
   s = reduce(s, t("open", null), T0 + 1);
   assert.deepEqual(placement(s, "mgr"), { place: "station", dept: "App", why: "ticket" });
   s = reduce(s, t("done", "in_progress"), T0 + 2);
-  assert.equal(placement(s, "mgr").place, "home");
+  assert.equal(placement(s, "mgr").place, "station");
+  assert.equal(placement(reduce(s, { type: "agent.retired", id: "mgr" }, T0 + 3), "mgr").place, "home");
 });
 
 test("placement: a manager stays while the tickets it sent are open", () => {
@@ -405,7 +406,7 @@ test("placement: a manager stays while the tickets it sent are open", () => {
   s = reduce(s, event("open"), T0 + 1);
   assert.equal(placement(s, "app-manager").why, "ticket");
   s = reduce(s, event("done", "in_progress"), T0 + 2);
-  assert.equal(placement(s, "app-manager").place, "home");
+  assert.equal(placement(s, "app-manager").why, "hired");
 });
 
 test("placement: released with a branch unmerged stays at the desk showing it; merged, it goes home", () => {
@@ -437,7 +438,7 @@ test("placement: released with nothing to merge goes home, and a new ticket call
 test("placement: a parked ticket keeps nobody at a desk", () => {
   let s = seed([agent("mgr", "manager", "App")]);
   s = reduce(s, { type: "ticket.status", ticket: { id: "t1", from: "orchestrator", to: "mgr", goal: "x", status: "parked" }, previous: "open" }, T0 + 1);
-  assert.equal(placement(s, "mgr").place, "home");
+  assert.equal(placement(s, "mgr").why, "hired", "parked work is not why it stays");
 });
 
 test("visualState: agent.activity drives the mark; every activity the runtime can report has one", () => {
@@ -556,7 +557,7 @@ test("Jarvis's repeated status calls are one visit; never a visit to itself", ()
 
 test("the map says what is true when it is empty", () => {
   assert.match(cityMessage(applySnapshot(initialState(T0), cityEmpty(T0), T0)), /No departments yet/);
-  assert.match(cityMessage(seed([agent("mgr", "manager", "App")])), /Nobody is at a desk/);
+  assert.match(cityMessage(seed([agent("mgr", "manager", "App", "orchestrator", "claude-opus-5-5", { state: "retired" })])), /Nobody is at a desk/);
   assert.equal(cityMessage(applySnapshot(initialState(T0), cityBusy(T0), T0)), null);
 });
 
@@ -567,4 +568,28 @@ test("workers talking across departments show in the Activity feed, and so does 
   s = reduce(s, { type: "colleague.answer", ...talk, answered_by: "ledger", answer: "no session yet" }, T0);
   s = reduce(s, { type: "colleague.ask", ...talk, question: "again", refused: true }, T0);
   assert.deepEqual(s.feed.map((f) => f.text), ["ios-dev and data-eng have asked each other too much; ios-dev was told to stop", "ios-dev got data-eng's record, not an answer", "data-eng answers ios-dev: v2", "ios-dev asks data-eng: which schema?"]);
+});
+
+const fixtureStates = () => [citySnapshot(), cityBusy(), cityBusy(T0, 4), cityEmpty()].map((snap) => applySnapshot(initialState(T0), snap, T0));
+
+test("agents at work equal the top bar's N active, for every fixture, and an idle manager stays in its window", () => {
+  for (const s of fixtureStates()) assert.equal(agentsAtWork(s), topBar(s).agentsActive);
+  const s = fixtureStates()[1];
+  const m = Object.values(s.agents).find((a) => a.kind === "manager" && !Object.values(s.tickets).some((t) => t.to === a.id || t.from === a.id));
+  assert.ok(m, "the fixture has an idle manager");
+  assert.equal(placement(s, m.id).place, "station");
+  const rel = { ...s, agents: { ...s.agents, [m.id]: { ...m, worker_state: "released" } } };
+  assert.equal(placement(rel, m.id).place, "home");
+});
+
+test("the walk home plays only on a real retirement or release, once per id", () => {
+  let s = fixtureStates()[1];
+  const walked = new Set();
+  assert.equal(walksOut(s, "py-dev", walked), false, "a working agent does not walk");
+  assert.equal(walksOut(s, "old-writer", walked), true, "a retired one walks");
+  assert.equal(walksOut(s, "old-writer", walked), false, "but only once, even after a reconnect or snapshot");
+  s = reduce(s, { type: "agent.retired", id: "py-dev" }, T0 + 5);
+  assert.equal(walksOut(s, "py-dev", walked), true);
+  assert.equal(walksOut(s, "py-dev", walked), false);
+  assert.equal(walksOut(s, "nobody", walked), false);
 });

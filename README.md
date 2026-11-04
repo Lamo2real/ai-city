@@ -66,7 +66,7 @@ Everything runs on the owner's Claude subscription through the logged-in `claude
 | Spotify | Spotify Web API via `jarvis/bin/jarvis-spotify` (PKCE, tokens in Keychain) | Set up once: [docs/spotify-setup.md](docs/spotify-setup.md). Falls back to `osascript` for basic controls. |
 | Gmail | Gmail API via `jarvis/bin/jarvis-mail` (full mailbox access, PKCE, tokens in Keychain, audit log) | Set up once: [docs/gmail-setup.md](docs/gmail-setup.md). Jarvis on every channel can then read and send your mail. |
 | Video | `ffmpeg` + YouTube Data API | Add an upload MCP or a small script in Phase 7. |
-| Voice | Cartesia API, Kokoro-MLX, Piper | Python libraries, not MCP. |
+| Voice | Cartesia API, Kokoro, Piper | Python libraries, not MCP. |
 
 ## Try it
 
@@ -203,3 +203,7 @@ Reach Jarvis from your iPhone anywhere, over HTTPS on your private tailnet. Noth
 ## Where to build it
 
 Build it in **Claude Code on your Mac**: it needs your real files, Xcode, audio devices, long-running background processes and git. Use the Claude app for planning, diagrams, research and reviewing results. The city runs on the **Claude Agent SDK**, so it doesn't depend on any chat window.
+
+## Safari spending
+
+Jarvis can only spend with a `spend_approval` ticket the Orchestrator sent after the owner said yes (the ticket cites that question). The approval caps the amount Jarvis states with `--amount`; check the shop total yourself. Where the page shows a total (`[data-total]` or a "Total" line near the button), jarvis-safari also refuses when it exceeds the approved maximum. See docs/safari-setup.md.

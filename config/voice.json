@@ -1,6 +1,7 @@
 {
   "server": "http://127.0.0.1:7777",
   "session_id": "owner",
+  "echo_cancellation": true,
   "timing_log": "~/Library/Logs/jarvis-voice-timings.jsonl",
   "cartesia": {
     "model": "sonic-3",
@@ -9,7 +10,7 @@
   },
   "offline": {
     "en": { "engine": "kokoro", "voice": "bm_george" },
-    "sv": { "engine": "piper", "model_dir": "~/.jarvis/tts/vits-piper-sv_SE-nst-medium" }
+    "sv": { "engine": "piper", "voice": "sv_SE-nst-medium" }
   },
   "targets_ms": { "first_audio_p50": 800, "stop_on_barge_in": 200 }
 }

@@ -862,34 +862,25 @@ test("every agent sits where the real state says, and clicking one on the map op
   await page.close();
 });
 
-test("a page load places everyone with no journeys; a prompt dashes a manager from home in well under a second; done, it walks home", { skip }, async () => {
+test("a page load places everyone with no journeys; an idle manager stays in its window; only a real retirement walks home", { skip }, async () => {
   const page = await openCity(cityBusy());
   await page.waitForFunction(() => window.__city?.people.size === 27);
   for (const id of ["ios-dev", "web-dev", "old-writer", "travel-manager", "jarvis"]) assert.equal((await person(page, id)).moving, false, id);
   assert.match((await person(page, "ios-dev")).key, /^desk:App:/);
   assert.match((await person(page, "web-dev")).key, /^desk:App:/, "waiting for the merge holds the desk");
   assert.equal((await person(page, "old-writer")).key, "home");
-  assert.equal((await person(page, "travel-manager")).key, "home");
-  const start = await person(page, "travel-manager");
+  assert.match((await person(page, "travel-manager")).key, /^desk:Travel:/, "an idle manager stays in its window");
   const t = { id: "t-trip", from: "orchestrator", to: "travel-manager", kind: "task", goal: "Plan the trip", status: "open", created_at: "", updated_at: "" };
-  const t0 = Date.now();
   await fire(page, { type: "ticket.status", ticket: t, previous: null });
-  await page.waitForFunction(() => { const p = window.__city.people.get("travel-manager"); return p.key.startsWith("desk:Travel") && !p.move; }, null, { timeout: 2000, polling: 20 });
-  assert.ok(Date.now() - t0 < 900, `dash took ${Date.now() - t0} ms`);
-  const atDesk = await person(page, "travel-manager");
-  assert.notEqual(atDesk.y, start.y);
   await fire(page, { type: "ticket.status", ticket: { ...t, status: "done" }, previous: "in_progress" });
-  assert.equal((await person(page, "travel-manager")).key, "home");
-  assert.equal((await person(page, "travel-manager")).moving, true, "going home is a walk");
-  await page.waitForTimeout(300);
-  const walking = await person(page, "travel-manager");
-  assert.ok(walking.moving && (walking.x !== atDesk.x || walking.y !== atDesk.y), "relaxed, on its way");
+  assert.match((await person(page, "travel-manager")).key, /^desk:Travel:/, "its tickets closing does not send it home");
   // Merged: the one who was waiting leaves.
   await fire(page, { type: "worker.merged", id: "web-dev", branch: "feat/web-login" });
   assert.match((await person(page, "web-dev")).key, /^desk:/, "still hired and not released, so it keeps the desk");
   await fire(page, { type: "worker.state", id: "web-dev", state: "released", previous: "completed" });
   await fire(page, { type: "agent.retired", id: "web-dev" });
   assert.equal((await person(page, "web-dev")).key, "home");
+  assert.equal((await person(page, "web-dev")).moving, true, "a real retirement is a walk");
   assert.deepEqual(page.errors, []);
   await page.close();
 });
@@ -970,4 +961,21 @@ test("the view stops drawing while hidden, and a phone selects by touch with the
   await phone.waitForFunction(() => /Live details did not load/.test(document.querySelector("#citypanel").textContent), null, { timeout: 5000 }); // an unanswered read says so
   assert.ok(await noSideways(phone));
   await ctx.close();
+});
+
+test("lit windows: one per agent at work in the department buildings, equal to N active, on desktop and phone", { skip }, async () => {
+  const snap = cityBusy();
+  const active = snap.agents.filter((a) => a.kind !== "core" && a.state === "active").length;
+  const docs = new URL("../../docs/city-windows.png", import.meta.url).pathname;
+  for (const [name, viewport, path] of [["desktop", { width: 1440, height: 900 }, docs], ["phone", { width: 390, height: 844 }, join(SHOTS, "city-windows-mobile.png")]]) {
+    const page = await openCity(snap, viewport);
+    await page.waitForFunction(() => document.querySelectorAll("#citywindows [data-lit]").length > 0);
+    const lit = await page.locator("#citywindows [data-lit]:not([data-dept='HQ'])").count();
+    assert.equal(lit, active, `${name}: lit windows = N active`);
+    assert.ok(await noSideways(page), `${name}: no sideways scroll`);
+    assert.deepEqual(page.errors, []);
+    await page.waitForTimeout(600);
+    await page.screenshot({ path });
+    await page.close();
+  }
 });

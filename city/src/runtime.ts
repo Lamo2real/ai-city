@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { z } from "zod";
-import { AGENTS_DIR, OPENCLAW_CAPABILITIES, SKILLS_DIR, WORKER_TOOLS, listSkills, loadCorePrompt, parsePrompt, readSkill, renderTemplate, skillsIndex, type AgentPrompt } from "./agents.ts";
+import { AGENTS_DIR, OPENCLAW_CAPABILITIES, SKILLS_DIR, WORKER_TOOLS, listSkills, loadCorePrompt, loadSkills, modelFor as hireModelFor, parsePrompt, readSkill, renderTemplate, skillsIndex, type AgentPrompt } from "./agents.ts";
 import { findOverlap, managerId, type Department } from "./departments.ts";
 import { canMove, type WorkerState } from "./lifecycle.ts";
 import { createMemory, SECRET, type MemoryScope, type Visibility } from "./memory.ts";
@@ -121,6 +121,8 @@ const CORE: Array<{ name: "jarvis" | "orchestrator" | "secretary" | "reviewer"; 
   { name: "secretary", parent: "orchestrator" },
   { name: "reviewer", parent: "orchestrator" },
 ];
+const SPEND_APPROVAL_MAX_MS = 30 * 60 * 1000;
+const OWNER_ONLY_MSG = "spend approvals need the owner's own answer (HUD/phone), not a relay";
 // "automation" is a scheduled or external event: its results reach the owner the same way, through the Secretary and Jarvis.
 const OWNER_SIDE = new Set(["owner", "jarvis", "automation"]);
 export interface CityInboundEvent { source: string; type: string; summary: string; data?: unknown; idempotency_key?: string }
@@ -132,6 +134,11 @@ const FILE_TOOLS = /^(Write|Edit|MultiEdit|NotebookEdit|write|edit|apply_patch)$
 // The city's own controls are not an agent's to use. shortcut: text match, so an encoded command or a script file gets past it.
 const CITY_INTERNALS = /\/api\/city\b|\bledger\.db\b|\baudit\.jsonl\b|openclaw-plugin|policy_gate\.py|config\/policy\.json/;
 const newId = (prefix: string) => `${prefix}-${randomUUID().slice(0, 8)}`;
+
+// Thrown instead of starting a turn that would run past a daily cap. The ticket is already waiting_on_owner.
+export class CapReached extends Error {}
+const RAISE_OPTION = "raise the limit for today";
+const PAUSE_OPTION = "pause until tomorrow";
 
 export function createCity(opts: CityOptions) {
   const dataDir = opts.dataDir ?? process.env.JARVIS_HOME ?? join(homedir(), ".jarvis");
@@ -150,6 +157,7 @@ export function createCity(opts: CityOptions) {
   const pending = new Map<string, number>();
   const reminded = new Set<string>();
   const running = new Set<Promise<void>>();
+  let capTimer: ReturnType<typeof setInterval> | undefined;
   let closed = false;
   const skillsDir = opts.skillsDir ?? SKILLS_DIR;
   const memory = createMemory(ledger.db);
@@ -386,6 +394,53 @@ export function createCity(opts: CityOptions) {
     return work;
   }
 
+  // Daily caps use the UTC day, like the ledger. Over = spend >= cap, unless the owner answered "raise" to
+  // today's question for that key. That override is the answered row in the ledger's questions table (id
+  // q-cap-<key>-<day>), so it survives restarts and expires with the day.
+  const today = () => now().slice(0, 10);
+  const capQuestionId = (key: string) => `q-cap-${key}-${today()}`;
+  const capRaised = (key: string) => /raise/i.test(ledger.getQuestion(capQuestionId(key))?.answer ?? "");
+  function overCap(department?: string): { key: string; spent: number; cap: number } | null {
+    const g = policy.caps.daily_spend_usd_global;
+    if (typeof g === "number") {
+      const spent = ledger.usageToday().usd;
+      if (spent >= g && !capRaised("global")) return { key: "global", spent, cap: g };
+    }
+    if (department) {
+      const cap = policy.caps.daily_spend_usd_per_department;
+      const spent = ledger.spendToday(department);
+      if (spent >= cap && !capRaised(department)) return { key: department, spent, cap };
+    }
+    return null;
+  }
+
+  // Park the ticket and ask the owner once per key per UTC day (the id is the dedupe key, open or answered).
+  function blockTurn(a: AgentRow, ticket: Ticket | undefined, over: { key: string; spent: number; cap: number }): never {
+    const id = capQuestionId(over.key);
+    if (!ledger.getQuestion(id)) {
+      const who = over.key === "global" ? "All departments together have" : `The ${over.key} department has`;
+      const question: Question = {
+        ticket_id: ticket?.id ?? "-", asked_by: a.id, path: pathOf(a.id), blocking: true,
+        questions: [{ text: `${who} spent $${over.spent.toFixed(2)} today, over the $${over.cap} daily cap. Raise the limit for today, or pause until tomorrow?`, options: [RAISE_OPTION, PAUSE_OPTION], default: PAUSE_OPTION, why: "Daily spend cap reached; no new turns start until you decide or the UTC day ends." }],
+      };
+      ledger.putQuestion({ id, status: "open", question, created_at: now() });
+      emit({ type: "question.asked", id, question, ticket_id: question.ticket_id });
+      emit({ type: "question", id, question, ticket_id: question.ticket_id });
+    }
+    if (ticket && !TERMINAL.has(ledger.getTicket(ticket.id)?.status ?? "done")) setStatus(ticket.id, "waiting_on_owner", { cap_block: over.key });
+    throw new CapReached(`${over.key} is over its daily spend cap ($${over.spent.toFixed(2)} of $${over.cap}); waiting on the owner`);
+  }
+
+  // Tickets held by a cap restart once their cap is lifted (a raise today, or a new UTC day).
+  function resumeCapBlocked(): void {
+    for (const t of ledger.ticketsByStatus("waiting_on_owner").filter((x) => x.cap_block)) {
+      const a = ledger.getAgent(t.to);
+      if (!a || overCap(a.department)) continue;
+      ledger.updateTicket(t.id, { cap_block: null });
+      dispatch(ledger.getTicket(t.id)!, "[the daily spend cap no longer blocks you; continue] ");
+    }
+  }
+
   // One turn at a time per agent: a message lands at a turn boundary, never mid-tool-call.
   function deliver(agentId: string, text: string, ticket?: Ticket, onText?: (t: string) => void): Promise<TurnResult> {
     const prev = queues.get(agentId) ?? Promise.resolve();
@@ -439,7 +494,7 @@ export function createCity(opts: CityOptions) {
   const allowedFor = (a: AgentRow): string[] => (a.kind === "core" ? [...promptOf(a).tools] : [...new Set([...promptOf(a).tools, ...a.tools, ...(a.kind === "worker" ? WORKER_TOOLS : [])])]);
   // An agent only carries the jarvis tools it may call: every extra tool schema is context it pays for on every turn.
   const toolsForTurn = (a: AgentRow): JarvisTool[] => { const allowed = new Set(allowedFor(a)); return toolsFor(a.id).filter((t) => allowed.has(`mcp__jarvis__${t.name}`)); };
-  const systemPromptFor = (a: AgentRow): string => promptOf(a).body + skillsIndex([...(a.skills ?? []), ...(a.department ? ledger.getDepartment(departmentKey(a.department))?.skills ?? [] : [])], skillsDir);
+  const systemPromptFor = (a: AgentRow): string => promptOf(a).body + (a.kind === "core" ? "" : `\n\n${loadSkills(agentsDir)}`) + skillsIndex([...(a.skills ?? []), ...(a.department ? ledger.getDepartment(departmentKey(a.department))?.skills ?? [] : [])], skillsDir);
   const modelFor = (a: AgentRow, ticket?: Ticket): string => (a.kind === "worker" && ticket?.complexity ? policy.models?.[ticket.complexity] ?? a.model : a.model);
 
   // Every model call in the city passes the gate: limit, usage-limit pause, retries, timeout, cancellation.
@@ -509,6 +564,8 @@ export function createCity(opts: CityOptions) {
   async function turn(agentId: string, text: string, ticket?: Ticket, onText?: (t: string) => void): Promise<TurnResult> {
     if (ticket && ledger.getTicket(ticket.id)?.status === "cancelled") throw new Error("ticket cancelled");
     const a = agent(agentId);
+    const over = overCap(a.department);
+    if (over) blockTurn(a, ticket, over);
     const p = promptOf(a);
     const key = sessionKey(a, ticket);
     let resumeId = a.executor !== "openclaw" && a.session_id && a.session_key === key ? a.session_id : null;
@@ -561,6 +618,7 @@ export function createCity(opts: CityOptions) {
         if (t.kind === "direct_instruction" && ledger.getTicket(t.id)?.status === "in_progress") { setStatus(t.id, "done"); retireIfDone(t.to); }
       })
       .catch((err: Error) => {
+        if (err instanceof CapReached) { log(`${t.to}: ${err.message}`); return; }
         log(`${t.to}: turn failed: ${err.message}`);
         const latest = ledger.getTicket(t.id);
         if (!latest || TERMINAL.has(latest.status)) return; // it had already ended: a late error changes nothing, and dependents may have started
@@ -588,7 +646,7 @@ export function createCity(opts: CityOptions) {
       }
       reminded.add(t.id);
       deliver(agentId, `[reminder] Ticket ${t.id} is still open and nothing is in flight for it. Report on it now with the report tool (done or failed, with what happened), or delegate it with send_ticket.`, t)
-        .catch((err: Error) => finish(t.id, "failed", `${agentId} could not finish: ${err.message}`, []));
+        .catch((err: Error) => { if (!(err instanceof CapReached)) finish(t.id, "failed", `${agentId} could not finish: ${err.message}`, []); });
     }
   }
 
@@ -635,11 +693,45 @@ export function createCity(opts: CityOptions) {
     log(`${agentId}: retired (temporary, work done)`);
   }
 
+  function checkSpendApproval(t: Ticket): void {
+    const a = t.approval;
+    if (t.to !== "jarvis") throw new Error("a spend_approval ticket goes to jarvis");
+    if (!a) throw new Error("a spend_approval ticket needs an approval { origin, max_amount, currency, expires_at, question_id }");
+    let u: URL;
+    try { u = new URL(a.origin); } catch { throw new Error("approval.origin must be a URL origin like https://shop.example"); }
+    if (!/^https?:$/.test(u.protocol) || u.origin !== a.origin) throw new Error("approval.origin must be exactly an http(s) origin: scheme and host, no path");
+    const expires = Date.parse(a.expires_at);
+    const ahead = expires - Date.parse(now());
+    if (!Number.isFinite(expires) || ahead <= 0) throw new Error("approval.expires_at must be in the future");
+    if (ahead > SPEND_APPROVAL_MAX_MS) throw new Error("approval.expires_at must be at most 30 minutes ahead");
+    // The owner must have said yes: a question the orchestrator asked, answered by the owner (or Jarvis relaying his words)
+    // in the last 30 minutes, naming this origin and amount. A manager's answer never counts.
+    const q = a.question_id ? ledger.getQuestion(a.question_id) : undefined;
+    if (!q) throw new Error("approval.question_id must name a question the orchestrator asked the owner");
+    if (q.question.asked_by !== "orchestrator") throw new Error("approval.question_id must be a question the orchestrator asked");
+    if (q.status !== "answered" || !q.answered_by) throw new Error("that question was not answered by the owner");
+    // Jarvis browses the shop, so it must not approve its own purchase: only the owner's direct answer (HUD, phone, answer API) counts.
+    if (q.answered_by !== "owner") throw new Error(OWNER_ONLY_MSG);
+    const answeredAt = Date.parse(q.answered_at ?? "");
+    if (!Number.isFinite(answeredAt) || Date.parse(now()) - answeredAt > SPEND_APPROVAL_MAX_MS || answeredAt > Date.parse(now()) + 60_000) throw new Error("the owner's answer is older than 30 minutes; ask again");
+    const text = q.question.questions.map((x) => x.text).join(" ");
+    const amounts = (text.match(/\d+(?:[.,]\d+)?/g) ?? []).map((n) => Number(n.replace(",", ".")));
+    if (!text.includes(a.origin) || !amounts.includes(a.max_amount)) throw new Error("the question must name the same origin and max_amount as the approval");
+    const ans = (q.answer ?? "").trim();
+    if (!/^(yes|yep|yeah|y|ok|okay|sure|approve[d]?|go ahead|do it|confirm(ed)?)\b/i.test(ans) || /\b(no|not|don't|dont|cancel|never)\b/i.test(ans)) throw new Error("the owner's answer was not a yes");
+  }
+
   function sendTicket(from: string, input: Record<string, unknown>): Ticket {
     // Only Jarvis speaks for the owner, so only Jarvis may name another sender.
     const draft = { id: newId("t"), created_at: now(), kind: "task", ...input, status: "open", from: from === "jarvis" && typeof input.from === "string" && input.from ? input.from : from } as Record<string, unknown>;
     delete draft.gate;
     for (const k of Object.keys(draft)) if (draft[k] === undefined) delete draft[k];
+    // A spend approval is a permission slip, so nobody can forge one: only the Orchestrator sends it, as itself, to Jarvis.
+    if (draft.kind === "spend_approval") {
+      if (from !== "orchestrator") throw new Error("only the orchestrator can send a spend_approval ticket");
+      draft.from = from;
+      draft.status = "done";
+    }
     // Work the owner gives the Orchestrator has to come back as a result, and a direct instruction ends once heard.
     // Only an answer to the Orchestrator's own question stays one.
     if (draft.kind === "direct_instruction" && draft.to === "orchestrator" && from === "jarvis" && !ledger.openQuestions().some((o) => o.question.asked_by === "orchestrator")) draft.kind = "task";
@@ -647,18 +739,21 @@ export function createCity(opts: CityOptions) {
     const ticket = validate<Ticket>("ticket", draft);
     const target = agent(ticket.to);
     for (const d of ticket.depends_on ?? []) if (!ledger.getTicket(d)) throw new Error(`depends_on: no ticket ${d}`);
+    // The spend check comes first: a refused approval must not revive anything.
+    if (ticket.kind === "spend_approval") checkSpendApproval(ticket);
     // A ticket to a retired agent revives it first, through the department cap; refused = no ticket is created.
     if (target.state === "retired" && target.kind !== "core" && !ledger.getTicket(ticket.id)) revive(target);
     if (!ledger.putTicket(ticket)) return ledger.getTicket(ticket.id)!;
     emit({ type: "ticket.status", ticket, previous: null });
+    if (ticket.kind === "spend_approval") return ticket; // read by jarvis-safari from the ledger; there is no work to dispatch
     if (ticket.kind === "direct_instruction" && OWNER_SIDE.has(ticket.from)) {
       // The owner's reply, relayed by Jarvis, is the answer to what that agent asked.
       // An approval is only ever decided by the owner's own answer in the inbox, never by a relayed message.
       for (const q of ledger.openQuestions().filter((o) => o.question.asked_by === ticket.to && !ledger.approvalByQuestion(o.id))) {
-        ledger.answerQuestion(q.id, ticket.goal);
+        ledger.answerQuestion(q.id, ticket.goal, from, now()); // the real caller, not the `from` a tool call put in the draft
         emit({ type: "question.answered", id: q.id, answer: ticket.goal, answered_by: ticket.from, ticket_id: q.question.ticket_id });
         const t = ledger.getTicket(q.question.ticket_id);
-        if (t?.status === "waiting_on_owner") setStatus(t.id, "in_progress");
+        if (t?.status === "waiting_on_owner" && !t.cap_block) setStatus(t.id, "in_progress");
       }
     }
     const failedDep = (ticket.depends_on ?? []).map((d) => ledger.getTicket(d)!).find((d) => TERMINAL.has(d.status) && d.status !== "done");
@@ -679,6 +774,7 @@ export function createCity(opts: CityOptions) {
   // A retired agent comes back through the same department check, whether hire_agent or a ticket brings it back.
   function revive(a: AgentRow): AgentRow {
     checkDepartment(a.department ?? "other");
+    if (overCap(a.department)) throw new Error(`cap reached: ${a.department ?? "all departments"} has spent today's budget`);
     log(`${a.id}: revived from the registry`);
     const row = ledger.updateAgent(a.id, { state: "active", last_active_at: now(), awaiting_merge: null });
     emit({ type: "agent.hired", agent: row, revived: true });
@@ -706,9 +802,9 @@ export function createCity(opts: CityOptions) {
       if (idle) throw new Error(`${idle.id} has the same role and nothing to do; send it the ticket instead of hiring`);
     }
     if (spec.kind === "worker" && ledger.children(by).length >= policy.caps.max_workers_per_manager) throw new Error(`cap reached: ${policy.caps.max_workers_per_manager} workers per manager`);
-    if (ledger.spendToday(department) >= policy.caps.daily_spend_usd_per_department) throw new Error(`cap reached: ${department} has spent today's budget`);
+    if (overCap(department)) throw new Error(`cap reached: ${department} has spent today's budget`);
     // shortcut: tools are not checked against a per-department allowlist, policy.json has none yet; add one when departments get scopes.
-    const model = spec.model ?? policy.models?.[spec.complexity ?? "standard"] ?? "claude-sonnet-5-5";
+    const model = hireModelFor(spec.kind, by, spec.model ?? policy.models?.[spec.complexity ?? "standard"] ?? "claude-sonnet-5-5");
     if (spec.kind === "worker") spec.tools = [...new Set([...WORKER_TOOLS, ...spec.tools])];
     // By the owner's decision workers have no OS sandbox and full tools. The policy rules still apply to each call.
     // Browser only when asked for, because browser runs take turns: their ports are fixed.
@@ -954,7 +1050,7 @@ export function createCity(opts: CityOptions) {
         const answers = parseAnswers(r.text);
         if (!answers) return toOwner();
         const answer = answers.join(" | ");
-        ledger.answerQuestion(row.id, answer);
+        ledger.answerQuestion(row.id, answer, parent, now());
         emit({ type: "question.answered", id: row.id, answer, answered_by: parent, ticket_id: q.ticket_id });
         sendTicket(parent, { to: by, kind: "direct_instruction", goal: `Answer to your question (${row.id}): ${answer}`, parent_id: q.ticket_id });
       })
@@ -990,11 +1086,12 @@ export function createCity(opts: CityOptions) {
     const q = ledger.getQuestion(questionId);
     if (!q) throw new Error(`no question ${questionId}`);
     if (q.status === "answered") throw new Error(`question ${questionId} is already answered`);
-    ledger.answerQuestion(questionId, text);
+    ledger.answerQuestion(questionId, text, "owner", now());
     emit({ type: "question.answered", id: questionId, answer: text, answered_by: "owner", ticket_id: q.question.ticket_id });
     if (CANNOT_RESUME.test(q.question.questions[0]?.text ?? "")) return answerParked(q.question.ticket_id, text);
     const t = ledger.getTicket(q.question.ticket_id);
-    if (t?.status === "waiting_on_owner") setStatus(t.id, "in_progress");
+    if (t?.status === "waiting_on_owner" && !t.cap_block) setStatus(t.id, "in_progress");
+    resumeCapBlocked(); // a "raise" answer lifts today's cap; a "pause" leaves the tickets waiting
     const asker = agent(q.question.asked_by);
     const approval = ledger.approvalByQuestion(questionId);
     if (approval?.tool === "workflow:gate") {
@@ -1275,6 +1372,10 @@ export function createCity(opts: CityOptions) {
       dispatch(t, "[resumed after a restart; continue where you left off] ");
     }
     if (parked.length) { log(`${parked.length} stale tickets parked; the owner decides`); emit({ type: "tickets.parked", ids: parked }); }
+    resumeCapBlocked();
+    // "Pause until tomorrow": check now and then so held tickets restart when the UTC day rolls over.
+    capTimer ??= setInterval(resumeCapBlocked, 5 * 60_000);
+    capTimer.unref();
   }
 
   function resumeParked(ids?: string[]): { resumed: string[] } {
@@ -1358,7 +1459,8 @@ export function createCity(opts: CityOptions) {
     },
     askOwner: (ticketId: string, text: string, why: string) => ask("orchestrator", { ticket_id: ticketId, blocking: false, questions: [{ text, default: "ok", options: ["ok"], ...(why ? { why } : {}) }] }),
     tellOwner: (ticketId: string, summary: string, artifacts: string[]) => emit({ type: "result", ticket_id: ticketId, status: "done", summary, artifacts }),
-    close: () => { closed = true; clearInterval(mergeTimer); ledger.close(); },
+    resumeCapBlocked,
+    close: () => { closed = true; clearInterval(mergeTimer); if (capTimer) clearInterval(capTimer); ledger.close(); },
   };
 }
 

@@ -1,0 +1,108 @@
+#!/usr/bin/env node
+// jarvis-safari: Jarvis's Safari tool. One compact JSON line on stdout; errors exit 1.
+// Page content is wrapped as data. Passwords, codes and payments are refused in code (see safari/safari.js).
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { SafariError, mapOsaError } from "../safari/errors.js";
+
+const VALUE_FLAGS = new Set(["tab", "selector", "timeout", "spend-ticket", "amount"]);
+const HELP = "Commands: windows, tabs, open <url> [--new-window|--new-tab], switch <window> <tab>, close <window> <tab>, close-window <window>, navigate <url>, back, forward, reload, read [--tab w:t], html [--selector css], js <code|->, click <css>, fill <css> <value|->, submit <css form>, wait <css> [--timeout s]. Page commands take --tab window:tab (default: front tab). click/submit/js on payment pages need --spend-ticket <id> --amount <n>.";
+
+const usage = (message) => new SafariError("USAGE", message);
+
+export function parseArgs(argv) {
+  const [cmd = "help", ...rest] = argv;
+  const args = [];
+  const flags = {};
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i];
+    if (!a.startsWith("--") || a === "--") { args.push(a); continue; }
+    const name = a.slice(2);
+    if (VALUE_FLAGS.has(name)) {
+      if (i + 1 >= rest.length) throw usage(`--${name} needs a value.`);
+      flags[name] = rest[++i];
+    } else flags[name] = true;
+  }
+  return { cmd, args, flags };
+}
+
+function tabOf(flags) {
+  if (!flags.tab) return { window: 1, index: 0 };
+  const m = /^(\d+):(\d+)$/.exec(flags.tab);
+  if (!m) throw usage("--tab looks like 2:3 (window:tab).");
+  return { window: Number(m[1]), index: Number(m[2]) };
+}
+const int = (v, what) => {
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1) throw usage(`${what} is a number from 1.`);
+  return n;
+};
+const need = (args, n, what) => { if (args.length < n) throw usage(`Missing ${what}.`); };
+// "-" reads the value from stdin (keeps code and values out of the process list); one trailing newline is dropped.
+async function valueOf(arg, deps) {
+  if (arg !== "-") return arg;
+  return String(await deps.readStdin()).replace(/\r?\n$/, "");
+}
+
+const COMMANDS = {
+  windows: (_p, { safari }) => safari.windows(),
+  tabs: (_p, { safari }) => safari.tabs(),
+  open: ({ args, flags }, { safari }) => (need(args, 1, "a URL"), safari.open(args[0], flags["new-window"] ? "window" : "tab")),
+  switch: ({ args }, { safari }) => (need(args, 2, "a window and a tab"), safari.switchTo(int(args[0], "Window"), int(args[1], "Tab"))),
+  close: ({ args }, { safari }) => (need(args, 2, "a window and a tab"), safari.close(int(args[0], "Window"), int(args[1], "Tab"))),
+  "close-window": ({ args }, { safari }) => (need(args, 1, "a window"), safari.closeWindow(int(args[0], "Window"))),
+  navigate: ({ args, flags }, { safari }) => (need(args, 1, "a URL"), safari.navigate(tabOf(flags), args[0])),
+  back: ({ flags }, { safari }) => safari.history(tabOf(flags), "back"),
+  forward: ({ flags }, { safari }) => safari.history(tabOf(flags), "forward"),
+  reload: ({ flags }, { safari }) => safari.history(tabOf(flags), "reload"),
+  read: ({ flags }, { safari }) => safari.read(tabOf(flags)),
+  html: ({ flags }, { safari }) => safari.html(tabOf(flags), flags.selector),
+  async js({ args, flags }, deps) {
+    need(args, 1, "code (or - for stdin)");
+    return deps.safari.js(tabOf(flags), await valueOf(args[0], deps), { spendTicket: flags["spend-ticket"], amount: flags.amount });
+  },
+  click: ({ args, flags }, { safari }) => (need(args, 1, "a CSS selector"), safari.click(tabOf(flags), args[0], { spendTicket: flags["spend-ticket"], amount: flags.amount })),
+  async fill({ args, flags }, deps) {
+    need(args, 2, "a CSS selector and a value (or -)");
+    return deps.safari.fill(tabOf(flags), args[0], await valueOf(args[1], deps));
+  },
+  submit: ({ args, flags }, { safari }) => (need(args, 1, "a form selector"), safari.submit(tabOf(flags), args[0], { spendTicket: flags["spend-ticket"], amount: flags.amount })),
+  wait({ args, flags }, { safari }) {
+    need(args, 1, "a CSS selector");
+    const t = flags.timeout === undefined ? 10 : Number(flags.timeout);
+    if (!Number.isFinite(t) || t <= 0) throw usage("--timeout is a number of seconds.");
+    return safari.wait(tabOf(flags), args[0], t);
+  },
+  help: async () => ({ help: HELP }),
+};
+
+// run(argv, deps) → { code, line }. Never throws.
+export async function run(argv, deps) {
+  let value;
+  let code = 0;
+  try {
+    const parsed = parseArgs(argv);
+    if (!(parsed.cmd in COMMANDS)) throw usage(`Unknown command "${parsed.cmd}". ${HELP}`);
+    value = await COMMANDS[parsed.cmd](parsed, deps);
+  } catch (err) {
+    code = 1;
+    const e = err instanceof SafariError ? err : mapOsaError(err);
+    value = { error: e.code, message: e.message };
+  }
+  return { code, line: JSON.stringify(value) };
+}
+
+async function defaultDeps() {
+  const [{ createSafariMac }, { createSafari }, { createAudit }, { createSpendCheck }] = await Promise.all([
+    import("../safari/mac.js"), import("../safari/safari.js"), import("../safari/audit.js"), import("../safari/spend.js"),
+  ]);
+  const readStdin = async () => { let s = ""; for await (const c of process.stdin) s += c; return s; };
+  return { readStdin, safari: createSafari({ mac: createSafariMac(), audit: createAudit(), spend: createSpendCheck() }) };
+}
+
+const isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  const { code, line } = await run(process.argv.slice(2), await defaultDeps());
+  process.stdout.write(line + "\n");
+  process.exitCode = code;
+}

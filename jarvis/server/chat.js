@@ -45,15 +45,22 @@ export const DISALLOWED_TOOLS = [
   "Bash(gh auth *)", "Bash(gh secret *)", "Bash(gh api *--method*)", "Bash(gh api *-X *)", "Bash(gh api *-f *)", "Bash(gh api *-F *)", "Bash(gh api *--input*)", "Bash(gh api graphql*)",
 ];
 
-// GitHub tokens (classic ghp_/gho_/ghu_/ghs_/ghr_ and fine-grained github_pat_), wherever they appear in text.
-const GITHUB_TOKEN = /(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})/g;
+// Anything token-shaped stays out of what Jarvis writes down or shows: known token prefixes (GitHub, Slack,
+// OpenAI/Anthropic-style keys, AWS), Telegram bot tokens and Bearer values. The last pattern catches any long
+// random-looking string; it is the bluntest (it also matches long paths, URLs and git hashes), so only
+// redactTokens uses it and scrubSecrets does not.
+const KNOWN_TOKEN_PATTERNS = [/\b(?:ghp|gho|ghu|ghs|ghr|github_pat|xox[abprs]|sk|sk-ant|AKIA)[-_][A-Za-z0-9_-]{8,}/g, /\b\d{6,12}:[A-Za-z0-9_-]{30,}\b/g, /Bearer\s+\S+/gi, /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g]; // the last one: AWS access key ids, which have no separator after the prefix
+const LONG_RANDOM = /\b[A-Za-z0-9+/_-]{32,}={0,2}/g;
+const redactWith = (patterns) => (text) => patterns.reduce((out, re) => out.replace(re, "[redacted]"), text);
+export const redactKnownTokens = redactWith(KNOWN_TOKEN_PATTERNS);
+export const redactTokens = redactWith([...KNOWN_TOKEN_PATTERNS, LONG_RANDOM]);
 
 export function scrubSecrets(text, env = process.env) {
   let out = String(text ?? "");
   for (const name of SECRET_VARS) {
     if (env[name]) out = out.split(env[name]).join("[redacted]");
   }
-  return out.replace(GITHUB_TOKEN, "[redacted]");
+  return redactKnownTokens(out);
 }
 
 export function claudeArgs(resumeId, persistent = false) {
