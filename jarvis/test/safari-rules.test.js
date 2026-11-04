@@ -303,3 +303,94 @@ test("payment gating also covers 'Buy now'-style buttons and forms that post to 
   assert.equal(isPaymentPage({ url: "https://a.test/", targetText: "Buy now" }, "js"), false, "js is only gated by the page, best-effort");
   assert.equal(isPaymentPage({ url: "https://a.test/", formAction: "https://a.test/billing" }, "submit"), true);
 });
+
+// A small fake page world: each realm has its own classes (a fresh iframe is an unpatched realm).
+function realmRig() {
+  const makeRealm = () => {
+    class Node { constructor() { this.kids = []; this.nodeType = 1; } appendChild(n) { this.kids.push(n); return n; } insertBefore(n) { this.kids.push(n); return n; } querySelectorAll() { return this.kids.filter((k) => k.tagName === "INPUT"); } }
+    class Element extends Node {
+      constructor(a = {}) { super(); this.a = a; this._h = ""; }
+      getAttribute(k) { return this.a[k] ?? null; } setAttribute(k, v) { this.a[k] = v; }
+      get innerHTML() { return this._h; } set innerHTML(v) { this._h = v; }
+      get outerHTML() { return ""; } set outerHTML(v) { this._h = v; }
+      insertAdjacentHTML() {} get name() { return this.a.name; } get id() { return this.a.id; }
+    }
+    class HTMLInputElement extends Element {
+      constructor(a) { super(a); this._v = ""; } get tagName() { return "INPUT"; }
+      get value() { return this._v; } set value(v) { this._v = v; }
+      get type() { return this.a.type || "text"; } set type(v) { this.a.type = v; }
+      get defaultValue() { return ""; } set defaultValue(v) {} focus() {} dispatchEvent() {}
+    }
+    class HTMLIFrameElement extends Element { get tagName() { return "IFRAME"; } get contentWindow() { return (this._w ??= makeRealm()); } get contentDocument() { return this.contentWindow.document; } }
+    class Document extends Node { execCommand() { return true; } write() {} writeln() {} get documentElement() { return null; } }
+    class Range { createContextualFragment() { return {}; } }
+    const ctx = { Node, Element, HTMLInputElement, HTMLIFrameElement, Document, Range, Event: class {}, EvalError, HTMLFormElement: class {}, location: { href: "https://a.test/" }, frames: [] };
+    const fields = {};
+    ctx.document = Object.assign(new Document(), { activeElement: null, body: new Element(), querySelector: (s) => fields[s] ?? null, createElement: (t) => (t === "iframe" ? new HTMLIFrameElement() : new HTMLInputElement()) });
+    ctx.window = ctx; ctx.fields = fields; vm.createContext(ctx);
+    return ctx;
+  };
+  const top = makeRealm();
+  top.fields["#pw"] = new top.HTMLInputElement({ type: "password" });
+  top.fields["#user"] = new top.HTMLInputElement({ type: "text" });
+  top.fields["#named"] = new top.HTMLInputElement({ type: "text", name: "Account_Password" });
+  return { top, go: (src) => JSON.parse(vm.runInContext(src, top)), makeRealm };
+}
+
+test("page guard: password-named fields of any type are sensitive", () => {
+  const { top, go } = realmRig();
+  assert.equal(go(pageJs.fill("#named", "x")).error, "PASSWORD_FIELD");
+  assert.equal(top.fields["#named"]._v, "");
+  assert.equal(go(pageJs.fill("#user", "ok")).url, "https://a.test/");
+});
+
+test("page guard: concatenated property names can't reach a fresh iframe's native setter", () => {
+  const { top, go } = realmRig();
+  const code = `var f=document.createElement('iframe');document.body.appendChild(f);var w=f['content'+'Window'];` +
+    `var d=Object['getOwnProperty'+'Descriptor'](w.HTMLInputElement.prototype,'value');d.set.call(document.querySelector('#pw'),'x')`;
+  assert.equal(go(pageJs.js(code)).error, "PASSWORD_FIELD");
+  assert.equal(top.fields["#pw"]._v, "");
+  // the same without touching contentWindow first: inserting the iframe is enough
+  const { top: t2, go: go2 } = realmRig();
+  const f = new t2.HTMLIFrameElement(); t2.document.body._f = f;
+  go2(pageJs.js("1"));
+  const insert = `var f=document.createElement('iframe');document.body.appendChild(f);window.__f=f;1`;
+  go2(pageJs.js(insert));
+  const w = vm.runInContext("window.__f", t2)._w;
+  assert.ok(w.__jarvisGuard, "child realm was guarded on insertion");
+  assert.throws(() => Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype, "value").set.call(t2.fields["#pw"], "x"), /PASSWORD_FIELD/);
+});
+
+test("page guard: existing same-origin frames are patched at install", () => {
+  const { top, go, makeRealm } = realmRig();
+  const child = makeRealm(); top.frames = [child];
+  go(pageJs.js("1"));
+  assert.ok(child.__jarvisGuard);
+  assert.throws(() => Object.getOwnPropertyDescriptor(child.HTMLInputElement.prototype, "value").set.call(top.fields["#pw"], "x"), /PASSWORD_FIELD/);
+});
+
+test("page guard: outerHTML / innerHTML / insertAdjacentHTML / document.write / createContextualFragment can't swap in a plain field", () => {
+  const { go } = realmRig();
+  for (const code of [
+    `document.querySelector('#pw')['outer'+'HTML']='<b>x</b>'`,
+    `document.querySelector('#user')['outer'+'HTML']='<input type=text name=password>'`,
+    `document.querySelector('#user').innerHTML='<TEXTAREA name=x></textarea>'`,
+    `document.querySelector('#user')['insertAdjacent'+'HTML']('afterend','<input name=password>')`,
+    `document.write('<input name=password>')`,
+    `document.writeln('<input')`,
+    `new Range().createContextualFragment('<input type=text>')`,
+  ]) assert.equal(go(pageJs.js(code)).error, "PASSWORD_FIELD", code);
+  assert.equal(go(pageJs.js(`document.querySelector('#user').innerHTML='<b>hi</b>';5`)).value, "5");
+});
+
+test("a total on the page above the approved maximum is refused without spending the ticket", async () => {
+  const r0 = spendRig();
+  r0.add("approved", { approval: r0.ok() });
+  r0.close();
+  const page = { probe: { url: "https://shop.test/checkout", total: 99.5 }, submit: { url: "https://shop.test/checkout" } };
+  const r = rig({ page, spend: r0.authorize });
+  await assert.rejects(r.safari.submit(TAB, "form", { spendTicket: "approved", amount: 10 }), (e) => e.code === "SPEND_NEEDS_APPROVAL" && /total on the page/.test(e.message));
+  page.probe.total = 19.5;
+  assert.equal((await r.safari.submit(TAB, "form", { spendTicket: "approved", amount: 10 })).ok, true, "refusal didn't spend it");
+  assert.match(pageJs.probe("#b"), /data-total/);
+});

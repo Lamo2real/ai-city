@@ -48,7 +48,7 @@ export function createSafari({ mac, audit, spend, sleep = (ms) => new Promise((r
   async function gate(tab, spendTicket, action, selector, amount) {
     const probe = await page(tab, pageJs.probe(action === "js" ? undefined : selector));
     if (!isPaymentPage(probe, action)) return { url: probe.url };
-    const verdict = spendTicket ? spend(spendTicket, probe.url, amount) : { ok: false, reason: null };
+    const verdict = spendTicket ? spend(spendTicket, probe.url, amount, probe.total) : { ok: false, reason: null };
     if (verdict.ok) return { url: probe.url, spendTicket, approvalAudit: verdict.audit };
     const msg = verdict.reason ? `${MESSAGES.SPEND_NEEDS_APPROVAL} I can't use that ticket: ${verdict.reason}.` : MESSAGES.SPEND_NEEDS_APPROVAL;
     throw Object.assign(new SafariError("SPEND_NEEDS_APPROVAL", msg), { url: probe.url, spend_ticket: spendTicket });

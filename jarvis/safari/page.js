@@ -69,7 +69,10 @@ export const pageJs = {
     script("probe", `var c=Array.prototype.some.call(document.querySelectorAll("input"),function(i){return /(^|\\s)cc-/i.test(i.getAttribute("autocomplete")||"")||/card|cvc|cvv|iban/i.test((i.name||"")+" "+(i.id||""))});
 var el=${selector ? `document.querySelector(${J(selector)})` : "null"},tt="",fa="";
 if(el){tt=String(el.innerText||el.value||el.getAttribute("aria-label")||"").trim().slice(0,200);fa=String((el.tagName==="FORM"?el.action:(el.form&&el.form.action)||el.getAttribute("formaction"))||"")}
-return JSON.stringify({url:location.href,cardInputs:c,targetText:tt,formAction:fa})`),
+var tot=null,te=document.querySelector("[data-total]"),tx=te?String(te.getAttribute("data-total")||te.innerText||""):"";
+if(!tx&&el){var box=el.closest&&el.closest("form,section,main,div");var m=/(?:total|summa|amount due|to pay)[^\\d]{0,24}(\\d[\\d\\s.,]*)/i.exec(String(box&&box.innerText||"").slice(0,5000));tx=m?m[1]:""}
+var nm=/\\d[\\d\\s.,]*/.exec(tx);if(nm){var q=nm[0].replace(/\\s/g,"").replace(/[.,](?=\\d{3}(\\D|$))/g,"").replace(",",".");var x=Number(q);if(isFinite(x))tot=x}
+return JSON.stringify({url:location.href,cardInputs:c,targetText:tt,formAction:fa,total:tot})`),
   exists: (selector) => script("exists", `return JSON.stringify({found:!!document.querySelector(${J(selector)})})`),
   click: (selector) => script("click", `${find(selector)}var f=el.form;var s=!!f&&((el.tagName==="BUTTON"&&el.type==="submit")||(el.tagName==="INPUT"&&/^(submit|image)$/i.test(el.type)));el.click();return JSON.stringify({url:location.href,submits:s})`),
   fill: (selector, value) =>
