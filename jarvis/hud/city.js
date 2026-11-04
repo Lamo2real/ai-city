@@ -351,19 +351,6 @@ export function mountCity(root, { fetchImpl = fetch, EventSourceImpl = EventSour
     );
     const list = $("#citydepts"); list.replaceChildren(el("h3", null, "Departments"));
     for (const name of ["HQ", ...Object.keys(state.departments)]) { const b = el("button", "dept", name); b.style.borderLeftColor = deptColor(name); b.dataset.building = name; b.onclick = () => openDept(name); list.append(b); }
-    const inbox = $("#cityinbox"); inbox.replaceChildren(el("h3", null, "Needs you"));
-    const qs = Object.values(state.questions);
-    if (!qs.length) inbox.append(el("div", "mute", "Nothing waiting."));
-    for (const q of qs) {
-      const card = el("form", "q"); card.dataset.question = q.id;
-      card.append(el("div", "who", q.question.path));
-      for (const x of q.question.questions) card.append(el("div", "text", x.text), el("div", "mute", `options: ${(x.options ?? []).join(" / ") || "—"} · default: ${x.default}`));
-      const input = el("input"); input.placeholder = q.question.questions[0]?.default ?? ""; input.setAttribute("aria-label", `Answer for ${q.question.path}`);
-      const send = el("button", null, "Answer"); send.type = "submit"; const note = el("div", "mute");
-      card.append(input, send, note);
-      card.onsubmit = async (ev) => { ev.preventDefault(); const text = input.value.trim() || input.placeholder; try { const r = await fetchImpl("./api/city/answer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: q.id, text }) }); const j = await r.json(); note.textContent = r.ok ? "Sent." : j.error; } catch { note.textContent = "Could not reach the server."; } };
-      inbox.append(card);
-    }
     const a11y = $("#citylist"); a11y.replaceChildren();
     for (const name of ["HQ", ...Object.keys(state.departments)]) { const b = el("button", null, `Building: ${name}`); b.dataset.building = name; b.onclick = () => openDept(name); a11y.append(b); }
     for (const a of Object.values(state.agents)) { if (a.state === "retired") continue; const b = el("button", null, `Agent: ${a.id} (${a.role}, ${MODEL_NAME[a.model] ?? a.model})`); b.dataset.agent = a.id; b.onclick = () => { const p = people.get(a.id); if (p) clickAgent(p); else openAgent(a.id); }; a11y.append(b); }

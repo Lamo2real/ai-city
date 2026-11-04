@@ -1,0 +1,21 @@
+#!/bin/zsh
+# Starts Jarvis's Telegram channel: installs and loads the OpenClaw gateway as a LaunchAgent.
+# Needs the four Keychain items from jarvis/openclaw/README.md. Stop with: jarvis/openclaw/bin/telegram-off
+set -euo pipefail
+ROOT="${0:A:h:h}"
+PLIST="$HOME/Library/LaunchAgents/se.lamo.jarvis-openclaw.plist"
+DOMAIN="gui/$(id -u)"
+for item in jarvis.openclaw-gateway jarvis.openclaw-relay jarvis.openclaw-telegram jarvis.openclaw-telegram-owner; do
+  security find-generic-password -s "$item" >/dev/null 2>&1 || { echo "Keychain item $item is missing. See jarvis/openclaw/README.md → Set up Telegram."; exit 1; }
+done
+mkdir -p "$HOME/Library/LaunchAgents"
+# The gateway log may show your Telegram user ID and message metadata: create it private before launchd opens it.
+LOG="$HOME/Library/Logs/jarvis-openclaw.log"
+mkdir -p "$HOME/Library/Logs"
+[ -e "$LOG" ] || install -m 600 /dev/null "$LOG"
+chmod 600 "$LOG"
+sed -e "s|__ROOT__|$ROOT|g" -e "s|__HOME__|$HOME|g" "$ROOT/launchd/se.lamo.jarvis-openclaw.plist.template" > "$PLIST"
+chmod 600 "$PLIST"
+launchctl bootout "$DOMAIN/se.lamo.jarvis-openclaw" 2>/dev/null || true
+launchctl bootstrap "$DOMAIN" "$PLIST"
+echo "Telegram channel is on. Log: ~/Library/Logs/jarvis-openclaw.log. Stop it with: jarvis/openclaw/bin/telegram-off"

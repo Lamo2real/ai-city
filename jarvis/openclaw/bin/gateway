@@ -1,22 +1,57 @@
 #!/bin/sh
-# Starts the OpenClaw gateway with only what it needs: the gateway token from Keychain
-# item jarvis.openclaw-gateway. No Claude OAuth token, no API key ever reaches OpenClaw;
-# its Claude CLI backend uses the `claude` login on this Mac by itself.
-# Usage: jarvis/openclaw/bin/gateway [gateway|security audit --deep|channels add ...|pairing ...]
+# Starts the OpenClaw gateway with only what it needs, all from the macOS Keychain, never from files:
+#   jarvis.openclaw-gateway   OPENCLAW_GATEWAY_TOKEN  clients must present it to the gateway (required)
+#   jarvis.openclaw-relay     JARVIS_RELAY_TOKEN      the relay presents it to Jarvis's relay route (required)
+#   jarvis.openclaw-telegram  TELEGRAM_BOT_TOKEN      the Telegram bot token from @BotFather (required)
+#   jarvis.openclaw-telegram-owner TELEGRAM_OWNER_ID  the owner's numeric Telegram user ID, the only allowed sender (required)
+# openclaw.json only references these by name, so no secret or personal ID is ever written to a git-tracked file.
+# No Claude OAuth token, no API key ever reaches OpenClaw; its Claude CLI backend uses the `claude` login.
+# Usage: jarvis/openclaw/bin/gateway [gateway|security audit --deep|pairing ...]
 set -e
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN
 export OPENCLAW_CONFIG_PATH="$HERE/openclaw.json"
 export OPENCLAW_STATE_DIR="${OPENCLAW_STATE_DIR:-$HOME/.jarvis/openclaw}"
-if [ -z "$OPENCLAW_GATEWAY_TOKEN" ]; then
-  OPENCLAW_GATEWAY_TOKEN="$(security find-generic-password -s jarvis.openclaw-gateway -w 2>/dev/null)" || {
-    echo "gateway: Keychain item jarvis.openclaw-gateway is missing. Create it: security add-generic-password -s jarvis.openclaw-gateway -a jarvis -w \"\$(openssl rand -hex 32)\"" >&2
+
+keychain() { security find-generic-password -s "$1" -w 2>/dev/null; }
+need() { # $1 env var, $2 Keychain item
+  eval "current=\${$1:-}"
+  [ -n "$current" ] && { export "$1"; return; }
+  value="$(keychain "$2")" || {
+    echo "gateway: Keychain item $2 is missing. Create it: security add-generic-password -s $2 -a jarvis -w \"\$(openssl rand -hex 32)\"" >&2
     exit 1
   }
-  export OPENCLAW_GATEWAY_TOKEN
-fi
+  export "$1=$value"
+}
+need OPENCLAW_GATEWAY_TOKEN jarvis.openclaw-gateway
+need JARVIS_RELAY_TOKEN jarvis.openclaw-relay
+need_entered() { # $1 env var, $2 Keychain item, $3 what it is: entered by the owner at a prompt, never generated
+  eval "current=\${$1:-}"
+  [ -n "$current" ] && { export "$1"; return; }
+  value="$(keychain "$2")" || {
+    echo "gateway: Keychain item $2 ($3) is missing. Store it at a prompt: security add-generic-password -s $2 -a jarvis -w" >&2
+    exit 1
+  }
+  export "$1=$value"
+}
+need_entered TELEGRAM_BOT_TOKEN jarvis.openclaw-telegram "the bot token from @BotFather"
+need_entered TELEGRAM_OWNER_ID jarvis.openclaw-telegram-owner "your numeric Telegram user ID"
+# The allowlist must be exactly one numeric ID: anything else could widen or break who may talk to Jarvis.
+case "$TELEGRAM_OWNER_ID" in
+  ''|*[!0-9]*) echo "gateway: jarvis.openclaw-telegram-owner must be your numeric Telegram user ID (digits only)." >&2; exit 1 ;;
+esac
+unset value current
+
+# OpenClaw substitutes ${VARS} in config values but not in keys, so the owner-only tool policy key
+# (tools.toolsBySender."channel:telegram:<id>") is filled in here, from the ID checked above, into a
+# git-ignored runtime copy next to openclaw.json (relative paths still resolve). Tokens stay ${ENV} references.
+RUNTIME_CONFIG="${OPENCLAW_RUNTIME_CONFIG:-$HERE/openclaw.runtime.json}"
+( umask 077; sed "s/channel:telegram:\${TELEGRAM_OWNER_ID}/channel:telegram:$TELEGRAM_OWNER_ID/" "$OPENCLAW_CONFIG_PATH" > "$RUNTIME_CONFIG" )
+grep -q "channel:telegram:$TELEGRAM_OWNER_ID\"" "$RUNTIME_CONFIG" || { echo "gateway: could not write the owner tool policy into $RUNTIME_CONFIG" >&2; exit 1; }
+chmod 600 "$OPENCLAW_CONFIG_PATH" "$RUNTIME_CONFIG"
+export OPENCLAW_CONFIG_PATH="$RUNTIME_CONFIG"
+
 mkdir -p "$OPENCLAW_STATE_DIR" && chmod 700 "$OPENCLAW_STATE_DIR"
-chmod 600 "$OPENCLAW_CONFIG_PATH"
 cd "$HERE"
 [ $# -gt 0 ] || set -- gateway
 exec npx openclaw "$@"
