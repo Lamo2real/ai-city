@@ -29,6 +29,8 @@ export interface TurnRequest {
   // The runtime's policy decision for one tool call (approvals, autonomy levels). Without it: decide() alone.
   guard?: (toolName: string, input: Record<string, unknown>) => { allow: true } | { allow: false; message: string };
   capabilities?: string[];
+  // A side question: reads this session's history in a copy, so it needs no turn slot and leaves the agent's own work alone.
+  forkSession?: boolean;
 }
 
 export interface TurnResult {
@@ -93,6 +95,7 @@ export function createRunner({ policy, env, queryFn = query }: { policy: Policy;
       env,
       abortController: abort,
       resume: req.resume ?? undefined,
+      forkSession: req.forkSession,
       // dontAsk denies anything that would prompt; the hook below gates every call, allowed or not.
       hooks: {
         PreToolUse: [{

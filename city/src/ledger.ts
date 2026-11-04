@@ -49,6 +49,7 @@ export interface AgentRow {
   idle_retire_minutes?: number;
   state: "active" | "retired";
   worker_state?: WorkerState;
+  awaiting_merge?: { branch: string; repo: string; ticket_id: string; since: string } | null; // released, but its branch is not merged yet
   executor?: "sdk" | "openclaw";
   capabilities?: string[];
   session_id?: string | null;
@@ -197,6 +198,7 @@ export function openLedger(path: string, log: (line: string) => void = () => {})
       });
     },
     ticketsByStatus: (...statuses: TicketStatus[]) => rows<Ticket>(`SELECT json FROM tickets WHERE status IN (${statuses.map(() => "?").join(",")}) ORDER BY updated_at`, ...statuses),
+    recentTicketsFor: (agentId: string, limit = 5) => rows<Ticket>("SELECT json FROM tickets WHERE to_agent = ? ORDER BY updated_at DESC LIMIT ?", agentId, limit),
     ticketsFrom: (from: string) => rows<Ticket>("SELECT json FROM tickets WHERE from_agent = ? ORDER BY updated_at", from),
     inbox: (agentId: string) => rows<Ticket>("SELECT json FROM tickets WHERE status IN ('open','in_progress') AND (to_agent = ? OR json LIKE ?) ORDER BY updated_at", agentId, `%"cc":[%"${agentId}"%`),
 

@@ -37,3 +37,18 @@ export async function releaseWorkspace(w: Workspace): Promise<{ removed: boolean
   await git(w.repo, "worktree", "remove", w.path);
   return { removed: true };
 }
+
+// "nothing": no commits to merge. "merged": it landed, or its branch is gone. A squash merge only shows through its PR.
+export async function branchState(w: Workspace): Promise<"nothing" | "merged" | "unmerged"> {
+  let head: string;
+  try { head = await git(w.repo, "rev-parse", "--verify", "--quiet", `refs/heads/${w.branch}`); } catch { return "merged"; }
+  if (w.base && head === w.base) return "nothing";
+  for (const target of ["HEAD", "refs/remotes/origin/HEAD"]) {
+    try { await git(w.repo, "merge-base", "--is-ancestor", head, target); return "merged"; } catch { /* not there */ }
+  }
+  try {
+    const { stdout } = await run("gh", ["pr", "list", "--head", w.branch, "--state", "merged", "--json", "number", "--limit", "1"], { cwd: w.repo, timeout: 20_000 });
+    if ((JSON.parse(stdout) as unknown[]).length) return "merged";
+  } catch { /* no gh, or no GitHub remote */ }
+  return "unmerged";
+}

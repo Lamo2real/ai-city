@@ -16,7 +16,7 @@ export function createTrace(path: string) {
   let ready = false;
   return {
     write(event: Record<string, unknown>): void {
-      if (event.type === "log") return;
+      if (event.type === "log" || event.type === "agent.activity") return; // activity can hold command text, and the audit log has the history
       if (!ready) { mkdirSync(dirname(path), { recursive: true, mode: 0o700 }); ready = true; }
       const fresh = !existsSync(path);
       appendFileSync(path, `${JSON.stringify({ at: new Date().toISOString(), ...event })}\n`);
