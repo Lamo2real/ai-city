@@ -104,13 +104,13 @@ Gaps:
 ## 6. MCP and tools: not done for city agents, partial overall
 
 Evidence:
-- The SDK runner (`city/src/sdk.ts`) passes `mcpServers: { jarvis }`, `strictMcpConfig: true` and `settingSources: []`. The only MCP server a city agent sees is the in-process `jarvis` one.
+- The SDK runner (`city/src/sdk.ts`) passes the in-process `jarvis` server, plus any server in `mcp_servers` in `config/policy.json` for the agents listed there, with `strictMcpConfig: true` and `settingSources: []`. Today that is `personal-assistant`, for Jarvis alone.
 - The city's own tools (20 of them, defined in `toolsFor` in `runtime.ts`): `hire_agent`, `retire_agent`, `list_registry`, `send_ticket`, `ask_user`, `request_review`, `review_deliverable`, `cancel_ticket`, `create_department`, `update_department`, `list_departments`, `remember`, `recall`, `list_skills`, `read_skill`, `allocate_workspace`, `list_workflows`, `start_workflow`, `report`, and `reset_session` (Orchestrator only). Each agent gets the subset its prompt lists.
 - `config/integrations.json` and `probeIntegrations` report what is installed or signed in. Status words are `operational` (a real probe answered), `authenticated` (credential present, not exercised), `available`, `unavailable`, `needs_owner`, `unknown`. A probe never reads a secret's value.
 - OpenClaw workers get `city_*` tools through the plugin and native tools by capability.
 
 Gaps:
-- Jarvis's prompt lists `mcp__personal-assistant__*` tools and the Reviewer's lists `mcp__github__*`. By the code above neither server can be loaded in an SDK session. I did not confirm this with a live call. If it is right, Jarvis's calendar, mail and notes fast path does not work through this runner and the review step cannot read a PR through GitHub.
+- Jarvis's `personal-assistant` tools work, confirmed with a live call on 2026-11-04. Other departments have no outside servers yet.
 - The `.mcp.json` servers (github, terraform, meta-ads, playwright) serve the interactive Claude Code in this repo, not the city. Terraform's server also needs Docker, which is not installed.
 - OpenClaw runs load no MCP servers (`plugins.allow` lists only `city-bridge`, `anthropic` and, with the browser capability, `browser`).
 - The morning report lists MCP servers needing sign-in (Slack, Stripe, Microsoft 365 and others). None are usable by the city.

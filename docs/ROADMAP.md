@@ -6,9 +6,7 @@ Written 2026-11-04 from the code on branch `feat/openclaw-nervous-system` (first
 
 ## State of the branches
 
-`main` does not contain any of this work. `git rev-list --count main..HEAD` gives 23, and `main` has no `recordTurn` in `city/src/ledger.ts`, so `main` still has the cost accounting that summed a running session total on every turn. Until this chain is merged, the corrected figures exist only here.
-
-The game-style City view and Jarvis's direct line sit one branch further on, on `feat/city-game-direct-jarvis`, stacked on `feat/openclaw-nervous-system`. See `docs/ARCHITECTURE.md`.
+This work, the game-style City view and Jarvis's direct line were merged to `main` on 2026-11-04 through PRs #20 and #21. Other unmerged branches are listed below.
 
 ## The ten highest-impact improvements
 
@@ -29,8 +27,8 @@ The game-style City view and Jarvis's direct line sit one branch further on, on 
 
 1. **Done 2026-11-04: shell rules cover `Bash`, `exec`, `bash` and `process`,** with any git flags before `push`, plus `gh pr merge` and `gh api` writes. A regular expression over a command is never complete, so these rules are a guard against mistakes and simple injection, and the sandbox is the stronger layer.
 2. **Decide what actually limits spend.** Today the department's daily budget is checked only when hiring, and `budget_usd` on a ticket and `budget_usd_per_day` on a spec are stored and unused. Read the two unmerged cost branches (list below) against the corrected figures before choosing, because both may have been motivated by the inflated number.
-3. **Merge the chain into `main`.** `main` lacks the cost fix. Merging needs the owner and the Reviewer Gate, so it is not something an agent does alone.
-4. **Settle MCP for city agents.** Either give the SDK runner the servers its prompts name (`mcp__personal-assistant__*` in Jarvis, `mcp__github__*` in the Reviewer), or remove those names from the prompts. First confirm with a live call that they are unavailable now; the finding is from reading `sdk.ts`.
+3. **Done 2026-11-04: the chain is on `main`,** merged by the owner's decision (PRs #20 and #21).
+4. **Partly done 2026-11-04: outside MCP servers for city agents.** Jarvis has `personal-assistant`, confirmed with a live call, and the Reviewer no longer names GitHub tools it could not load. Still open: Meta Ads and Terraform for departments, which need the owner's sign-in and Docker.
 5. **Give default-executor workers an OS sandbox.** They have the policy rules and a text check only, so a steered worker with `Bash` can still reach the owner's API through a script file. This is the largest remaining security gap.
 6. **Verify a real provider limit on the OpenClaw path.** A fake CLI's limit message came back only as "process exited with code 1", so a real limit may fail that worker's ticket rather than pause the city. Its manager's next turn should pause. Record what a real limit does when one next occurs. Do not provoke one.
 7. **Owner decision: Gateway and schedules.** Start the Gateway, then enable schedules one at a time with `jarvis/bin/city-automations enable <id>`. Start with `failed-tickets` and `github-failures`, which make no model call unless something happened. The daily briefing costs one Sonnet turn a day.

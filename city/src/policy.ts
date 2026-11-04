@@ -17,6 +17,7 @@ export interface Rule {
 
 export interface Policy {
   audit_log: string;
+  mcp_servers?: Record<string, { command: string; args: string[]; agents: string[] }>;
   caps: {
     ad_daily_budget_cents: number;
     max_active_agents_per_department: number; // active (non-retired, non-core) agents any one department may have
