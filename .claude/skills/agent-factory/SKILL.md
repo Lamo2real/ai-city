@@ -32,4 +32,4 @@ SQLite at `~/.jarvis/ledger.db`, tables `tickets`, `agents`, `questions`, `costs
 `temporary` agents retire when their root ticket is `done`, `failed` or `cancelled`. `persistent` agents retire after `idle_retire_minutes` but stay in the registry for reuse.
 
 ## Tests that must exist
-Spec validation rejects bad input; caps block the agent over `max_concurrent_agents` (the test pins a cap of 4 and expects the 5th to be refused; the real cap is in `config/policy.json`) and the 5th worker of one manager; `@id` routes with cc; a parent-answered question never reaches the owner; the daemon resumes an `in_progress` ticket after a kill.
+Spec validation rejects bad input; caps block the agent over `max_concurrent_agents` (the test pins a cap of 4 and expects the 5th to be refused; the real cap is in `config/policy.json`, currently 10) and the 5th worker of one manager; `@id` routes with cc; a parent-answered question never reaches the owner; the daemon resumes an `in_progress` ticket after a kill.
