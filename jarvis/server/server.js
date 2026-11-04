@@ -141,7 +141,7 @@ function allowedRequest(req, hosts, scheme = "http") {
 
 async function reply(res, text, voice, speak, gate, sessionId, phone = false) {
   text = scrubSecrets(text);
-  const out = { reply: text, confirm: phone ? null : gate.describe(sessionId) };
+  const out = { reply: text, confirm: phone ? null : scrubDeep(gate.describe(sessionId)) };
   if (voice === true) {
     try {
       Object.assign(out, await speak(spokenForm(text)));
@@ -288,7 +288,7 @@ async function handleChatStream(req, res, { chat, speak, gate, phone, firstWaitM
   };
   const finish = async (reply) => {
     await order;
-    emit({ type: "done", reply: scrubSecrets(reply), confirm: phone ? null : gate.describe(sessionId) });
+    emit({ type: "done", reply: scrubSecrets(reply), confirm: phone ? null : scrubDeep(gate.describe(sessionId)) });
     res.end();
   };
 

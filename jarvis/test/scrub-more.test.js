@@ -137,3 +137,22 @@ test("the mail 'Approved' note and the different-email notice are scrubbed, and 
   assert.match(refused.reply, /^That is a different email/);
   assert.equal(has(refused.reply), false, refused.reply);
 });
+
+// ---- the pending-merge confirmation that rides along with chat replies ----
+test("POST /api/chat and /api/chat/stream: the attached merge confirm is scrubbed, its id/repo/url intact", async () => {
+  for (const [path, sid] of [["/api/chat", "cf1"], ["/api/chat/stream", "cf2"]]) {
+    const file = gate.requestFile();
+    writeFileSync(file, JSON.stringify({ repo: "BookingSystemAdvancedOrg/application", number: 9, title: `Ship ${ALL}`, url: "https://github.com/BookingSystemAdvancedOrg/application/pull/9", head: "def456", ci: `ok ${LONG}`, mergeable: "MERGEABLE" }));
+    gate.collect(file, sid);
+    const real = gate.describe(sid);
+    const r = await call(path, { message: "status?", sessionId: sid });
+    assert.equal(r.status, 200);
+    assert.equal(has(r.text), false, `${path}: ${r.text}`);
+    const body = path === "/api/chat" ? JSON.parse(r.text) : r.text.trim().split("\n").map((l) => JSON.parse(l)).find((l) => l.type === "done");
+    assert.equal(body.confirm.id, real.id, `${path}: the UUID must survive`);
+    assert.equal(body.confirm.url, "https://github.com/BookingSystemAdvancedOrg/application/pull/9");
+    assert.match(body.confirm.title, /^Ship \[redacted\] and/);
+    assert.equal(body.confirm.ci, "ok [redacted]");
+    gate.cancel(sid);
+  }
+});
