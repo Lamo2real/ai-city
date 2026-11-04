@@ -1,6 +1,6 @@
 # AI City roadmap
 
-Written 2026-11-04 from the code on branch `feat/openclaw-nervous-system` (commit `b82cab3`). This file is the persistent roadmap: update it when something changes, and date the change. See `docs/ARCHITECTURE.md` for how the parts fit and `docs/CAPABILITY_GAPS.md` for the evidence per section of the directive.
+Written 2026-11-04 from the code on branch `feat/openclaw-nervous-system` (first written at commit `b82cab3`, updated the same day after the live tests and two code reviews). This file is the persistent roadmap: update it when something changes, and date the change. See `docs/ARCHITECTURE.md` for how the parts fit and `docs/CAPABILITY_GAPS.md` for the evidence per section of the directive.
 
 **How to read the status column.** "In code" means the code exists and a unit test with a fake runner covers it. It says nothing about live behaviour. Live results go only in the Acceptance tests table, filled in by the coordinating session. Where this file and a live result disagree, the live result wins.
 
@@ -25,42 +25,42 @@ Written 2026-11-04 from the code on branch `feat/openclaw-nervous-system` (commi
 
 ## What comes next, in priority order
 
-1. **Done 2026-11-04: the `exec` tool obeys the same policy rules as `Bash`.** Nine rules in `config/policy.json` matched `^Bash$` only, so `decide("exec", terraform destroy)` returned `allow` while `Bash` returned `ask`. They now match `^(Bash|exec|bash)$`, and `exec` and `bash` cases are in `.claude/hooks/policy_gate.py --selftest` (45 cases) and `city/test/policy.test.ts`. Not done: any test that tries to write a dangerous command so a regex misses it.
+1. **Done 2026-11-04: shell rules cover `Bash`, `exec`, `bash` and `process`,** with any git flags before `push`, plus `gh pr merge` and `gh api` writes. A regular expression over a command is never complete, so these rules are a guard against mistakes and simple injection, and the sandbox is the stronger layer.
 2. **Decide what actually limits spend.** Today the department's daily budget is checked only when hiring, and `budget_usd` on a ticket and `budget_usd_per_day` on a spec are stored and unused. Read the two unmerged cost branches (list below) against the corrected figures before choosing, because both may have been motivated by the inflated number.
 3. **Merge the chain into `main`.** `main` lacks the cost fix. Merging needs the owner and the Reviewer Gate, so it is not something an agent does alone.
 4. **Settle MCP for city agents.** Either give the SDK runner the servers its prompts name (`mcp__personal-assistant__*` in Jarvis, `mcp__github__*` in the Reviewer), or remove those names from the prompts. First confirm with a live call that they are unavailable now; the finding is from reading `sdk.ts`.
-5. **Release worktrees.** Call `releaseWorkspace` when a ticket reaches a terminal state, and keep the worktree when it reports something unpushed (that function already refuses in that case).
-6. **Finish and record the browser path** (acceptance test 6) and the desktop path, with the live result in the table below.
+5. **Give default-executor workers an OS sandbox.** They have the policy rules and a text check only, so a steered worker with `Bash` can still reach the owner's API through a script file. This is the largest remaining security gap.
+6. **Verify a real provider limit on the OpenClaw path.** A fake CLI's limit message came back only as "process exited with code 1", so a real limit may fail that worker's ticket rather than pause the city. Its manager's next turn should pause. Record what a real limit does when one next occurs. Do not provoke one.
 7. **Owner decision: Gateway and schedules.** Start the Gateway, then enable schedules one at a time with `jarvis/bin/city-automations enable <id>`. Start with `failed-tickets` and `github-failures`, which make no model call unless something happened. The daily briefing costs one Sonnet turn a day.
-8. **Authenticate `POST /api/city/events`**, so that any local process cannot start tickets.
-9. **Stricter approval parsing.** Offer the owner buttons (approve or deny) in the inbox and accept only those for gated actions, instead of reading the first word of free text.
+8. **Authenticate `POST /api/city/events` and `/api/city/answer` for local processes.** Cross-site requests are refused and the sandbox stops OpenClaw shell runs, but any other local process can still call them.
+9. **Done 2026-11-04: only a whole yes approves,** so "okay, deny it" is a denial, and approvals cannot be decided from the phone listener.
 10. **Make idle retirement real.** Read `idle_retire_minutes`, or remove the field. Enter or remove the `requested` and `paused` states.
 11. **Verify voice.** Run the audio checks in `jarvis/voice/README.md`, wire the offline fallback, pick the Cartesia voice id, and record the latency.
-12. **Memory quality.** Widen the secret filter, add a way to see what was recalled for a ticket, and add embeddings only if a recall test shows keyword search is not enough.
+12. **Memory quality.** The secret filter was widened on 2026-11-04. Still to add: a way to see what was recalled for a ticket, and embeddings only if a recall test shows keyword search is not enough.
 13. **Workflow shape.** Retry of a single step, and a failure that does not fail unrelated branches. Only if a real workflow needs it.
 
 ## Acceptance tests
 
-The twelve live acceptance tests run by the coordinating session. The test descriptions are not in the repo, so that column is left for the coordinating session to fill in. Results are left as "pending" on purpose; nothing here is a live result.
+Run live on 2026-11-04 on scratch data (`JARVIS_HOME` in a temp folder, `JARVIS_MODEL_CAP=claude-sonnet-5-5`), with real agents on the owner's Claude subscription. Total estimated value at API list prices: under $3, not a charge. The owner's live ledger was not touched.
 
 | # | Test | Result | Date | Notes |
 |---|---|---|---|---|
-| 1 | | pending | | |
-| 2 | | pending | | |
-| 3 | | pending | | |
-| 4 | | pending | | |
-| 5 | | pending | | |
-| 6 | | pending | | |
-| 7 | | pending | | |
-| 8 | | pending | | |
-| 9 | | pending | | |
-| 10 | | pending | | |
-| 11 | | pending | | |
-| 12 | | pending | | |
+| 1 | Dynamic department creation | Passed | 2026-11-04 | Jarvis to Orchestrator; Research and its manager created and shown in the city. |
+| 2 | Dynamic workforce | Passed | 2026-11-04 | The manager hired three OpenClaw Haiku workers and delegated to them. |
+| 3 | Parallel execution | Passed | 2026-11-04 | Three workers overlapped in time, with real `web_fetch` calls in the audit log; the manager consolidated. |
+| 4 | Worker lifecycle | Passed | 2026-11-04 | Hired, assigned, working, review, completed, released, from the event log. Results stay in the ledger. |
+| 5 | Cross-department coordination | Passed | 2026-11-04 | Engineering, then Marketing through `depends_on`, with one combined report. |
+| 6 | Computer execution | Passed | 2026-11-04 | Real `sw_vers` and `df`; a real browser read a page heading; a Keychain read was denied by the gate; a zero-capability worker was blocked from Write and Agent. `desktop` was not exercised. |
+| 7 | Claude Code | Passed | 2026-11-04 | A real commit with a test on its own branch of a scratch repo, tests rerun independently, not merged. |
+| 8 | Persistent memory | Passed | 2026-11-04 | After workers were released and the server restarted, Research answered from `recall` with no web calls. |
+| 9 | Proactive automation | Passed, on a scratch Gateway | 2026-11-04 | A real OpenClaw cron job fired `city-event`, and the result came through the Secretary. A routed event reached Engineering, whose planted instruction was ignored. The owner's own Gateway and schedules stay off. |
+| 10 | Cost visibility | Passed | 2026-11-04 | Per-agent figures sum to the total, with breakdowns by department, model and ticket. All are labelled estimates. |
+| 11 | Failure recovery | Mostly passed | 2026-11-04 | Worker killed with SIGKILL: ticket failed cleanly and the manager was told. Server killed with SIGKILL: ledger integrity ok, tickets resumed and finished, and that run's worker ran again (execution is at least once). Provider limit: see What comes next, item 6; pause is unit-tested only. |
+| 12 | Real-time city | Passed | 2026-11-04 | Live in the HUD: workers appeared, the Workforce panel and Activity feed followed each state through release. All 34 tickets and 10 workers in the event log matched the ledger at the time of that check. Real phone listener not exercised. |
 
 ## Limits that do not change by building more
 
-- Docker is absent, so there is no OpenClaw sandbox.
+- Docker is absent. OpenClaw runs other than browser runs go inside a macOS `sandbox-exec` profile: they cannot reach the owner's API port or write to the city's code, config, ledger, audit log, agent prompts, `node_modules`, shell start-up files or launch agents, and `open` and `osascript` are blocked unless the run has the `desktop` capability. Browser runs stay outside it, because Chrome's own sandbox cannot start inside it, and a browser worker cannot also have shell, desktop or files. Default-executor (SDK) workers have no OS sandbox: only the policy rules and a text check on their commands, which an encoded command or a script file can get past.
 - Inbound webhooks need public exposure, which the owner has forbidden. Events come from schedules and a local POST.
 - Non-Anthropic providers are not used.
 - Lobster is not used: it is single-agent tool pipelines, and workflows here span departments.
@@ -87,3 +87,8 @@ Counts are commits ahead of `main`, checked 2026-11-04. None of these is an ance
 | `fix/mail-followups` | 3 | Scrubs the mail note on the unprompted path | |
 
 `fix/fresh-sessions` and `fix/worker-report-ask` are ancestors of this branch.
+
+## For the owner to check
+
+- **The live Jarvis is not running.** `se.lamo.jarvis` is disabled in launchd, and nothing listens on port 7777. Nothing recorded in the work on this branch disabled it, so it was left alone. To start it again: `launchctl enable gui/$(id -u)/se.lamo.jarvis`, then `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/se.lamo.jarvis.plist`.
+- **The first restart on this code parks stale tickets.** The live ledger had 25 stale `in_progress` tickets. They will appear in the City view's Parked list to resume or cancel, instead of all running at once.

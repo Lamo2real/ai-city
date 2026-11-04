@@ -294,6 +294,7 @@ export function openLedger(path: string, log: (line: string) => void = () => {})
     putApproval(a: Approval) {
       db.prepare("INSERT OR REPLACE INTO approvals (id, hash, status, question_id, json) VALUES (?, ?, ?, ?, ?)").run(a.id, a.hash, a.status, a.question_id, JSON.stringify(a));
     },
+    approvalsGranted: () => rows<Approval>("SELECT json FROM approvals WHERE status = 'granted'"),
     approvalByQuestion: (questionId: string) => one<Approval>("SELECT json FROM approvals WHERE question_id = ?", questionId),
     approvalByHash: (hash: string, status: Approval["status"]) => one<Approval>("SELECT json FROM approvals WHERE hash = ? AND status = ?", hash, status),
 

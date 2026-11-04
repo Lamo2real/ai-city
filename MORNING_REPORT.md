@@ -4,6 +4,10 @@
 
 Added the day after. The sections below are left as they were written, so that the record shows what was claimed. Where something below conflicts with this section, this section is right. Section numbers refer to the headings below.
 
+**A mistake made while fixing these, the same day**
+
+- A commit on `feat/openclaw-nervous-system` (38bff00) swept in an unexplained change that removed the rules in `.claude/settings.json` denying reads of `.env`, `~/.ssh` and `~/.aws/credentials`, and added a stray `.claude/settings.json.bak`. A code review caught it, and both were reverted before any PR. The cause of the change was not found.
+
 **Claims this report makes that were wrong or unsupported**
 
 - **Section 6, "six runs of the hire scenario".** There were five hire runs, not six. The same section's "the sixth went end to end" and section 3's "two of six live hire attempts" are therefore also wrong in their counts.

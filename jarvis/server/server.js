@@ -686,7 +686,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   startTailnetListener({ dataDir, handler: server.handleTailnet, logger: log });
   if (process.env.JARVIS_BACKEND === "booqy") for (const missing of ["ORCHESTRATOR_FIRE_URL", "ORCHESTRATOR_TOKEN"].filter((n) => !process.env[n])) log(`${missing} is not set: relaying to the Orchestrator will fail`);
   // Open event streams never end by themselves, so close them too: otherwise a restart hangs on any open HUD.
-  process.on("SIGTERM", () => { server.close(() => process.exit(0)); server.closeAllConnections(); });
+  for (const s of ["SIGTERM", "SIGINT"]) process.on(s, () => { server.close(() => process.exit(0)); server.closeAllConnections(); });
 }
 
 // The city runs inside this process: Jarvis's session, the core agents and the ledger at ~/.jarvis.

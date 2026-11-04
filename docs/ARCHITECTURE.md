@@ -143,22 +143,27 @@ The aim is that a prompt can be ignored or talked around and the tool layer stil
 - A pinned config is written per agent per run: minimal tool profile, only the groups its `capabilities` map to, a deny list (`gateway`, `cron`, `plugins`, `message`, `computer`, `group:agents`, and others), elevated tools off, bundled skills off, mDNS off.
 - The measured behaviour that justifies the second layer (stated in a comment in `openclaw.ts`): on the Claude CLI backend the agent also sees native tools such as Write, Edit and Agent whatever the config says. All of them pass `before_tool_call`, so that hook is the real boundary. `capabilityAllows` lets a call through only if its tool is in the agent's capability table (or is a `city_*` tool); then the same `guardFor` as SDK agents applies.
 - The hook fails closed: no bridge URL, no token, a non-loopback URL or a failed request all block the call.
+- The plugin reports in when it loads. A run whose plugin never did is failed, because nothing in it was checked. A shell run could fake that report only if its hook were already broken, so this catches a load failure and is not a defence against an attacker.
+- A run gets an allowlisted environment, so tokens in the server's environment do not reach it. SDK agents lose every secret-named variable except the Claude login, which `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` asks Claude Code to keep out of the shells it starts.
+- OS sandbox: see limits. Browser runs take turns because their ports are fixed.
 
 **Approvals** (`guardFor`, `answer`, `askGate` in `runtime.ts`):
 - An `ask` decision stores a pending approval keyed by a hash of agent, tool and sorted input, opens a blocking question and parks the ticket in `waiting_on_owner`. The tool call is refused for now.
 - When the owner answers in the inbox, the answer is stored as granted or denied. The agent is told to repeat the exact call; it passes once and the approval is marked `used`.
 - A relayed message cannot approve: a direct instruction from the owner side does not answer a question that has an approval attached. Only `answer()` does.
+- Only a whole yes approves. Approvals cannot be decided on the phone listener. Cancelling a ticket denies its pending and unused approvals.
+- No agent tool can report, review, cancel or ask on an approval step, an agent can report only tickets addressed to it, and only Jarvis can name another sender.
 - A workflow approval step is a ticket with `gate: true` and an approval row `gate:<ticket>`. It survives a restart and is re-asked by `resume()`.
 
 **What is not enforced at the tool layer** (stated so nobody assumes it is):
 - The daily spend cap is checked only when hiring (`hire`). It does not stop turns by agents that are already hired. `Ticket.budget_usd` is in the schema and unused. A per-turn spend limit exists on the unmerged branch `fix/turn-spend-limit`.
 - `idle_retire_minutes` is stored on the agent and never read.
 - Fixed 2026-11-04 after the first version of this file: nine rules in `config/policy.json` (force-push, push to main, recursive delete of root or home, `terraform destroy`, `terraform apply` to prod, piping a download into a shell, the `git -c` and git-redirect rules, `gh repo delete`) matched the tool name `^Bash$` only, while an OpenClaw run's shell tool is named `exec`. `decide("exec", terraform destroy)` returned `allow`. Those rules now match `^(Bash|exec|bash)$`, and `exec` and `bash` cases are in both self-tests (`policy_gate.py --selftest`, 45 cases; `city/test/policy.test.ts`). Rules are still regular expressions over the JSON of the tool input, so a command written in a way the regex does not see is still not caught.
-- Everything runs directly on the owner's Mac. There is no sandbox (see limits).
+- Default-executor workers run directly on the owner's Mac under the policy gate, with no OS sandbox (see limits).
 
 ## Limits, stated plainly
 
-- **No OpenClaw sandbox.** Docker is not installed on this Mac (`which docker` finds nothing; `config/integrations.json` probes it for this reason). OpenClaw's sandboxing needs it. Workers with `shell`, `files`, `browser` or `desktop` capabilities act on the real filesystem, bounded only by the pinned tool config, the capability hook and the policy gate.
+- **Sandboxing is partial.** OpenClaw runs other than browser runs go inside a macOS `sandbox-exec` profile: they cannot reach the owner's API port or write to the city's code, config, ledger, audit log, agent prompts, `node_modules`, shell start-up files or launch agents, and `open` and `osascript` are blocked unless the run has the `desktop` capability. Browser runs stay outside it, because Chrome's own sandbox cannot start inside it, and a browser worker cannot also have shell, desktop or files. Default-executor (SDK) workers have no OS sandbox: only the policy rules and a text check on their commands, which an encoded command or a script file can get past. Docker is absent, so OpenClaw's own Docker sandbox is not used.
 - **No inbound webhooks.** They would need the Gateway to be publicly reachable, which the owner has forbidden. Events come from schedules and from a local `POST /api/city/events` on `127.0.0.1`.
 - **Schedules are off.** `jarvis/bin/city-automations enable <id>` installs one in OpenClaw's scheduler, and it needs the Gateway. The Gateway is not running (nothing listens on port 18789 as of this writing). Nothing runs on a schedule today.
 - **Anthropic models only.** No non-Anthropic provider is configured or used.

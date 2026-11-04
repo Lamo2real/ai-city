@@ -441,7 +441,7 @@ test("worktrees: one per ticket on its own branch; removed only when nothing can
   assert.equal(git(repo, "rev-parse", "--abbrev-ref", "HEAD"), "main", "the owner's checkout stays where it was");
   assert.equal((await allocateWorkspace(wt, "t-1", repo, [root])).path, w.path, "asking twice gives the same one");
   writeFileSync(join(w.path, "b.txt"), "b\n");
-  assert.deepEqual(await releaseWorkspace(w), { removed: false, reason: "uncommitted changes" });
+  assert.deepEqual(await releaseWorkspace(w), { removed: false, reason: "uncommitted or ignored files" });
   git(w.path, "add", "-A");
   execFileSync("git", ["-C", w.path, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "work"]);
   assert.deepEqual(await releaseWorkspace(w), { removed: false, reason: "commits not pushed to a remote" });

@@ -15,6 +15,12 @@
       "mcp__terraform",
       "mcp__playwright",
       "mcp__meta-ads"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/credentials)"
     ]
   },
   "hooks": {

@@ -31,7 +31,7 @@ export async function allocateWorkspace(root: string, ticketId: string, repo: st
 // Otherwise the worktree stays and the reason comes back.
 export async function releaseWorkspace(w: Workspace): Promise<{ removed: boolean; reason?: string }> {
   if (!existsSync(w.path)) return { removed: true };
-  if (await git(w.path, "status", "--porcelain")) return { removed: false, reason: "uncommitted changes" };
+  if (await git(w.path, "status", "--porcelain", "--ignored")) return { removed: false, reason: "uncommitted or ignored files" };
   const own = await git(w.path, "log", "--oneline", "HEAD", ...(w.base ? [`^${w.base}`] : []), "--not", "--remotes");
   if (own) return { removed: false, reason: "commits not pushed to a remote" };
   await git(w.repo, "worktree", "remove", w.path);
