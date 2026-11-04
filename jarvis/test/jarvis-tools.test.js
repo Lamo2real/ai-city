@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
+import { loadCorePrompt } from "city";
 
 const DIR = fileURLToPath(new URL("../../agents/core/", import.meta.url));
 
@@ -12,10 +13,9 @@ const DIR = fileURLToPath(new URL("../../agents/core/", import.meta.url));
 export const ALLOWED_BASH = new Set(["Bash(jarvis-spotify:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(terraform show:*)"]);
 const RUNNERS = /^(osascript|open|sh|bash|zsh|dash|ksh|fish|node|nodejs|deno|bun|npx|npm|python[\d.]*|ruby|perl|php|lua|curl|wget|env|xargs|sudo|eval|exec|osacompile|swift|jxa)$/i;
 
-export function toolsOf(file) {
-  const line = readFileSync(join(DIR, file), "utf8").split("\n").find((l) => l.startsWith("tools:"));
-  return line ? line.slice(6).split(",").map((t) => t.trim()).filter(Boolean) : [];
-}
+// Pass this checkout's agents dir: the `city` package may be linked from another worktree.
+const AGENTS = fileURLToPath(new URL("../../agents/", import.meta.url));
+const toolsOf = (file) => loadCorePrompt(file.replace(/\.md$/, ""), AGENTS).tools;
 
 const files = readdirSync(DIR).filter((f) => f.endsWith(".md"));
 
