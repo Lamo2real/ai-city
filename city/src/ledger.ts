@@ -147,10 +147,12 @@ export function openLedger(path: string) {
       const day = now().slice(0, 10);
       return db.prepare("SELECT COALESCE(SUM(usd), 0) AS usd, COALESCE(SUM(tokens), 0) AS tokens, COUNT(*) AS turns FROM costs WHERE ts >= ?").get(day) as { usd: number; tokens: number; turns: number };
     },
+    // Grouped in JS by the same key as policy.departmentKey (trim, collapse whitespace, case-fold), not by an SQL string match.
     spendToday(department: string): number {
       const day = now().slice(0, 10);
-      const r = db.prepare("SELECT COALESCE(SUM(c.usd), 0) AS usd FROM costs c JOIN agents a ON a.id = c.agent_id WHERE c.ts >= ? AND lower(trim(json_extract(a.json, '$.department'))) = lower(trim(?))").get(day, department) as { usd: number };
-      return r.usd;
+      const key = (n: string) => n.trim().replace(/\s+/g, " ").toLowerCase();
+      const rows = db.prepare("SELECT c.usd AS usd, json_extract(a.json, '$.department') AS dept FROM costs c JOIN agents a ON a.id = c.agent_id WHERE c.ts >= ?").all(day) as Array<{ usd: number; dept: string | null }>;
+      return rows.filter((r) => r.dept != null && key(r.dept) === key(department)).reduce((n, r) => n + r.usd, 0);
     },
     close: () => db.close(),
   };
