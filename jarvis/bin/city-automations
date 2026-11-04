@@ -1,0 +1,42 @@
+#!/usr/bin/env node
+// Turns the schedules in config/automations.json on and off in OpenClaw's scheduler. The Gateway must be running.
+// Everything starts off: a schedule runs only after the owner enables it here.
+//   city-automations list | enable <id> | disable <id>
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const repo = resolve(here, "..", "..");
+const { schedules = [] } = JSON.parse(readFileSync(process.env.CITY_AUTOMATIONS ?? join(repo, "config", "automations.json"), "utf8"));
+const cli = process.env.JARVIS_OPENCLAW_CLI ?? join(repo, "jarvis", "openclaw", "bin", "gateway");
+const openclaw = (...args) => execFileSync(cli, args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], timeout: 60_000 });
+const prefix = "city-";
+const installed = () => { const out = JSON.parse(openclaw("cron", "list", "--json")); return out.jobs ?? out; };
+
+const [command, id] = process.argv.slice(2);
+const find = () => {
+  const s = schedules.find((x) => x.id === id);
+  if (!s) { console.error(`city-automations: no schedule ${id ?? "(none)"}. One of: ${schedules.map((x) => x.id).join(", ")}`); process.exit(2); }
+  return s;
+};
+if (command === "list") {
+  const jobs = installed();
+  for (const s of schedules) console.log(`${jobs.some((j) => j.name === prefix + s.id) ? "on " : "off"}  ${s.id}  ${s.cron}  ${s.note ?? ""}`);
+} else if (command === "enable") {
+  const s = find();
+  if (installed().some((j) => j.name === prefix + s.id)) { console.log(`${s.id} is already on`); process.exit(0); }
+  const [bin, ...rest] = s.command;
+  openclaw("cron", "add", "--name", prefix + s.id, "--cron", s.cron, "--command-argv", JSON.stringify([join(repo, bin), ...rest]), "--command-cwd", repo);
+  console.log(`${s.id} is on`);
+} else if (command === "disable") {
+  const s = find();
+  const job = installed().find((j) => j.name === prefix + s.id);
+  if (!job) { console.log(`${s.id} is already off`); process.exit(0); }
+  openclaw("cron", "rm", job.id);
+  console.log(`${s.id} is off`);
+} else {
+  console.error("usage: city-automations list | enable <id> | disable <id>");
+  process.exit(2);
+}

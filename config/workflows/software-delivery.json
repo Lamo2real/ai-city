@@ -1,0 +1,63 @@
+{
+  "name": "software-delivery",
+  "description": "Research, architecture, build, test, review, then a deployment the owner approves.",
+  "inputs": [
+    "goal",
+    "repo"
+  ],
+  "steps": [
+    {
+      "id": "research",
+      "department": "Engineering",
+      "goal": "Research what {{goal}} needs before anything is built, in {{repo}}. Report constraints and options.",
+      "complexity": "standard"
+    },
+    {
+      "id": "architecture",
+      "department": "Engineering",
+      "goal": "Design {{goal}} from the research. Report the design and its risks.",
+      "depends_on": [
+        "research"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "build",
+      "department": "Engineering",
+      "goal": "Build {{goal}} per the design, on a branch of {{repo}} with tests. Open a PR.",
+      "depends_on": [
+        "architecture"
+      ],
+      "acceptance_criteria": [
+        "tests pass",
+        "a PR exists"
+      ],
+      "complexity": "standard"
+    },
+    {
+      "id": "review",
+      "department": "Engineering",
+      "goal": "Review the {{goal}} PR against the design and fix what falls short. Request the Reviewer Gate through your report.",
+      "depends_on": [
+        "build"
+      ],
+      "complexity": "standard"
+    },
+    {
+      "id": "approve-deploy",
+      "approval": "Deploy {{goal}}? The PR is reviewed and its checks pass.",
+      "depends_on": [
+        "review"
+      ]
+    },
+    {
+      "id": "deploy",
+      "department": "Engineering",
+      "goal": "Deploy {{goal}} and confirm it runs. Report how it was verified.",
+      "depends_on": [
+        "approve-deploy"
+      ],
+      "complexity": "standard"
+    }
+  ]
+}

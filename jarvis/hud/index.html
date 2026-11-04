@@ -154,65 +154,151 @@
   @media (display-mode:standalone){html,body{overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}input{-webkit-user-select:text;user-select:text}}
   @media (prefers-reduced-motion:reduce){.core>svg{transform:none}.wakering{display:none}}
   /* ---------- City View: the whole grid cell, overlays at the corners like the reference ---------- */
-  #city{display:none;position:relative;min-height:0;overflow:hidden;outline:none;background:#070a12}
+  /* The City view: a toy world at dusk. Panels are parchment in a chunky wood frame, the corners notched like the map's pixels. */
+  #city{--ink:#1d1c36;--wood:#7a4a2a;--wood2:#a86f40;--paper:#f6e8cb;--paper2:#ecdab4;--text:#2e1f16;--soft:#6a5140;--go:#e8a33d;--go2:#b47722;--no:#b5301f;--okk:#2c7a4c;
+    display:none;position:relative;min-height:0;overflow:hidden;outline:none;background:#26284a;font-family:ui-rounded,"Trebuchet MS",system-ui,sans-serif;font-weight:600;font-size:13px;line-height:1.35;color:var(--text)}
   body.view-city #city{display:block}
-  /* In the City the core's art is hidden but its dock stays, so Needs you is reachable from there. */
+  body.view-city .scan{display:none}
+  body.view-city #grid{padding:0;gap:0;max-width:none}
+  #city ::selection{background:#ffd84a;color:var(--ink)}
+  #city *{scrollbar-width:thin;scrollbar-color:var(--wood2) var(--paper2)}
   body.view-city .talk,body.view-city #status,body.view-city #inbox{display:none}
   body.view-city .core{display:contents}
   body.view-city .core>:not(.dock){display:none}
   body.view-city #grid{position:relative}
   body.view-city .dock{z-index:5}
-  #city canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab}
-  #city canvas:active{cursor:grabbing}
-  .cityui{position:absolute;background:rgba(7,3,2,.78);border:1px solid var(--line);backdrop-filter:blur(6px);font-size:11px;
-    clip-path:polygon(0 8px,8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%)}
-  .cityui h3{font-family:Orbitron,sans-serif;font-weight:500;font-size:10px;letter-spacing:.22em;color:var(--o2);margin:0 0 6px}
-  .cityui .mute{color:var(--mute)}
-  #citytop{top:10px;left:50%;transform:translateX(-50%);display:flex;gap:18px;padding:8px 16px;white-space:nowrap;max-width:calc(100% - 20px);overflow-x:auto}
-  #citytop .stat{display:flex;flex-direction:column;align-items:flex-start}
-  #citytop .stat .k{color:var(--mute);letter-spacing:.15em;font-size:9px}
-  #citytop .stat b{font-family:Orbitron,sans-serif;font-size:13px;color:var(--txt)}
-  #citydepts{top:10px;right:10px;width:150px;padding:10px;display:flex;flex-direction:column;gap:4px;max-height:calc(100% - 180px);overflow-y:auto}
-  #citydepts .dept{text-align:left;background:transparent;border:0;border-left:3px solid var(--line);color:var(--txt);padding:5px 8px;cursor:pointer;font:inherit}
-  #citydepts .dept:hover,#citydepts .dept:focus-visible{background:rgba(255,106,26,.12);outline:none}
-  #cityfeed{left:10px;bottom:74px;width:300px;padding:10px;max-height:40%;overflow-y:auto}
-  #cityfeed .line{display:flex;gap:8px;padding:2px 0;color:var(--txt)}
-  #cityfeed .line .t{color:var(--mute);flex:none}
-  #cityfeed .line.fail{color:var(--bad)}#cityfeed .line.pass,#cityfeed .line.done{color:var(--ok)}#cityfeed .line.question{color:#ffd21e}
-  #cityinbox{right:10px;bottom:74px;width:300px;padding:10px;display:flex;align-items:center;justify-content:space-between;gap:10px}
-  #cityinbox button{min-height:40px;padding:0 12px;background:var(--o);color:#1a0800;border:0;font:inherit;letter-spacing:.1em;cursor:pointer}
-  #citypanel input{width:100%;background:rgba(0,0,0,.4);border:1px solid var(--line);color:var(--txt);font:inherit;padding:5px 6px}
-  #citypanel button[type=submit],#citypanel .wide{margin-top:4px;background:var(--o);color:#1a0800;border:0;font:inherit;padding:5px 10px;cursor:pointer;letter-spacing:.1em}
-  #citypanel{top:10px;left:10px;width:320px;max-height:calc(100% - 100px);overflow-y:auto;padding:12px}
-  #citypanel header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
-  #citypanel header h3{margin:0;font-size:12px}
-  #citypanel header .ibtn{width:28px;height:28px;font-size:16px}
-  #citypanel .badge{display:inline-block;color:#111;font-weight:bold;padding:1px 8px;margin-bottom:8px;border-radius:2px}
-  #citypanel .row{display:flex;gap:10px;padding:2px 0;border-bottom:1px dashed rgba(255,106,26,.15)}
-  #citypanel .row .k{color:var(--mute);width:90px;flex:none;letter-spacing:.1em}
-  #citypanel .row .v{color:var(--txt);word-break:break-word}
-  #citypanel h4{font-size:10px;letter-spacing:.2em;color:var(--o2);margin:10px 0 4px}
-  #citypanel ul{list-style:none;margin:0;padding:0}#citypanel li{padding:2px 0;color:var(--txt)}
-  #citypanel .instruct{margin-top:10px;display:flex;flex-direction:column;gap:4px}
-  #cityerror{position:absolute;left:50%;top:60px;transform:translateX(-50%);max-width:calc(100% - 20px);color:#fff;background:var(--bad);font-size:12px;letter-spacing:.05em;padding:6px 12px;text-align:center}
+  body.view-city .dock .ibtn{background:var(--paper,#f6e8cb);color:#5a3219;border:0;box-shadow:0 -3px 0 #7a4a2a,0 3px 0 #7a4a2a,-3px 0 0 #7a4a2a,3px 0 0 #7a4a2a,0 6px 0 #1d1c36}
+  body.view-city .dock .ibtn.active{background:#e8a33d;color:#2e1f16}
+  #city>canvas{position:absolute;left:0;top:0;display:block;touch-action:none;cursor:grab;image-rendering:pixelated}
+  #city>canvas:active{cursor:grabbing}
+  #city .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+  #city .cityui canvas{image-rendering:pixelated;display:block}
+  .cityui{position:absolute;background:var(--paper);color:var(--text);
+    box-shadow:inset 0 2px 0 #fff6e0,inset 0 -2px 0 var(--paper2),0 -3px 0 var(--wood),0 3px 0 var(--wood),-3px 0 0 var(--wood),3px 0 0 var(--wood),0 6px 0 var(--ink),-3px 3px 0 var(--ink),3px 3px 0 var(--ink)}
+  .cityui h3{font-weight:700;font-size:12px;color:#5a3219;margin:0 0 6px}
+  .cityui h3 canvas,.cityui h4 canvas{display:block}
+  .cityui .mute{color:var(--soft)}
+  #citytop{top:9px;left:9px;right:249px;display:flex;gap:18px;padding:7px 12px;white-space:nowrap;overflow-x:auto}
+  #citytop .stat{display:flex;flex-direction:column;align-items:flex-start;flex:none}
+  #citytop .stat .k{color:var(--soft);font-size:10px;letter-spacing:.04em}
+  #citytop .stat b{font-size:14px;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums}
+  #cityside{position:absolute;top:9px;right:9px;bottom:9px;width:222px;display:flex;flex-direction:column;gap:12px;z-index:1}
+  #cityside .cityui{position:relative;flex:none}
+  #citydepts{padding:10px;display:flex;flex-direction:column;gap:3px;max-height:58%;overflow-y:auto}
+  #citydepts h3:not(:first-child){margin-top:8px}
+  #citydepts .dept{display:flex;align-items:center;gap:7px;text-align:left;background:transparent;border:0;color:var(--text);padding:4px 6px;min-height:28px;cursor:pointer;font:inherit}
+  #citydepts .dept:not(.rec)::before{content:"";flex:none;width:10px;height:10px;background:var(--swatch);box-shadow:0 0 0 2px var(--ink)}
+  #citydepts .dept[data-count]:not([data-count="0"])::after{content:attr(data-count);margin-left:auto;min-width:20px;text-align:center;background:var(--ink);color:#ffe9a0;font-size:12px;padding:0 4px}
+  #citydepts .dept:hover{background:var(--paper2)}
+  #citydepts .dept.off{color:var(--soft)}
+  #cityfeed{padding:10px;flex:1 1 0!important;min-height:90px;overflow-y:auto}
+  #cityfeed .line{display:flex;gap:7px;padding:2px 0;color:var(--text);font-size:12px;overflow-wrap:anywhere}
+  #cityfeed .line .t{color:var(--soft);flex:none;font-variant-numeric:tabular-nums}
+  #cityfeed .line.fail{color:var(--no)}#cityfeed .line.pass,#cityfeed .line.done{color:var(--okk)}#cityfeed .line.question{color:#8a5a00}
+  #cityinbox,#cityparked{padding:9px 10px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+  #cityinbox button,#cityparked button,#citypanel .instruct button{min-height:40px;padding:0 10px;background:var(--go);color:#2a1a08;border:0;box-shadow:inset 0 2px 0 #f9c976,inset 0 -3px 0 var(--go2),0 0 0 2px var(--ink);font:inherit;font-weight:800;cursor:pointer}
+  #cityinbox button:active,#cityparked button:active,#citypanel .act:active,#citypanel .instruct button:active,#cityzoom button:active{transform:translateY(2px)}
+  #cityinbox span{min-width:0}
+  #cityparked button{flex:none;white-space:nowrap}
+  #cityparked[hidden],#citypaused[hidden],#cityerror[hidden],#cityempty[hidden]{display:none}
+  #cityzoom{position:absolute;left:12px;bottom:14px;display:flex;gap:7px;z-index:1}
+  #cityzoom button{min-width:40px;height:40px;padding:0 8px;background:var(--paper);color:#5a3219;border:0;font:inherit;font-weight:800;font-size:16px;cursor:pointer;box-shadow:inset 0 -3px 0 var(--paper2),0 0 0 3px var(--wood),0 5px 0 1px var(--ink)}
+  #city button:focus-visible,#city input:focus-visible{outline:3px solid #2257c5;outline-offset:2px}
+  #citypanel input{width:100%;background:#fff9ea;border:0;box-shadow:inset 0 0 0 2px var(--wood2);color:var(--text);font:inherit;padding:8px;min-height:40px}
+  #citypanel input::placeholder{color:var(--soft)}
+  #citypanel{top:74px;left:12px;width:min(340px,calc(100% - 24px));max-height:calc(100% - 96px);overflow-y:auto;padding:12px;z-index:2}
+  #citypanel[data-kind=workforce],#citypanel[data-kind=costs],#citypanel[data-kind=health],#citypanel[data-kind=parked],#citypanel[data-kind=story],#citypanel[data-kind=legend]{width:min(460px,calc(100% - 24px))}
+  #citypanel[data-kind=costs] .row .k,#citypanel[data-kind=health] .row .k{width:130px}
+  #citypanel .hint{color:var(--soft);margin:6px 0;line-height:1.4}
+  #citypanel .costnote{color:var(--text);font-size:12px}
+  #citypanel .saynote:empty{display:none}
+  #citypanel .saynote{color:var(--text)}
+  #citypanel .act{min-height:34px;padding:0 10px;background:var(--paper2);color:var(--text);border:0;box-shadow:inset 0 -2px 0 #cdb88e,0 0 0 2px var(--wood);font:inherit;cursor:pointer;margin:2px}
+  #citypanel .act:hover{background:#f5e0b0}
+  #citypanel .act.main{background:var(--go);box-shadow:inset 0 -2px 0 var(--go2),0 0 0 2px var(--ink)}
+  #citypanel .act.sure{background:var(--no);color:#fff;box-shadow:0 0 0 2px var(--ink)}
+  #citypanel .act:disabled{opacity:.55;cursor:default}
+  #citypanel .act.back{margin-bottom:6px}
+  #citypanel .wide{margin-top:8px}
+  #citypanel .link{background:none;border:0;padding:0;font:inherit;color:#1f4fae;cursor:pointer;text-decoration:underline;text-underline-offset:2px;text-align:left;overflow-wrap:anywhere}
+  #citypanel .acts{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+  #citypanel .withact{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  #citypanel .wk{padding:6px 0;border-bottom:2px dotted #d3bf95;line-height:1.4;overflow-wrap:anywhere}
+  #citypanel .nowrap{white-space:nowrap}
+  #citypanel .wkhead{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  #citypanel .tag{flex:none;font-size:11px;padding:0 6px;background:var(--paper2);color:var(--soft)}
+  #citypanel .tag.good{background:#cfe8d0;color:#1e5c38}
+  #citypanel .tag.warn{background:#f8e29a;color:#6a4b00}
+  #citypanel .tag.bad{background:#f6c8bf;color:#7f1f12}
+  #citypanel table.costs{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  #citypanel table.costs th{color:var(--soft);font-weight:600;text-align:right;padding:2px 0 2px 8px}
+  #citypanel table.costs td{text-align:right;padding:2px 0 2px 8px;border-top:2px dotted #d3bf95;white-space:nowrap}
+  #citypanel table.costs td:first-child,#citypanel table.costs th:first-child{text-align:left;padding-left:0;white-space:normal;overflow-wrap:anywhere}
+  #citypanel .story .line{display:flex;gap:8px;line-height:1.4;overflow-wrap:anywhere}
+  #citypanel .story .t{color:var(--soft);flex:none;font-variant-numeric:tabular-nums}
+  #citypanel .legend{display:grid;grid-template-columns:max-content 1fr;gap:2px 10px}
+  #citypanel .legend dt{color:var(--text)}#citypanel .legend dd{color:var(--soft);margin:0}
+  #citypanel .legendlist li{display:grid;grid-template-columns:34px max-content 1fr;align-items:center;gap:0 8px;padding:3px 0}
+  #citypanel .legendlist li canvas{width:34px;height:36px}
+  #citypanel .legendlist b{font-weight:800}
+  #citypanel header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+  #citypanel header h3{margin:0}
+  #citypanel .closer{flex:none;width:32px;height:32px;display:grid;place-items:center;background:var(--paper2);border:0;box-shadow:0 0 0 2px var(--wood);cursor:pointer}
+  #citypanel .closer canvas{width:14px;height:14px}
+  #citypanel .badge{display:inline-block;color:#14121f;font-weight:800;padding:0 8px;margin-top:2px}
+  #citypanel .who{display:flex;align-items:center;gap:10px}
+  #citypanel .portrait{width:60px;height:78px;background:#3f4168;box-shadow:0 0 0 2px var(--ink)}
+  #citypanel .where{font-weight:800;font-size:14px}
+  #citypanel .doing{display:flex;align-items:center;gap:8px;margin:10px 0;padding:8px;background:#fff9ea;box-shadow:inset 0 0 0 2px var(--wood2);font-size:15px;font-weight:800;overflow-wrap:anywhere}
+  #citypanel .doing .bub{flex:none;width:34px;height:36px}
+  #citypanel .doing[data-doing=idle] .bub{display:none}
+  #citypanel .doing[data-doing=waiting_owner]{background:#ffd84a}
+  #citypanel .doing[data-doing=failed],#citypanel .doing[data-doing=blocked]{background:#f6c8bf}
+  #citypanel .merge{margin:0 0 8px;padding:8px;background:#cfe8d0;box-shadow:inset 0 0 0 2px var(--okk)}
+  #citypanel .row{display:flex;justify-content:flex-start;gap:10px;padding:3px 0;border-bottom:2px dotted #d3bf95}
+  #citypanel .row .k{color:var(--soft);width:92px;flex:none}
+  #citypanel .row .v{color:var(--text);overflow-wrap:anywhere;min-width:0}
+  #citypanel h4{font-size:12px;font-weight:800;color:#7a4a2a;margin:12px 0 5px}
+  #citypanel ul{list-style:none;margin:0;padding:0}#citypanel li{padding:2px 0;color:var(--text);overflow-wrap:anywhere}
+  #citypanel li.ask{font-weight:800}
+  #citypanel .instruct{margin-top:12px;display:flex;flex-direction:column;gap:6px}
+  #cityalerts{position:absolute;left:50%;top:76px;transform:translateX(calc(-50% - 110px));width:max-content;max-width:min(560px,calc(100% - 280px));display:flex;flex-direction:column;gap:12px;z-index:1;pointer-events:none}
+  #cityalerts>*{pointer-events:auto}
+  #cityalerts .cityui{position:static}
+  @media (min-width:1100px){#city:has(#citypanel:not([hidden])) #cityalerts{left:490px;right:250px;transform:none;width:auto;max-width:none}}
+  #cityerror{color:#fff;background:var(--no);font-size:13px;padding:7px 12px;text-align:center;box-shadow:0 0 0 3px var(--ink)}
+  #citypaused{padding:8px 14px;line-height:1.4}
+  #citypaused b{color:#8a3b00;font-weight:800}
+  #citypaused .why{color:var(--soft);margin-top:2px}
+  #cityempty{padding:8px 14px;text-align:center}
   .srlist{position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden}
-  .srlist:focus-within{position:absolute;left:10px;bottom:120px;width:auto;height:auto;background:rgba(7,3,2,.9);padding:8px;z-index:3}
-  @media (max-width:1200px){#cityfeed,#cityinbox{width:240px}#citydepts{width:120px}}
-  #citytoggles{display:none}
-  /* Phones: stats wrap in two columns, Departments and Activity open as sheets above the dock, so nothing covers the scene unless asked. */
+  .srlist:focus-within{position:absolute;left:12px;bottom:70px;width:auto;height:auto;max-height:50%;overflow-y:auto;background:var(--paper);box-shadow:0 0 0 3px var(--wood);padding:8px;z-index:3;display:flex;flex-direction:column;gap:3px}
+  .srlist button{text-align:left;background:transparent;border:0;color:var(--text);font:inherit;padding:3px 6px;cursor:pointer}
+  /* Phone width: the top bar and a row of departments and records across the top, the alerts under them, the map between. */
   @media (max-width:800px){
-    #citytop{left:10px;right:10px;transform:none;display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;white-space:normal;max-width:none;overflow:visible;padding:8px 12px}
-    #citytop .stat b{font-size:12px;overflow-wrap:anywhere}
-    #cityinbox{left:10px;right:10px;width:auto;max-height:none;padding:6px 10px}
-    #citytoggles{display:flex;left:10px;right:10px;bottom:134px;gap:8px;padding:0;background:none;border:0;clip-path:none;backdrop-filter:none}
-    #citytoggles button{flex:1;min-height:40px;border:1px solid var(--line);background:rgba(7,3,2,.78);color:var(--txt);font:inherit;letter-spacing:.1em;cursor:pointer}
-    #citytoggles button[aria-expanded=true]{border-color:var(--o);color:#fff}
-    #citydepts,#cityfeed{display:none;left:10px;right:10px;top:auto;bottom:182px;width:auto;max-height:min(40%,300px)}
-    #city[data-sheet=depts] #citydepts{display:flex}#city[data-sheet=feed] #cityfeed{display:block}
-    #citypanel{max-width:calc(100% - 20px)}
+    #city{font-size:13px}
+    #cityside{display:contents}
+    #cityside .cityui{position:absolute}
+    #citytop{left:9px;right:9px;gap:14px;padding:5px 10px}
+    #citydepts{top:68px;left:9px;right:9px;bottom:auto;max-height:none;flex-direction:row;overflow-x:auto;padding:5px;z-index:1}
+    #citydepts h3{display:none}
+    #citydepts .dept{flex:none;min-height:40px;white-space:nowrap}
+    #cityalerts{top:128px;left:9px;right:9px;transform:none;width:auto;max-width:none}
+    #cityfeed{left:9px;bottom:76px;flex:none!important;width:calc(58% - 14px);height:70px;min-height:0;padding:6px 8px}
+    #cityfeed h3{display:none}
+    #cityinbox,#cityparked{left:auto;right:9px;width:calc(42% - 9px);padding:6px;flex-direction:column;align-items:stretch;gap:4px;font-size:12px}
+    #cityinbox{bottom:76px;height:70px;justify-content:center}
+    #cityinbox button{min-height:40px;padding:0 4px}
+    #cityinbox span{display:none}
+    #cityparked{bottom:158px;height:auto;z-index:1}
+    #cityzoom{left:auto;right:12px;bottom:auto;top:128px;flex-direction:column}
+    #citypanel{top:auto;left:0;right:0;bottom:70px;width:100%!important;max-height:58%} /* a sheet over the bottom of the map, so the figure stays in view above it */
+    #citypanel .act{min-height:40px}
+    #citypanel .row .k{width:84px}
+    #citypanel .legendlist li{grid-template-columns:34px 1fr}
+    #citypanel .legendlist .mute{grid-column:2}
   }
-  #citydepts .dept{min-height:40px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #citytoggles button:focus-visible,#citydepts .dept:focus-visible{outline:2px solid var(--o2);outline-offset:2px}
+  @media (prefers-reduced-motion:reduce){#city button:active{transform:none!important}}
   .core.panel{grid-area:auto;background:none;border:0;clip-path:none;padding:0;overflow:hidden;min-width:0;min-height:0}
   .core.panel:before{display:none}
   .hud-stat,.corelabel{display:none}
@@ -354,13 +440,20 @@
     <div class="hud-stat hs4">BLOCKED<b id="blockn">0</b>need action</div>
 
     <section id="city" tabindex="-1" aria-label="City view">
-      <canvas aria-label="Isometric city of the agents"></canvas>
+      <canvas aria-label="The city of the agents, drawn as a small game map. Every department and agent is also listed as a button."></canvas>
       <div class="cityui" id="citytop" role="status"></div>
-      <div id="cityerror" role="alert" hidden></div>
-      <nav class="cityui" id="citydepts" aria-label="Departments"></nav>
-      <div class="cityui" id="cityfeed" aria-live="polite"></div>
-      <div class="cityui" id="cityinbox" aria-live="polite"><span id="citysum">Nothing waiting.</span><button type="button" id="cityopeninbox">Open Needs you</button></div>
-      <div class="cityui" id="citytoggles"><button type="button" id="citydeptsbtn" aria-expanded="false" aria-controls="citydepts">Departments</button><button type="button" id="cityfeedbtn" aria-expanded="false" aria-controls="cityfeed">Activity</button></div>
+      <div id="cityalerts">
+        <div id="cityerror" role="alert" hidden></div>
+        <div class="cityui" id="citypaused" role="status" hidden></div>
+        <div class="cityui" id="cityempty" role="status" hidden></div>
+      </div>
+      <div id="cityside">
+        <nav class="cityui" id="citydepts" aria-label="Departments"></nav>
+        <div class="cityui" id="cityfeed" aria-live="polite"></div>
+        <div class="cityui" id="cityparked" aria-live="polite" hidden><span id="cityparkedsum"></span><button type="button" id="cityparkedbtn">Review parked</button></div>
+        <div class="cityui" id="cityinbox" aria-live="polite"><span id="citysum">Nothing waiting.</span><button type="button" id="cityopeninbox">Open Needs you</button></div>
+      </div>
+      <div id="cityzoom" role="group" aria-label="Map zoom"><button type="button" id="cityzoomin" aria-label="Zoom in" title="Zoom in">+</button><button type="button" id="cityzoomout" aria-label="Zoom out" title="Zoom out">-</button><button type="button" id="cityzoomfit" aria-label="Fit the whole map" title="Fit the whole map">Fit</button></div>
       <aside class="cityui" id="citypanel" role="dialog" aria-label="Details" hidden></aside>
       <nav id="citylist" class="srlist" aria-label="Buildings and agents (keyboard)"></nav>
     </section>
@@ -493,13 +586,8 @@ $("statusbtn").onclick=()=>setView(view==="status"?"":"status");
 $("inboxbtn").onclick=()=>setView(view==="inbox"?"":"inbox");
 $("inboxclose").onclick=()=>setView("");
 $("talkhead").onclick=()=>setView("");
-/* City sheets (phones): one of Departments or Activity open at a time. */
-function citySheet(name){ const c=$("city"), cur=c.dataset.sheet||""; const next=cur===name?"":name; if(next) c.dataset.sheet=next; else delete c.dataset.sheet;
-  $("citydeptsbtn").setAttribute("aria-expanded",String(next==="depts")); $("cityfeedbtn").setAttribute("aria-expanded",String(next==="feed")); }
-$("citydeptsbtn").onclick=()=>citySheet("depts"); $("cityfeedbtn").onclick=()=>citySheet("feed");
-/* Esc closes what is open on top (a city detail panel or sheet), then the view, so a second Esc is Home. */
+/* Esc closes what is open on top (a city detail panel handles it first), then the view, so a second Esc is Home. */
 document.addEventListener("keydown",e=>{ if(e.key!=="Escape"||e.defaultPrevented||e.isComposing) return;
-  if(view==="city"&&$("city").dataset.sheet){ citySheet($("city").dataset.sheet); e.preventDefault(); return; }
   if(view){ setView(""); e.preventDefault(); } });
 let hintTimer=null;
 function showHint(text){ $("vhint").textContent=text; $("vhint").classList.add("show"); clearTimeout(hintTimer); hintTimer=setTimeout(()=>$("vhint").classList.remove("show"),6000); }
@@ -947,7 +1035,7 @@ load();
 </script>
 <script type="module">
 /* Status board: limits, tickets and agents of the AI City, from GET /api/city and the shared event stream. Text goes in with textContent. */
-import { applySnapshot, reduce, initialState, limits, ticketGroups, agentRows, relTime, ageText } from "./city-state.js";
+import { COST_NOTE, estUsd, applySnapshot, reduce, initialState, limits, ticketGroups, agentRows, relTime, ageText } from "./city-state.js";
 const $ = (id) => document.getElementById(id);
 const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 let state = initialState(), streamLost = false, timer = null, costTimer = null;
@@ -966,7 +1054,7 @@ function renderLimits() {
   const legacyTotal = L.agents.max !== null;
   strip.append(legacyTotal ? lim("AGENTS ACTIVE", of(L.agents.active, L.agents.max), L.agents.active >= L.agents.max) : lim(L.agentsLabel, `${L.agents.active} active`),
     withNote(lim("WORKERS PER MANAGER (MOST)", L.workersPerManager.max === null ? String(L.workersPerManager.largest) : of(L.workersPerManager.largest, L.workersPerManager.max), L.workersPerManager.max !== null && L.workersPerManager.largest >= L.workersPerManager.max), L.workersPerManager.max));
-  if (L.usage) { const u = lim("USAGE TODAY", `${L.usage.turns} turns · ${Number(L.usage.tokens).toLocaleString("en-US")} tokens`); u.append(mk("span", "", `${fmtUsd(L.usage.usd)} (SDK cost estimate)`)); strip.append(u); } else strip.append(lim("USAGE TODAY", "—"));
+  if (L.usage) { const u = lim("USAGE TODAY", `${L.usage.turns} turns · ${Number(L.usage.tokens).toLocaleString("en-US")} tokens`); u.append(mk("span", "", `${estUsd(L.usage.usd)} (API list price, not a charge)`)); strip.append(u); } else strip.append(lim("USAGE TODAY", "—"));
   parts.push(strip);
   if (L.agentsByDepartment.length) {
     const ha = mk("h4", "", "AGENTS PER DEPARTMENT" + (L.agentCapPerDepartment === null ? " · cap: unknown until Jarvis restarts" : "")); ha.style.cssText = "font-size:10px;letter-spacing:.2em;color:var(--o2);margin:4px 0";
@@ -977,11 +1065,11 @@ function renderLimits() {
       top.append(name, mk("span", "amt", of(d.active, d.cap))); row.append(top); parts.push(row);
     }
   }
-  const h = mk("h4", "", "SPEND TODAY PER DEPARTMENT" + (L.departments[0]?.cap != null ? ` (cap ${fmtUsd(L.departments[0].cap)} each)` : " · cap: unknown until Jarvis restarts")); h.style.cssText = "font-size:10px;letter-spacing:.2em;color:var(--o2);margin:4px 0";
-  parts.push(h);
+  const h = mk("h4", "", "ESTIMATED SPEND TODAY PER DEPARTMENT" + (L.departments[0]?.cap != null ? ` (cap ${fmtUsd(L.departments[0].cap)} each)` : " · cap: unknown until Jarvis restarts")); h.style.cssText = "font-size:10px;letter-spacing:.2em;color:var(--o2);margin:4px 0";
+  parts.push(h, mk("div", "mute costnote", COST_NOTE));
   if (!L.departments.length) parts.push(mk("div", "mute", "No spend recorded today."));
   for (const d of L.departments) {
-    const row = mk("div", d.over ? "dept over" : "dept"), top = mk("div", "top2"), amt = mk("span", "amt", d.cap === null ? `${fmtUsd(d.usd)} today` : fmtUsd(d.usd));
+    const row = mk("div", d.over ? "dept over" : "dept"), top = mk("div", "top2"), amt = mk("span", "amt", d.cap === null ? `${estUsd(d.usd)} today` : estUsd(d.usd));
     const name = mk("span", "", d.dept); if (d.over) name.append(mk("span", "overtag", "OVER CAP"));
     top.append(name, amt); row.append(top);
     if (d.pct !== null) { const bar = mk("div", "bar"); const i = mk("i", d.over ? "over" : ""); i.style.width = `${d.pct}%`; bar.append(i); row.append(bar); }

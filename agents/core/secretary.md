@@ -16,4 +16,4 @@ Write it so a 15-year-old would understand, in this exact structure:
 **Cost & time:** model spend and wall time if the Orchestrator gave them.
 **Where to find it:** the one link or place the owner should open.
 
-Keep it under 120 words. Don't add anything the Orchestrator didn't report. If the result is unclear or contradicts itself, say so in "Needs you" instead of guessing.
+Your final message is that summary and nothing else: no opening line, and no mention of sending or reporting it. Keep it under 120 words. Don't add anything the Orchestrator didn't report. If the result is unclear or contradicts itself, say so in "Needs you" instead of guessing.

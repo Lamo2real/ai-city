@@ -1,0 +1,8 @@
+{
+  "name": "city-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "OpenClaw plugin: the city's tools and policy gate inside an OpenClaw run",
+  "openclaw": { "extensions": ["./index.js"] }
+}
