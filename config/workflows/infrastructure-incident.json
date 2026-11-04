@@ -1,0 +1,40 @@
+{
+  "name": "infrastructure-incident",
+  "description": "Investigate, diagnose, propose a fix, the owner authorizes, execute.",
+  "inputs": [
+    "goal"
+  ],
+  "steps": [
+    {
+      "id": "investigate",
+      "department": "Infrastructure",
+      "goal": "Investigate {{goal}}. Read-only: logs, metrics, recent changes.",
+      "complexity": "standard"
+    },
+    {
+      "id": "diagnose",
+      "department": "Infrastructure",
+      "goal": "Diagnose {{goal}} from the investigation and propose the smallest safe remediation.",
+      "depends_on": [
+        "investigate"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "authorize",
+      "approval": "Run the proposed remediation for {{goal}}?",
+      "depends_on": [
+        "diagnose"
+      ]
+    },
+    {
+      "id": "execute",
+      "department": "Infrastructure",
+      "goal": "Execute the authorized remediation for {{goal}} and verify recovery.",
+      "depends_on": [
+        "authorize"
+      ],
+      "complexity": "standard"
+    }
+  ]
+}

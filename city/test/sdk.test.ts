@@ -29,7 +29,7 @@ test("a turn streams text, reports tool use, and returns the final text, session
   const text: string[] = [];
   const tools: string[] = [];
   const r = await runner({ agentId: "jarvis", systemPrompt: "You are Jarvis", model: "claude-haiku-5-5", effort: "low", allowedTools: ["mcp__jarvis__send_ticket"], tools: [{ name: "send_ticket", description: "d", schema: { ticket: z.record(z.string(), z.unknown()) }, handler: async () => ({ ok: true }) }], prompt: "what's 9+9", resume: "old", onText: (t) => text.push(t), onTool: (n) => tools.push(n) });
-  assert.deepEqual(r, { text: "eighteen", sessionId: "sess-1", costUsd: 0.002, tokens: 150, usage: { input: 120, output: 30, cacheRead: 0, cacheWrite: 0 } });
+  assert.deepEqual(r, { text: "eighteen", sessionId: "sess-1", costUsd: 0.002, tokens: 150, usage: { input: 120, output: 30, cacheRead: 0, cacheWrite: 0 }, contextTokens: 120, durationMs: 0 });
   assert.deepEqual(text, ["Math it is — ", "eighteen."]);
   assert.deepEqual(tools, ["mcp__jarvis__send_ticket"]);
   const { options } = captured[0];

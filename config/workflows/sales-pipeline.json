@@ -1,0 +1,49 @@
+{
+  "name": "sales-pipeline",
+  "description": "Find leads, qualify, research, draft outreach for approval, follow up, update the CRM.",
+  "inputs": [
+    "goal"
+  ],
+  "steps": [
+    {
+      "id": "discover",
+      "department": "Sales",
+      "goal": "Find leads for {{goal}}.",
+      "complexity": "standard"
+    },
+    {
+      "id": "qualify",
+      "department": "Sales",
+      "goal": "Qualify the leads for {{goal}} and keep only the good ones.",
+      "depends_on": [
+        "discover"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "research",
+      "department": "Sales",
+      "goal": "Research each qualified lead for {{goal}}.",
+      "depends_on": [
+        "qualify"
+      ],
+      "complexity": "standard"
+    },
+    {
+      "id": "approve-outreach",
+      "approval": "Send the outreach drafted for {{goal}}?",
+      "depends_on": [
+        "research"
+      ]
+    },
+    {
+      "id": "outreach",
+      "department": "Sales",
+      "goal": "Send the approved outreach for {{goal}} and record it.",
+      "depends_on": [
+        "approve-outreach"
+      ],
+      "complexity": "simple"
+    }
+  ]
+}

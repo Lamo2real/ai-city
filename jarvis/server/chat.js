@@ -45,12 +45,15 @@ export const DISALLOWED_TOOLS = [
   "Bash(gh auth *)", "Bash(gh secret *)", "Bash(gh api *--method*)", "Bash(gh api *-X *)", "Bash(gh api *-f *)", "Bash(gh api *-F *)", "Bash(gh api *--input*)", "Bash(gh api graphql*)",
 ];
 
+// GitHub tokens (classic ghp_/gho_/ghu_/ghs_/ghr_ and fine-grained github_pat_), wherever they appear in text.
+const GITHUB_TOKEN = /(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})/g;
+
 export function scrubSecrets(text, env = process.env) {
   let out = String(text ?? "");
   for (const name of SECRET_VARS) {
     if (env[name]) out = out.split(env[name]).join("[redacted]");
   }
-  return out;
+  return out.replace(GITHUB_TOKEN, "[redacted]");
 }
 
 export function claudeArgs(resumeId, persistent = false) {

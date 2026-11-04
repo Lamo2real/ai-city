@@ -112,17 +112,34 @@ test("'pause' leaves tickets waiting, and they stay waiting; no new question tha
   city.close();
 });
 
-test("held tickets restart when the cap no longer applies (a new day)", async () => {
+test("at the cap the agent stops before its next turn, and resumes by itself once the day resets", async () => {
   const { city, calls } = mk();
   await hire(city, "it-mgr", "IT");
   city.ledger.addCost("it-mgr", null, 2);
   const t = city.sendTicket({ to: "it-mgr", goal: "x" });
   await city.idle();
-  // Tomorrow's spend is 0: simulate by moving today's spend to yesterday.
-  city.ledger.addCost("it-mgr", null, -2); // offsets today's spend, standing in for the day rolling over
-  city.resumeCapBlocked();
+  assert.equal(calls.filter((c) => c.agentId === "it-mgr").length, 0, "stopped at the cap");
+  assert.equal(city.ledger.getTicket(t.id)?.status, "waiting_on_owner");
+  // The UTC day rolls over: yesterday's spend no longer counts today. Nobody answers the question.
+  const yesterday = new Date(Date.now() - 86_400_000).toISOString();
+  city.ledger.db.prepare("UPDATE costs SET ts = ?").run(yesterday);
+  city.resumeCapBlocked(); // what the periodic timer calls
   await city.idle();
-  assert.ok(calls.some((c) => c.agentId === "it-mgr" && c.prompt.includes(t.id)));
+  assert.ok(calls.some((c) => c.agentId === "it-mgr" && c.prompt.includes(t.id)), "resumed with no owner action");
+  assert.equal(city.ledger.getTicket(t.id)?.cap_block ?? null, null);
+  city.close();
+});
+
+test("department names match without regard to case or spaces", async () => {
+  const { city, calls } = mk();
+  await hire(city, "it-mgr", "IT");
+  city.ledger.addCost("it-mgr", null, 2);
+  assert.ok(city.ledger.spendToday("  it ") >= 2);
+  assert.equal(city.ledger.spendToday("It"), city.ledger.spendToday("IT"));
+  await hire(city, "it-two", " it ").then(() => assert.fail("should be capped"), (e) => assert.match(String(e.message), /cap reached/));
+  city.sendTicket({ to: "it-mgr", goal: "x" });
+  await city.idle();
+  assert.equal(calls.filter((c) => c.agentId === "it-mgr").length, 0);
   city.close();
 });
 
