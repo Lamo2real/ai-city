@@ -8,7 +8,7 @@ import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createChat, scrubSecrets } from "./chat.js";
+import { createChat, redactTokens, scrubSecrets } from "./chat.js";
 import { createCityChat, withJarvisBin } from "./city-chat.js";
 import { createTranscriber, isWav, parseWake } from "./listen.js";
 import { createLiveSession, liveAvailable } from "./live.js";
@@ -48,10 +48,8 @@ function writeAudit(dataDir, entry) {
   }
 }
 
-// Anything token-shaped the owner pastes into a chat stays out of the audit file: known token prefixes
-// (GitHub, Slack, OpenAI/Anthropic-style keys), Telegram bot tokens, Bearer values and long random strings.
-const TOKEN_PATTERNS = [/\b(?:ghp|gho|ghu|ghs|ghr|github_pat|xox[abprs]|sk|sk-ant|AKIA)[-_][A-Za-z0-9_-]{8,}/g, /\b\d{6,12}:[A-Za-z0-9_-]{30,}\b/g, /Bearer\s+\S+/gi, /\b[A-Za-z0-9+/_-]{32,}={0,2}/g];
-export const redactTokens = (text) => TOKEN_PATTERNS.reduce((out, re) => out.replace(re, "[redacted]"), text);
+// redactTokens (every token pattern, the audit file uses it) lives in chat.js with scrubSecrets; re-exported here.
+export { redactTokens };
 
 // What arrived through Telegram, so the owner can see what was approved there: who, when, what.
 // Merge confirmations and cancellations name the pull request. Text is scrubbed of secrets and capped.
@@ -142,7 +140,8 @@ function allowedRequest(req, hosts, scheme = "http") {
 }
 
 async function reply(res, text, voice, speak, gate, sessionId, phone = false) {
-  const out = { reply: text, confirm: phone ? null : gate.describe(sessionId) };
+  text = scrubSecrets(text);
+  const out = { reply: text, confirm: phone ? null : scrubDeep(gate.describe(sessionId)) };
   if (voice === true) {
     try {
       Object.assign(out, await speak(spokenForm(text)));
@@ -271,6 +270,7 @@ async function handleChatStream(req, res, { chat, speak, gate, phone, firstWaitM
   let spoken = false;
   let lastSaid = Date.now();
   const say = (type, text) => {
+    text = scrubSecrets(text);
     lastSaid = Date.now();
     if (type === "sentence") spoken = true;
     order = order.then(async () => {
@@ -288,7 +288,7 @@ async function handleChatStream(req, res, { chat, speak, gate, phone, firstWaitM
   };
   const finish = async (reply) => {
     await order;
-    emit({ type: "done", reply, confirm: phone ? null : gate.describe(sessionId) });
+    emit({ type: "done", reply: scrubSecrets(reply), confirm: phone ? null : scrubDeep(gate.describe(sessionId)) });
     res.end();
   };
 
@@ -409,10 +409,14 @@ async function handleLogin(req, res, access) {
 // What the city says unprompted (questions, results) reaches every open HUD as server-sent events,
 // and so does everything that moves in the city (hires, tickets, questions, reviews, cost) for the City View.
 // Agents write free text (goals, summaries, questions) and the HUD shows it, so every string leaving for the HUD is scrubbed here.
-export function scrubDeep(value) {
-  if (typeof value === "string") return scrubSecrets(value);
-  if (Array.isArray(value)) return value.map(scrubDeep);
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, scrubDeep(v)]));
+// Free text gets every token pattern, including "long random string". Fields that are identifiers or links
+// (a merge confirmation's UUID, repo, url, commit) look random by design and must reach the HUD intact, so they
+// only get the specific patterns.
+const IDENTIFIER_KEY = /^(id|url|repo|head|sessionId|.*_id|.*Id|.*_at|.*_path)$/;
+export function scrubDeep(value, key = "") {
+  if (typeof value === "string") return IDENTIFIER_KEY.test(key) ? scrubSecrets(value) : redactTokens(scrubSecrets(value));
+  if (Array.isArray(value)) return value.map((v) => scrubDeep(v, key));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, scrubDeep(v, k)]));
   return value;
 }
 
@@ -602,7 +606,7 @@ export function createServer({ booqyDir, dataDir, port, getState, chat, speak = 
     if (req.method === "GET" && path === "/api/confirm/pending") {
       const sessionId = new URL(req.url, "http://localhost").searchParams.get("sessionId");
       if (typeof sessionId !== "string" || !SESSION_ID.test(sessionId)) return sendJson(res, 400, { error: "bad sessionId" });
-      return sendJson(res, 200, { confirm: phone ? null : mergeGate.describe(sessionId) });
+      return sendJson(res, 200, scrubDeep({ confirm: phone ? null : mergeGate.describe(sessionId) }));
     }
     if (req.method === "POST" && path === "/api/confirm") return await handleConfirm(req, res, { gate: mergeGate, speak });
     if (req.method === "POST" && path === "/api/listen") return await handleListen(req, res, { transcribe: hear });
