@@ -1,12 +1,15 @@
 // The city with a scripted runner in place of the Agent SDK: no network, no credentials.
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { loadPolicy } from "../src/policy.ts";
 import { createCity, type CityEvent } from "../src/runtime.ts";
 import type { Runner, TurnRequest } from "../src/sdk.ts";
+// A real session's total_cost_usd is cumulative; the fakes mimic that.
+const totals = new Map<string, number>();
+const cum = (id: string) => { const v = (totals.get(id) ?? 0) + 0.01; totals.set(id, v); return v; };
 
 type Script = Record<string, (req: TurnRequest) => Promise<string | void> | string | void>;
 const use = (req: TurnRequest, name: string, args: Record<string, unknown>) => req.tools.find((t) => t.name === name)!.handler(args);
@@ -16,7 +19,7 @@ function fakeRunner(script: Script) {
   const runner: Runner = async (req) => {
     calls.push(req);
     const text = (await script[req.agentId]?.(req)) ?? "";
-    return { text, sessionId: `s-${req.agentId}`, costUsd: 0.01 };
+    return { text, sessionId: `s-${req.agentId}`, costUsd: cum(req.agentId) };
   };
   return { runner, calls };
 }
@@ -172,15 +175,16 @@ test("a question the manager can answer never reaches the owner; one it cannot d
   const ticket = city.ledger.getTicket(city.sendTicket({ to: "orchestrator", goal: "app" }).id)!;
   await city.idle();
   const ask = city.toolsFor("ios-dev").find((t) => t.name === "ask_user")!.handler;
-  const q1 = await ask({ question: { ticket_id: ticket.id, questions: [{ text: "Core Data or SwiftData?", default: "SwiftData" }] } }) as { answered_by?: string; answer?: string };
+  await ask({ question: { ticket_id: ticket.id, questions: [{ text: "Core Data or SwiftData?", default: "SwiftData" }] } });
   await city.idle();
-  assert.equal(q1.answered_by, "app-manager");
+  assert.ok(events.some((e) => e.type === "question.answered" && e.answered_by === "app-manager"));
   assert.equal(events.filter((e) => e.type === "question").length, 0, "the owner was never asked");
   const toDev = calls.filter((c) => c.agentId === "ios-dev");
   assert.equal(toDev.length, 1);
   assert.match(toDev[0].prompt, /direct instruction from app-manager.*Answer to your question \(q-[0-9a-f]+\): Use SwiftData\./);
 
   managerReply = '{"escalate": true}';
+  city.ledger.updateTicket(ticket.id, { status: "in_progress" }); // the fake model did not report, so the first turn had dropped it
   const q2 = await ask({ question: { ticket_id: ticket.id, blocking: true, questions: [{ text: "Ship to TestFlight?", default: "no", options: ["yes", "no"] }] } }) as { id: string };
   await city.idle();
   const asked = events.filter((e) => e.type === "question");
@@ -323,6 +327,7 @@ test("a PR that fails max_review_rounds times reaches the owner as a question, w
   const r2 = await review({ ticket_id: t.id, artifact: "diff" }) as Record<string, any>;
   assert.equal(r2.round, 2);
   assert.equal(events.filter((e) => e.type === "question").length, 0);
+  city.ledger.updateTicket(t.id, { status: "in_progress" }); // the fake model did not report, so earlier turns had dropped it
   const r3 = await review({ ticket_id: t.id, artifact: "diff" }) as Record<string, any>;
   await city.idle();
   assert.equal(r3.escalated, true);
@@ -502,6 +507,7 @@ test("spend_approval: only the orchestrator can send one, to Jarvis, valid for a
   city.answer("q-own", "yes");
   assert.equal(city.ledger.getQuestion("q-own")!.answered_by, "owner");
   assert.equal((await send("orchestrator", { ...base, approval: approval({ question_id: "q-own" }) })).status, "done");
+  await city.idle(); // the relayed direct_instruction dispatched a turn; let it finish before the db closes
   city.close();
 });
 
