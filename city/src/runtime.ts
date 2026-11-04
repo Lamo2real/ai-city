@@ -61,6 +61,7 @@ const CORE: Array<{ name: "jarvis" | "orchestrator" | "secretary" | "reviewer"; 
   { name: "reviewer", parent: "orchestrator" },
 ];
 const SPEND_APPROVAL_MAX_MS = 30 * 60 * 1000;
+const OWNER_ONLY_MSG = "spend approvals need the owner's own answer (HUD/phone), not a relay";
 const OWNER_SIDE = new Set(["owner", "jarvis"]);
 const TERMINAL = new Set<Ticket["status"]>(["done", "failed", "cancelled"]);
 const newId = (prefix: string) => `${prefix}-${randomUUID().slice(0, 8)}`;
@@ -233,7 +234,9 @@ export function createCity(opts: CityOptions) {
     const q = a.question_id ? ledger.getQuestion(a.question_id) : undefined;
     if (!q) throw new Error("approval.question_id must name a question the orchestrator asked the owner");
     if (q.question.asked_by !== "orchestrator") throw new Error("approval.question_id must be a question the orchestrator asked");
-    if (q.status !== "answered" || !q.answered_by || !OWNER_SIDE.has(q.answered_by)) throw new Error("that question was not answered by the owner");
+    if (q.status !== "answered" || !q.answered_by) throw new Error("that question was not answered by the owner");
+    // Jarvis browses the shop, so it must not approve its own purchase: only the owner's direct answer (HUD, phone, answer API) counts.
+    if (q.answered_by !== "owner") throw new Error(OWNER_ONLY_MSG);
     const answeredAt = Date.parse(q.answered_at ?? "");
     if (!Number.isFinite(answeredAt) || Date.parse(now()) - answeredAt > SPEND_APPROVAL_MAX_MS || answeredAt > Date.parse(now()) + 60_000) throw new Error("the owner's answer is older than 30 minutes; ask again");
     const text = q.question.questions.map((x) => x.text).join(" ");
@@ -261,7 +264,7 @@ export function createCity(opts: CityOptions) {
     if (ticket.kind === "direct_instruction" && OWNER_SIDE.has(ticket.from)) {
       // The owner's reply, relayed by Jarvis, is the answer to what that agent asked.
       for (const q of ledger.openQuestions().filter((o) => o.question.asked_by === ticket.to)) {
-        ledger.answerQuestion(q.id, ticket.goal, ticket.from, now());
+        ledger.answerQuestion(q.id, ticket.goal, from, now()); // the real caller, not the `from` a tool call put in the draft
         emit({ type: "question.answered", id: q.id, answer: ticket.goal, answered_by: ticket.from, ticket_id: q.question.ticket_id });
         const t = ledger.getTicket(q.question.ticket_id);
         if (t?.status === "waiting_on_owner") setStatus(t.id, "in_progress");

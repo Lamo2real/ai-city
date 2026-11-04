@@ -455,15 +455,24 @@ test("spend_approval: only the orchestrator can send one, to Jarvis, valid for a
   // the owner must have said yes
   await assert.rejects(send("orchestrator", { ...base, approval: approval({ question_id: undefined }) }), /question_id/);
   await assert.rejects(send("orchestrator", { ...base, approval: approval({ question_id: "q-nope" }) }), /must name a question/);
-  await assert.rejects(send("orchestrator", { ...base, approval: approval({ question_id: asked("yes", { by: "ios-manager" }) }) }), /not answered by the owner/);
+  await assert.rejects(send("orchestrator", { ...base, approval: approval({ question_id: asked("yes", { by: "ios-manager" }) }) }), /owner's own answer/);
   await assert.rejects(send("orchestrator", { ...base, approval: approval({ question_id: asked("yes", { asker: "py-dev" }) }) }), /orchestrator asked/);
   await assert.rejects(send("orchestrator", { ...base, approval: approval({ question_id: asked("yes", { ago: 31 }) }) }), /older than 30 minutes/);
   await assert.rejects(send("orchestrator", { ...base, approval: approval({ question_id: asked("yes", { text: "Buy at https://other.test, up to 49.9 EUR?" }) }) }), /same origin and max_amount/);
   await assert.rejects(send("orchestrator", { ...base, approval: approval({ question_id: asked("yes", { text: "Buy at https://shop.test, up to 500 EUR?" }) }) }), /same origin and max_amount/);
   await assert.rejects(send("orchestrator", { ...base, approval: approval({ question_id: asked("no") }) }), /not a yes/);
   await assert.rejects(send("orchestrator", { ...base, approval: approval({ question_id: asked("yes, but not now") }) }), /not a yes/);
-  const relayed = await send("orchestrator", { ...base, approval: approval({ question_id: asked("Yes, go ahead", { by: "jarvis" }) }) });
-  assert.equal(relayed.status, "done");
+  await assert.rejects(send("orchestrator", { ...base, approval: approval({ question_id: asked("Yes, go ahead", { by: "jarvis" }) }) }), /spend approvals need the owner's own answer \(HUD\/phone\), not a relay/);
+  // Jarvis relaying a "yes" through send_ticket is recorded as jarvis, even if it claims from: owner
+  city.ledger.putQuestion({ id: "q-relay", status: "open", created_at: inMin(0), question: { ticket_id: "t-x", asked_by: "orchestrator", path: "orchestrator", questions: [{ text: "Buy at https://shop.test, up to 49.9 EUR?", default: "no" }] } } as never);
+  await send("jarvis", { to: "orchestrator", kind: "direct_instruction", from: "owner", goal: "yes" });
+  assert.equal(city.ledger.getQuestion("q-relay")!.answered_by, "jarvis");
+  await assert.rejects(send("orchestrator", { ...base, approval: approval({ question_id: "q-relay" }) }), /not a relay/);
+  // the owner's own answer through the answer API is accepted
+  city.ledger.putQuestion({ id: "q-own", status: "open", created_at: inMin(0), question: { ticket_id: "t-x", asked_by: "orchestrator", path: "orchestrator", questions: [{ text: "Buy at https://shop.test, up to 49.9 EUR?", default: "no" }] } } as never);
+  city.answer("q-own", "yes");
+  assert.equal(city.ledger.getQuestion("q-own")!.answered_by, "owner");
+  assert.equal((await send("orchestrator", { ...base, approval: approval({ question_id: "q-own" }) })).status, "done");
   city.close();
 });
 
