@@ -1,8 +1,9 @@
 // Events in, scene state out: the City View's reducer and panel mappings, with no DOM and no three.js.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agentRows, ageText, applyLive, checkText, courierFor, departmentNames, estUsd, gateStatus, inboxItems, integrationGroups, limits, parkedRows, relTime, ticketGroups, traceLines, workforceGroups, agentPanel, agentStatus, applySnapshot, departmentPanel, initialState, layout, propFor, reduce, topBar } from "../hud/city-state.js";
-import { cityEvent, cityIntegrations, cityParked, citySnapshot, cityTrace, cityWorkforce } from "./fixtures/city.js";
+import { readFileSync } from "node:fs";
+import { RETIRED_SHOWN, TILE, VISUALS, assignSlots, cityMessage, doingWords, homeSpot, identity, placement, residents, seatSpot, visitAllowed, visualState, walkRoute, agentRows, ageText, applyLive, checkText, courierFor, departmentNames, estUsd, gateStatus, inboxItems, integrationGroups, limits, parkedRows, relTime, ticketGroups, traceLines, workforceGroups, agentPanel, agentStatus, applySnapshot, departmentPanel, initialState, layout, propFor, reduce, topBar } from "../hud/city-state.js";
+import { cityBusy, cityEmpty, cityEvent, cityIntegrations, cityParked, citySnapshot, cityTrace, cityWorkforce } from "./fixtures/city.js";
 
 const T0 = 1_000_000;
 const agent = (id, kind, department, parent = "orchestrator", model = "claude-sonnet-5-5", extra = {}) => ({ id, role: id, kind, department, parent, model, tools: [], lifecycle: "persistent", state: "active", created_at: "", last_active_at: "", total_cost_usd: 0.5, ...extra });
@@ -59,11 +60,13 @@ test("questions wait in the inbox until answered; usage follows cost updates", (
   assert.deepEqual(s.costs["ios-dev"], { usd: 0.03, tokens: 2000 });
 });
 
-test("a snapshot seeds the city without construction animations; HQ sits in the centre with departments around it", () => {
+test("a snapshot seeds the city without construction animations; HQ stands apart and departments get plots in the order they appeared", () => {
   const s = applySnapshot(initialState(T0), { agents: [agent("jarvis", "core", undefined, "owner", "claude-haiku-5-5"), agent("orchestrator", "core", undefined, "jarvis", "claude-opus-5-5"), agent("it-manager", "manager", "IT"), agent("app-manager", "manager", "App")], tickets: [ticket("t1", "it-manager", "in_progress")], questions: [], usage: { usd: 1, tokens: 10, turns: 2 }, spend: { IT: 0.5 } }, T0);
   const l = layout(s);
-  assert.deepEqual(l.hq, { dept: "HQ", x: 0, z: 0, color: "#3b82ff" });
-  assert.deepEqual(l.buildings.map((b) => [b.dept, b.x, b.z]), [["IT", 14, 0], ["App", -14, 0]]);
+  assert.equal(l.hq.dept, "HQ");
+  assert.deepEqual(l.buildings.map((b) => b.dept), ["IT", "App"]);
+  assert.equal(l.buildings[0].y, l.buildings[1].y, "side by side");
+  assert.ok(l.buildings[0].x > l.hq.x + l.hq.w && l.buildings[1].x > l.buildings[0].x + l.buildings[0].w);
   assert.ok(l.buildings.every((b) => b.builtAt < T0), "no construction animation for what already exists");
   assert.deepEqual(topBar(s), { agentsTotal: 2, agentsActive: 2, ticketsRunning: 1, questionsWaiting: 0, usage: { usd: 1, tokens: 10, turns: 2 } });
 });
@@ -372,4 +375,187 @@ test("the panels' readers: workforce groups, what an integration checked, a tick
     "ios-dev failed, retrying: overloaded", "App Manager › iOS Developer asked: SwiftData?",
   ], "the question is told once");
   assert.deepEqual(traceLines(undefined), []);
+});
+
+// ---------- The game: who is where ----------
+const worker = (id, extra = {}) => agent(id, "worker", "App", "app-manager", "claude-sonnet-5-5", { worker_state: "hired", ...extra });
+const seed = (agents, tickets = []) => applySnapshot(initialState(T0), { agents, tickets, departments: [{ name: "App", key: "app", state: "active", created_at: new Date(T0 - 1000).toISOString() }] }, T0);
+const event = (status, previous = null) => ({ type: "ticket.status", ticket: { id: "t9", from: "app-manager", to: "w", kind: "task", goal: "Do it", status, created_at: "", updated_at: "" }, previous });
+
+test("placement: core is at HQ, always; a hired worker is at its station", () => {
+  const s = seed([agent("jarvis", "core"), agent("reviewer", "core"), worker("w")]);
+  assert.equal(placement(s, "jarvis").place, "hq");
+  assert.equal(placement(s, "reviewer").place, "hq");
+  assert.deepEqual(placement(s, "w"), { place: "station", dept: "App", why: "hired" });
+  assert.equal(placement(s, "nobody"), null);
+});
+
+test("placement: a manager with no open work is home; a ticket calls it in; it goes home when the ticket ends", () => {
+  let s = seed([agent("mgr", "manager", "App")]);
+  assert.equal(placement(s, "mgr").place, "home");
+  const t = (status, previous) => ({ type: "ticket.status", ticket: { id: "t1", from: "orchestrator", to: "mgr", kind: "task", goal: "Lead", status, created_at: "", updated_at: "" }, previous });
+  s = reduce(s, t("open", null), T0 + 1);
+  assert.deepEqual(placement(s, "mgr"), { place: "station", dept: "App", why: "ticket" });
+  s = reduce(s, t("done", "in_progress"), T0 + 2);
+  assert.equal(placement(s, "mgr").place, "home");
+});
+
+test("placement: a manager stays while the tickets it sent are open", () => {
+  let s = seed([agent("app-manager", "manager", "App"), worker("w")]);
+  s = reduce(s, event("open"), T0 + 1);
+  assert.equal(placement(s, "app-manager").why, "ticket");
+  s = reduce(s, event("done", "in_progress"), T0 + 2);
+  assert.equal(placement(s, "app-manager").place, "home");
+});
+
+test("placement: released with a branch unmerged stays at the desk showing it; merged, it goes home", () => {
+  let s = seed([worker("w")]);
+  s = reduce(s, { type: "worker.merge_waiting", id: "w", branch: "feat/x" }, T0 + 1);
+  s = reduce(s, { type: "worker.state", id: "w", state: "released", previous: "completed" }, T0 + 2);
+  s = reduce(s, { type: "agent.retired", id: "w" }, T0 + 3);
+  assert.deepEqual(placement(s, "w"), { place: "station", dept: "App", why: "merge" });
+  assert.equal(visualState(s, "w", T0 + 3), "waiting_merge");
+  assert.equal(s.agents.w.awaiting_merge.branch, "feat/x");
+  s = reduce(s, { type: "worker.merged", id: "w", branch: "feat/x" }, T0 + 4);
+  assert.deepEqual(placement(s, "w"), { place: "home", dept: "App", why: "released" });
+  assert.equal(visualState(s, "w", T0 + 4), "idle");
+  assert.match(s.feed[0].text, /feat\/x is settled/);
+});
+
+test("placement: released with nothing to merge goes home, and a new ticket calls it back from there", () => {
+  let s = seed([worker("w", { state: "retired", worker_state: "released" })]);
+  assert.equal(placement(s, "w").place, "home");
+  s = reduce(s, event("open"), T0 + 1);
+  assert.equal(placement(s, "w").place, "station", "the real ticket event is what moves it");
+  s = reduce(s, { type: "agent.hired", revived: true, agent: { ...s.agents.w, state: "active", worker_state: "hired" } }, T0 + 2);
+  s = reduce(s, event("done", "in_review"), T0 + 3);
+  assert.equal(placement(s, "w").why, "hired", "hired and not released holds the desk");
+  s = reduce(s, { type: "worker.state", id: "w", state: "released", previous: "completed" }, T0 + 4);
+  assert.equal(placement(s, "w").place, "home");
+});
+
+test("placement: a parked ticket keeps nobody at a desk", () => {
+  let s = seed([agent("mgr", "manager", "App")]);
+  s = reduce(s, { type: "ticket.status", ticket: { id: "t1", from: "orchestrator", to: "mgr", goal: "x", status: "parked" }, previous: "open" }, T0 + 1);
+  assert.equal(placement(s, "mgr").place, "home");
+});
+
+test("visualState: agent.activity drives the mark; every activity the runtime can report has one", () => {
+  let s = seed([worker("w", { worker_state: "working" })], [ticket("t1", "w", "in_progress")]);
+  assert.equal(visualState(s, "w", T0), "working", "no activity yet: from the ticket");
+  const source = readFileSync(new URL("../../city/src/runtime.ts", import.meta.url), "utf8");
+  const words = source.match(/export type Activity = ([^;]+);/)[1].match(/"(\w+)"/g).map((w) => w.slice(1, -1));
+  assert.ok(words.length >= 19);
+  for (const word of words) {
+    assert.ok(VISUALS[word], word);
+    s = reduce(s, { type: "agent.activity", id: "w", activity: word, detail: "", ticket_id: "t1", at: "" }, T0 + 1);
+    assert.equal(visualState(s, "w", T0 + 1), word === "idle" ? "working" : word, word);
+  }
+  s = reduce(s, { type: "agent.activity", id: "w", activity: "something_new", detail: "", ticket_id: "t1", at: "" }, T0 + 2);
+  assert.equal(visualState(s, "w", T0 + 2), "working", "a word this HUD does not know still draws");
+});
+
+test("visualState: lifecycle marks win over the activity; the owner's question is loudest of the living; a paused city types nothing", () => {
+  const busy = (extra) => seed([worker("w", extra)], [ticket("t1", "w", "in_progress")]);
+  const coding = (s) => reduce(s, { type: "agent.activity", id: "w", activity: "coding", detail: "a.ts", ticket_id: "t1", at: "" }, T0);
+  assert.equal(visualState(coding(busy({ worker_state: "failed" })), "w", T0), "failed");
+  assert.equal(visualState(coding(busy({ worker_state: "blocked" })), "w", T0), "blocked");
+  assert.equal(visualState(coding(busy({ worker_state: "paused" })), "w", T0), "paused");
+  assert.equal(visualState(coding(busy({ worker_state: "working" })), "w", T0), "coding");
+  let s = reduce(coding(busy({ worker_state: "blocked" })), { type: "question.asked", id: "q", ticket_id: "t1", question: { asked_by: "w", path: "w", questions: [{ text: "?" }] } }, T0);
+  assert.equal(visualState(s, "w", T0), "waiting_owner");
+  s = coding(busy({ worker_state: "working" }));
+  s = reduce(s, { type: "city.paused", until: new Date(T0 + 60000).toISOString(), reason: "limit" }, T0);
+  assert.equal(visualState(s, "w", T0), "paused");
+  assert.equal(visualState(s, "w", T0 + 120000), "coding", "a reset in the past is no pause");
+  assert.equal(doingWords("coding", "a.ts"), "Writing code: a.ts");
+  assert.equal(doingWords("idle"), "Nothing right now.");
+  assert.equal(visualState(seed([worker("w", { state: "retired", worker_state: "released" })]), "w", T0), "idle", "home is off work");
+});
+
+test("the snapshot carries activities, and a whole busy city gets every mark", () => {
+  const s = applySnapshot(initialState(T0), cityBusy(T0), T0);
+  assert.equal(s.activities["ios-dev"].detail, "Sources/Habit.swift");
+  const shown = new Set(Object.keys(s.agents).map((id) => visualState(s, id, T0)));
+  for (const k of ["coding", "reading", "researching", "browsing", "running", "working", "hiring", "delegating", "asking", "answering", "reporting", "reviewing", "in_review", "summarizing", "remembering", "waiting_team", "waiting_owner", "waiting_merge", "failed", "blocked", "paused", "understanding", "idle"]) assert.ok(shown.has(k), k);
+});
+
+test("seats and houses are kept once given; a newcomer takes the lowest free one", () => {
+  const a = assignSlots(["b", "a", "c"]);
+  assert.deepEqual([a.get("a"), a.get("b"), a.get("c")], [0, 1, 2]);
+  const b = assignSlots(["c", "d"], a);
+  assert.equal(b.get("c"), 2, "c did not move when a and b left");
+  assert.equal(b.get("d"), 0);
+  assert.equal(b.has("a"), false);
+});
+
+test("only the latest released workers stand in the neighbourhood; the rest are counted", () => {
+  const old = Array.from({ length: RETIRED_SHOWN + 3 }, (_, i) => worker(`old${i}`, { state: "retired", worker_state: "released", last_active_at: new Date(T0 + i * 1000).toISOString() }));
+  const s = seed([agent("jarvis", "core"), worker("live"), ...old]);
+  const r = residents(s);
+  assert.equal(r.hidden, 3);
+  assert.ok(r.ids.includes("live") && r.ids.includes(`old${RETIRED_SHOWN + 2}`));
+  assert.ok(!r.ids.includes("old0") && !r.ids.includes("jarvis"));
+});
+
+test("an agent's look comes from its id alone", () => {
+  assert.deepEqual(identity("ios-dev"), identity("ios-dev"));
+  assert.notDeepEqual(identity("ios-dev"), identity("py-dev"));
+});
+
+test("the map fits any number of departments with no two plots on one spot, and stays wider than tall", () => {
+  for (const n of [0, 1, 2, 4, 5, 9, 12, 20]) {
+    const departments = Array.from({ length: n }, (_, i) => ({ name: `D${i}`, key: `d${i}`, state: "active", created_at: new Date(T0 - 100000 + i).toISOString() }));
+    const s = applySnapshot(initialState(T0), { agents: [], tickets: [], departments }, T0);
+    for (const portrait of [false, true]) {
+      const w = layout(s, { portrait, houses: 8 });
+      assert.equal(w.buildings.length, n, `${n}`);
+      const all = [w.hq, ...w.buildings, ...w.lots, ...w.homes.houses.map((h) => ({ ...h, w: 3, h: 4 }))];
+      for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) {
+        const a = all[i], b = all[j];
+        assert.ok(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y, `n=${n} portrait=${portrait}: ${JSON.stringify(a)} overlaps ${JSON.stringify(b)}`);
+      }
+      for (const b of all) assert.ok(b.x >= 0 && b.x + b.w <= w.width && b.y + b.h <= w.height, `n=${n}: inside the map`);
+      if (!portrait && n <= 12) assert.ok(w.width >= w.height * 0.9, `n=${n}: ${w.width}x${w.height}`);
+    }
+  }
+});
+
+test("a crowded department gets a deeper terrace, and every seat lands on its own plot", () => {
+  const s = seed([]);
+  const roomy = layout(s).buildings[0], crowded = layout(s, { seats: { App: 13 } }).buildings[0];
+  assert.ok(crowded.h > roomy.h);
+  const spots = Array.from({ length: 13 }, (_, i) => seatSpot(crowded, i));
+  assert.equal(new Set(spots.map((p) => `${p.x},${p.y}`)).size, 13);
+  for (const p of spots) assert.ok(p.x > crowded.x * TILE && p.x < (crowded.x + crowded.w) * TILE && p.y < (crowded.y + crowded.h) * TILE, JSON.stringify(p));
+});
+
+test("someone working in a department the registry no longer lists still has an office", () => {
+  const s = seed([]);
+  assert.ok(layout(s, { seats: { Ghost: 1 } }).buildings.some((b) => b.dept === "Ghost"));
+});
+
+test("a walk home keeps to the streets and ends at the door", () => {
+  const s = seed([]);
+  const w = layout(s, { houses: 8 });
+  const from = seatSpot(w.buildings[0], 2), to = homeSpot(w, 5);
+  const route = walkRoute(w, from, to);
+  assert.deepEqual(route.at(-1), to);
+  const lanes = new Set(w.streets.map((st) => (st.y + 1.5) * TILE));
+  assert.ok(lanes.has(route[0].y), "first to a street");
+  assert.equal(route[0].x, from.x, "straight down off the terrace");
+  assert.equal(route[1].x, (w.avenue + 1.5) * TILE, "then along to the avenue");
+});
+
+test("Jarvis's repeated status calls are one visit; never a visit to itself", () => {
+  assert.equal(visitAllowed(0, 5000, "w"), true);
+  assert.equal(visitAllowed(4500, 5000, "w"), false);
+  assert.equal(visitAllowed(4000, 5000, "w"), true);
+  assert.equal(visitAllowed(0, 5000, "jarvis"), false);
+});
+
+test("the map says what is true when it is empty", () => {
+  assert.match(cityMessage(applySnapshot(initialState(T0), cityEmpty(T0), T0)), /No departments yet/);
+  assert.match(cityMessage(seed([agent("mgr", "manager", "App")])), /Nobody is at a desk/);
+  assert.equal(cityMessage(applySnapshot(initialState(T0), cityBusy(T0), T0)), null);
 });

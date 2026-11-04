@@ -18,7 +18,7 @@ export const estUsd = (v, digits = 2) => (v === null || v === undefined || Numbe
 const RECENT_MS = { done: 6000, review_fail: 20000, hired: 4000, retired: 4000 };
 
 export function initialState(now = Date.now()) {
-  return { agents: {}, tickets: {}, questions: {}, departments: {}, reviews: {}, costs: {}, usage: null, spend: {}, caps: null, parked: {}, city: null, feed: [], recent: {}, now };
+  return { agents: {}, activities: {}, tickets: {}, questions: {}, departments: {}, reviews: {}, costs: {}, usage: null, spend: {}, caps: null, parked: {}, city: null, feed: [], recent: {}, now };
 }
 
 export const deptOf = (agent) => (agent.id === "jarvis" || CORE.has(agent.id) ? "HQ" : agent.department || "other");
@@ -58,6 +58,7 @@ export function applySnapshot(state, snap, now = Date.now()) {
     next.agents[a.id] = filed(next.departments, a);
     if (!listed) next.departments = touch(next, deptOf(a), now - 60000);
   }
+  next.activities = snap.activities ?? {};
   for (const t of snap.tickets ?? []) next.tickets[t.id] = t;
   for (const t of snap.parked ?? []) next.parked[t.id] = t;
   next.city = snap.city ?? null;
@@ -131,6 +132,22 @@ export function reduce(state, event, now = Date.now()) {
       const kind = WORKER_LINE[event.state];
       return { ...state, now, agents: { ...state.agents, [a.id]: { ...a, worker_state: event.state } }, feed: kind ? feed(state, `${a.id}: ${event.previous ?? "new"} → ${event.state}`, kind, now) : state.feed };
     }
+    case "agent.activity": {
+      const { id, activity, detail, ticket_id, at } = event;
+      return { ...state, now, activities: { ...state.activities, [id]: { activity, detail, ticket_id, at } } };
+    }
+    case "worker.merge_waiting": {
+      const a = state.agents[event.id];
+      if (!a) return state;
+      return { ...state, now, agents: { ...state.agents, [a.id]: { ...a, awaiting_merge: { branch: event.branch, since: new Date(now).toISOString() } } }, feed: feed(state, `${a.id} stays at its desk until ${event.branch} is merged`, "worker", now) };
+    }
+    case "worker.merged": {
+      const a = state.agents[event.id];
+      if (!a) return state;
+      return { ...state, now, agents: { ...state.agents, [a.id]: { ...a, awaiting_merge: null } }, feed: feed(state, `${event.branch} is settled; ${a.id} can leave its desk`, "done", now) };
+    }
+    case "jarvis.visit":
+      return { ...state, now, feed: feed(state, `Jarvis ${event.kind === "ask" ? "asks" : "checks in with"} ${event.to}`, "worker", now) };
     case "department.created":
     case "department.updated": {
       const d = event.department;
@@ -178,20 +195,182 @@ export function agentStatus(state, id, now = state.now) {
   return "idle";
 }
 
-// HQ in the centre, one building per department on a ring around it, in the order they appeared.
 export const departmentNames = (state) => Object.values(state.departments).sort((a, b) => a.builtAt - b.builtAt).map((d) => d.name);
 
-// An archived department keeps its slot, so a building never lands on another; it just isn't drawn.
-export function layout(state) {
-  const names = departmentNames(state);
-  const ring = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1], [2, 0], [-2, 0], [0, 2], [0, -2]];
-  const buildings = names.map((name, i) => {
-    const [gx, gz] = ring[i % ring.length];
-    const r = 1 + Math.floor(i / ring.length);
-    return { dept: name, x: gx * 14 * r, z: gz * 14 * r, color: deptColor(name), builtAt: state.departments[name].builtAt, archived: state.departments[name].state === "archived" };
-  });
-  return { hq: { dept: "HQ", x: 0, z: 0, color: DEPT_COLOR.HQ }, buildings };
+// ---------- Where each agent is. The whole game follows from these few rules. ----------
+const hasOpenWork = (state, id) => Object.values(state.tickets).some((t) => t.to === id || t.from === id);
+
+// Core: HQ. Anyone else is at its station while it has open work, is hired and not released, or waits for a merge. Otherwise home.
+// `state.tickets` holds only open tickets: a parked one does nothing until the owner decides, so it keeps nobody at a desk.
+export function placement(state, id) {
+  const a = state.agents[id];
+  if (!a) return null;
+  if (a.kind === "core" || CORE.has(id)) return { place: "hq", dept: "HQ", why: "core" };
+  const dept = deptOf(a);
+  if (hasOpenWork(state, id)) return { place: "station", dept, why: "ticket" };
+  if (a.awaiting_merge) return { place: "station", dept, why: "merge" };
+  if (a.kind === "worker" && a.state !== "retired" && a.worker_state !== "released") return { place: "station", dept, why: "hired" };
+  return { place: "home", dept, why: a.state === "retired" ? "released" : "off work" };
 }
+
+// What the figure shows: a key of VISUALS, one for every activity the runtime reports and every lifecycle mark.
+export function visualState(state, id, now = Date.now()) {
+  const a = state.agents[id], where = placement(state, id);
+  if (!a || where.place === "home") return "idle";
+  const mine = Object.values(state.tickets).filter((t) => t.to === id);
+  const worker = a.kind === "worker" ? a.worker_state : null;
+  const activity = state.activities[id]?.activity;
+  if (worker === "failed") return "failed";
+  if (mine.some((t) => t.status === "waiting_on_owner") || activity === "waiting_owner" || Object.values(state.questions).some((q) => q.question?.asked_by === id)) return "waiting_owner";
+  if (worker === "blocked") return "blocked";
+  if (worker === "paused") return "paused";
+  if (where.why === "merge") return "waiting_merge";
+  if (activity && activity !== "idle") return gateStatus(state, now).paused ? "paused" : VISUALS[activity] ? activity : "working"; // a paused city's turns wait, nobody is typing
+  if (worker === "review" || mine.some((t) => t.status === "in_review")) return "in_review";
+  if (mine.length) return "working";
+  return Object.values(state.tickets).some((t) => t.from === id) ? "waiting_team" : "idle";
+}
+
+// words: what the panel says in plain language. pose: which body animation.
+export const VISUALS = {
+  understanding: { label: "Understanding", words: "Working out what is being asked", pose: "think" },
+  reading: { label: "Reading", words: "Reading a file", pose: "read" },
+  researching: { label: "Researching", words: "Looking things up", pose: "read" },
+  browsing: { label: "Browsing", words: "Using a browser", pose: "tablet" },
+  coding: { label: "Coding", words: "Writing code", pose: "type" },
+  running: { label: "Running", words: "Running a command", pose: "type" },
+  working: { label: "Working", words: "Working on its task", pose: "type" },
+  hiring: { label: "Hiring", words: "Hiring someone", pose: "wave" },
+  delegating: { label: "Delegating", words: "Handing work to someone", pose: "point" },
+  asking: { label: "Asking", words: "Asking a question", pose: "raise" },
+  answering: { label: "Answering", words: "Answering a question", pose: "point" },
+  reporting: { label: "Reporting", words: "Reporting back", pose: "clipboard" },
+  reviewing: { label: "Reviewing", words: "Reviewing someone's work", pose: "magnify" },
+  in_review: { label: "In review", words: "Waiting for its work to be reviewed", pose: "wait" },
+  summarizing: { label: "Summarizing", words: "Writing a summary", pose: "clipboard" },
+  remembering: { label: "Remembering", words: "Saving something to memory", pose: "think" },
+  waiting_team: { label: "Waiting for the team", words: "Waiting for its team to finish", pose: "wait" },
+  waiting_owner: { label: "Needs you", words: "Waiting for your answer", pose: "alarm" },
+  waiting_merge: { label: "Waiting for a merge", words: "Done, and staying until the branch is merged", pose: "wait" },
+  failed: { label: "Failed", words: "Its last task failed", pose: "slump" },
+  blocked: { label: "Blocked", words: "Blocked and cannot go on", pose: "slump" },
+  paused: { label: "Paused", words: "Paused", pose: "still" },
+  idle: { label: "Idle", words: "Nothing right now", pose: "rest" },
+};
+
+// Plain words for the panel. The detail is agent text: the caller puts it in a text node.
+export function doingWords(key, detail = "") {
+  const words = (VISUALS[key] ?? VISUALS.working).words;
+  return detail ? `${words}: ${detail}` : `${words}.`;
+}
+
+// Everyone keeps a seat once given one; a newcomer takes the lowest free one. On a page load `previous` is empty.
+export function assignSlots(ids, previous = new Map()) {
+  const slots = new Map();
+  const taken = new Set();
+  for (const id of ids) if (previous.has(id)) { slots.set(id, previous.get(id)); taken.add(previous.get(id)); }
+  let next = 0;
+  for (const id of [...ids].sort()) {
+    if (slots.has(id)) continue;
+    while (taken.has(next)) next++;
+    slots.set(id, next);
+    taken.add(next);
+  }
+  return slots;
+}
+
+// A released worker stays home as history, but only the latest few stand in the neighbourhood; the rest are in Workforce.
+export const RETIRED_SHOWN = 24;
+export function residents(state) {
+  const all = Object.values(state.agents).filter((a) => !CORE.has(a.id) && a.kind !== "core");
+  const away = all.filter((a) => a.state === "retired" && placement(state, a.id).place === "home").sort((a, b) => (b.last_active_at ?? "").localeCompare(a.last_active_at ?? "") || a.id.localeCompare(b.id));
+  const hide = new Set(away.slice(RETIRED_SHOWN).map((a) => a.id));
+  return { ids: all.filter((a) => !hide.has(a.id)).map((a) => a.id), hidden: hide.size };
+}
+
+// A stable look from the id alone: the same figure on every load and every machine.
+export function hashOf(s) { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return h >>> 0; }
+export function identity(id) {
+  const h = hashOf(id);
+  return { skin: h % 6, hair: (h >>> 3) % 7, hairStyle: (h >>> 6) % 5, shirt: (h >>> 9) % 10, trousers: (h >>> 13) % 4 };
+}
+
+// ---------- The map, in tiles of 16 art pixels ----------
+export const TILE = 16;
+export const BUILDING_H = 5;
+const PLOT_W = 9, SEAT_PITCH = 40, SEATS_PER_ROW = 4, STREET = 3, HQ_W = 12, HQ_H = 11, HOUSES_PER_ROW = 4, HOUSE_W = 3, HOUSE_ROW_H = 4;
+
+// An archived department keeps its slot, so a building never lands on another; it isn't drawn unless work is still open there.
+// `seats` is { dept: the highest seat in use + 1 }, so a crowded row of offices gets a deeper terrace.
+export function layout(state, { portrait = false, seats = {}, houses = 0 } = {}) {
+  const names = departmentNames(state);
+  for (const d of Object.keys(seats)) if (d !== "HQ" && !names.includes(d)) names.push(d); // someone works in a department the registry no longer lists
+  const n = names.length;
+  const cols = portrait ? 2 : Math.max(2, n <= 4 ? 2 : Math.ceil(n / 3));
+  const rows = Math.max(2, Math.ceil(n / cols));
+  const originX = portrait ? 1 : 1 + HQ_W + STREET, width = originX + cols * PLOT_W + (cols - 1) * STREET + 1;
+  const hq = { dept: "HQ", x: portrait ? Math.round((width - HQ_W) / 2) : 1, y: 1, w: HQ_W, h: HQ_H, color: DEPT_COLOR.HQ };
+  const buildings = [], lots = [];
+  const avenueX = portrait ? originX + PLOT_W : 1 + HQ_W;
+  const streets = [portrait ? { y: 1 + HQ_H, x0: 0, x1: width } : { y: 1 + HQ_H, x0: 0, x1: avenueX }];
+  let y = portrait ? 1 + HQ_H + STREET : 1;
+  for (let r = 0; r < rows; r++) {
+    let most = 2 * SEATS_PER_ROW;
+    for (let c = 0; c < cols; c++) most = Math.max(most, seats[names[r * cols + c]] ?? 0);
+    const h = BUILDING_H + Math.ceil((Math.ceil(most / SEATS_PER_ROW) * SEAT_PITCH) / TILE);
+    for (let c = 0; c < cols; c++) {
+      const name = names[r * cols + c], x = originX + c * (PLOT_W + STREET);
+      if (!name) { lots.push({ x, y, w: PLOT_W, h }); continue; }
+      const reg = state.departments[name];
+      buildings.push({ dept: name, slot: r * cols + c, x, y, w: PLOT_W, h, color: deptColor(name), builtAt: reg?.builtAt ?? 0, archived: reg?.state === "archived" && !seats[name] });
+    }
+    y += h;
+    streets.push({ y, x0: portrait ? 0 : avenueX, x1: width });
+    y += STREET;
+  }
+  const officesEnd = y - STREET;
+  // Houses: under HQ on the wide map, under the offices on a phone. More than fit makes the neighbourhood run on below.
+  const homesY = portrait ? y : 1 + HQ_H + STREET;
+  const homesW = portrait ? width - 2 : HQ_W;
+  const perRow = portrait ? Math.floor(homesW / HOUSE_W) : HOUSES_PER_ROW;
+  const home = [];
+  for (let i = 0; i < houses; i++) home.push({ x: 1 + (i % perRow) * HOUSE_W, y: homesY + Math.floor(i / perRow) * HOUSE_ROW_H });
+  const homesH = Math.max(Math.ceil(houses / perRow) * HOUSE_ROW_H, portrait ? HOUSE_ROW_H : officesEnd - homesY);
+  return { hq, buildings, lots, streets, hqStreet: 1 + HQ_H, officesEnd, avenue: avenueX, width, height: Math.max(y, homesY + homesH + 1), homes: { x: 1, y: homesY, w: homesW, h: homesH, houses: home }, portrait };
+}
+
+// The art-pixel spot for a seat on a department's terrace: where the figure's feet are.
+export const seatRows = (building) => Math.floor(((building.h - BUILDING_H) * TILE) / SEAT_PITCH);
+export function seatSpot(building, seat) {
+  const r = Math.floor(seat / SEATS_PER_ROW), c = seat % SEATS_PER_ROW;
+  const pitch = (building.w * TILE - 8) / SEATS_PER_ROW;
+  return { x: building.x * TILE + 4 + Math.round(pitch * (c + 0.5)), y: (building.y + BUILDING_H) * TILE + r * SEAT_PITCH + 24 };
+}
+
+// Two spots in each house's front yard.
+export function homeSpot(world, slot) {
+  const h = world.homes.houses[Math.floor(slot / 2)];
+  return h ? { x: h.x * TILE + (slot % 2 ? 36 : 12), y: h.y * TILE + 58 } : null;
+}
+
+// An evening walk keeps to the streets: to the nearest street, along it to the avenue, along the avenue, and in.
+export function walkRoute(world, from, to) {
+  const lanes = [...world.streets.map((s) => (s.y + STREET / 2) * TILE), ...new Set(world.homes.houses.map((h) => h.y * TILE - 5))];
+  const nearest = (y) => lanes.reduce((best, l) => (Math.abs(l - y) < Math.abs(best - y) ? l : best), lanes[0] ?? y);
+  const ax = (world.avenue + STREET / 2) * TILE, a = nearest(from.y), b = nearest(to.y);
+  return a === b ? [{ x: from.x, y: a }, { x: to.x, y: a }, to] : [{ x: from.x, y: a }, { x: ax, y: a }, { x: ax, y: b }, { x: to.x, y: b }, to];
+}
+
+// What the map should say when it has nothing to show. Null when people and offices speak for themselves.
+export function cityMessage(state) {
+  const others = Object.keys(state.agents).filter((id) => !CORE.has(id));
+  if (!departmentNames(state).length) return "No departments yet. An office goes up the moment a prompt needs one.";
+  if (!others.some((id) => placement(state, id).place === "station")) return "Nobody is at a desk right now. Everyone is home or at HQ.";
+  return null;
+}
+
+// Jarvis's status call can fire many times in a row; only the first of a burst is a visit.
+export const visitAllowed = (lastAt, now, to) => to !== "jarvis" && now - lastAt >= 1000;
 
 export const currentTicket = (state, id) => Object.values(state.tickets).filter((t) => t.to === id).sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""))[0] ?? null;
 
