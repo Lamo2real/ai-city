@@ -16,6 +16,7 @@
   // The model backend: the owner's logged-in `claude` CLI. No API key, no token copied anywhere.
   agents: {
     defaults: {
+      heartbeat: { every: "0m" }, // The default wakes a model on a timer. Schedules call city-event instead, which costs nothing unless something happened.
       workspace: "./workspace",
       model: { primary: "anthropic/claude-haiku-5-5" },
       models: {

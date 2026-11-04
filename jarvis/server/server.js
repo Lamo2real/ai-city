@@ -1,8 +1,10 @@
 // Jarvis OS local server. Listens on 127.0.0.1, on the LAN only if the iPhone option is on (phone.js), and takes tailnet traffic only if that is on (tailnet.js).
 import { appendFileSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { createServer as createHttpServer } from "node:http";
+import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -406,12 +408,20 @@ async function handleLogin(req, res, access) {
 
 // What the city says unprompted (questions, results) reaches every open HUD as server-sent events,
 // and so does everything that moves in the city (hires, tickets, questions, reviews, cost) for the City View.
+// Agents write free text (goals, summaries, questions) and the HUD shows it, so every string leaving for the HUD is scrubbed here.
+export function scrubDeep(value) {
+  if (typeof value === "string") return scrubSecrets(value);
+  if (Array.isArray(value)) return value.map(scrubDeep);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, scrubDeep(v)]));
+  return value;
+}
+
 function createEventStream(talk, speak, mail) {
   const clients = new Set();
   const listeners = new Set(); // The phone bridge: Jarvis's words only, no audio, no city events.
   talk.city?.on((event) => {
     if (event.type === "log") return;
-    for (const res of clients) res.write(`data: ${JSON.stringify({ type: "city", event })}\n\n`);
+    for (const res of clients) res.write(`data: ${JSON.stringify({ type: "city", event: scrubDeep(event) })}\n\n`);
   });
   talk.on?.(async ({ sessionId, text }) => {
     const event = { type: "jarvis", sessionId, text: scrubSecrets(text) };
@@ -441,11 +451,52 @@ function createEventStream(talk, speak, mail) {
   return handler;
 }
 
+let integrationsCache = null;
+const AUTOMATIONS_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "config", "automations.json");
+const portOpen = (port) => new Promise((resolve) => {
+  const s = createConnection({ host: "127.0.0.1", port, timeout: 1000 });
+  s.once("connect", () => { s.destroy(); resolve(true); });
+  s.once("error", () => resolve(false));
+  s.once("timeout", () => { s.destroy(); resolve(false); });
+});
+
 // The City View's data: a snapshot to start from, an agent's last actions, and the two ways the owner
 // talks back through the bus (an @mention direct instruction, an answer to a question).
-async function handleCity(req, res, city, path) {
+// The phone keeps what it had: the view, answering questions and direct instructions. Running the organization needs a trusted listener.
+const PHONE_CITY = new Set(["/api/city", "/api/city/agent", "/api/city/audit", "/api/city/instruct", "/api/city/answer"]);
+export async function handleCity(req, res, city, path, phone = false) {
   if (!city) return sendJson(res, 404, { error: "the city backend is not running" });
-  if (req.method === "GET" && path === "/api/city") return sendJson(res, 200, city.snapshot());
+  if (phone && !PHONE_CITY.has(path)) return sendJson(res, 403, { error: "not available from the phone" });
+  if (req.method === "GET" && path === "/api/city") return sendJson(res, 200, scrubDeep(city.snapshot()));
+  const url = new URL(req.url, "http://localhost");
+  if (req.method === "GET") {
+    const { health, loadIntegrations, probeIntegrations, workforce } = await import("city");
+    if (path === "/api/city/agent") {
+      const id = url.searchParams.get("id") ?? "";
+      if (!/^[\w-]{1,64}$/.test(id) || !city.ledger.getAgent(id)) return sendJson(res, 404, { error: "no such agent" });
+      return sendJson(res, 200, scrubDeep(city.agentStatus(id)));
+    }
+    if (path === "/api/city/costs") return sendJson(res, 200, city.ledger.costReport());
+    if (path === "/api/city/workforce") return sendJson(res, 200, scrubDeep(workforce(city.ledger)));
+    if (path === "/api/city/health") return sendJson(res, 200, health(city.ledger, city.gate));
+    if (path === "/api/city/departments") return sendJson(res, 200, scrubDeep(city.ledger.departments().filter((d) => d.state !== "deleted")));
+    if (path === "/api/city/skills") return sendJson(res, 200, city.listSkills().map(({ name, description, version }) => ({ name, description, version })));
+    if (path === "/api/city/workflows") return sendJson(res, 200, city.workflows());
+    if (path === "/api/city/memory") {
+      const q = url.searchParams.get("q") ?? "", dept = url.searchParams.get("department") ?? undefined;
+      return sendJson(res, 200, city.memory.recall(q.slice(0, 200), { agent: "owner", department: dept, isJarvis: true }, 10).map((m) => ({ ...m, text: scrubSecrets(m.text) })));
+    }
+    if (path === "/api/city/trace") {
+      const id = url.searchParams.get("ticket") ?? "";
+      if (!/^[\w-]{1,64}$/.test(id)) return sendJson(res, 400, { error: "bad ticket" });
+      return sendJson(res, 200, scrubDeep(city.trace(id)));
+    }
+    if (path === "/api/city/integrations") {
+      // Real probes, at most every five minutes.
+      if (!integrationsCache || Date.now() - integrationsCache.at > 300_000) integrationsCache = { at: Date.now(), states: await probeIntegrations(loadIntegrations(), undefined, portOpen) };
+      return sendJson(res, 200, { checked_at: new Date(integrationsCache.at).toISOString(), integrations: integrationsCache.states });
+    }
+  }
   if (req.method === "GET" && path === "/api/city/audit") {
     const agent = new URL(req.url, "http://localhost").searchParams.get("agent") ?? "";
     return /^[a-z][a-z0-9-]{0,40}$/.test(agent) ? sendJson(res, 200, city.auditTail(agent)) : sendJson(res, 400, { error: "bad agent" });
@@ -463,8 +514,24 @@ async function handleCity(req, res, city, path) {
       const ticket = city.instruct(body.text);
       return ticket ? sendJson(res, 200, { ticket }) : sendJson(res, 400, { error: "start with @agent-id" });
     }
+    if (path === "/api/city/departments") {
+      if (body?.key) return sendJson(res, 200, { department: city.updateDepartment(body) });
+      return sendJson(res, 200, city.createDepartment(body));
+    }
+    if (path === "/api/city/tickets/resume") return sendJson(res, 200, city.resumeParked(Array.isArray(body?.ids) ? body.ids : undefined));
+    if (path === "/api/city/tickets/cancel") {
+      if (!Array.isArray(body?.ids)) return sendJson(res, 400, { error: "ids needed" });
+      return sendJson(res, 200, { cancelled: body.ids.flatMap((id) => city.cancelTicket(String(id)).cancelled) });
+    }
+    if (path === "/api/city/workflows/start") return sendJson(res, 200, city.startWorkflow(String(body?.name), body?.inputs ?? {}, body?.project));
+    if (path === "/api/city/events") {
+      const { routes = [] } = JSON.parse(await readFile(AUTOMATIONS_PATH, "utf8"));
+      return sendJson(res, 200, city.ingestEvent(body, routes));
+    }
     if (path === "/api/city/answer") {
       if (typeof body?.id !== "string" || typeof body?.text !== "string" || !body.text.trim() || body.text.length > MAX_MESSAGE) return sendJson(res, 400, { error: "bad answer" });
+      // Plain HTTP and a passcode are not enough to approve an action, as with merges.
+      if (phone && city.ledger.approvalByQuestion?.(body.id)) return sendJson(res, 403, { error: "approvals need the Mac" });
       return sendJson(res, 200, { ticket: city.answer(body.id, body.text.trim()) });
     }
   } catch (err) {
@@ -530,7 +597,7 @@ export function createServer({ booqyDir, dataDir, port, getState, chat, speak = 
     }
     if (req.method === "GET" && path === "/api/live/status") return sendJson(res, 200, { available: !phone && liveAvailable() });
     if (req.method === "GET" && path === "/api/events") return events(req, res);
-    if (path.startsWith("/api/city")) return await handleCity(req, res, talk.city, path);
+    if (path.startsWith("/api/city")) return await handleCity(req, res, talk.city, path, phone);
     // Read-only: what is waiting for this session, so another tab or Telegram-started merge shows up. Confirming is still POST /api/confirm only.
     if (req.method === "GET" && path === "/api/confirm/pending") {
       const sessionId = new URL(req.url, "http://localhost").searchParams.get("sessionId");
@@ -623,17 +690,21 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   startPhoneListener({ dataDir, port, handler: server.handlePhone, logger: log });
   startTailnetListener({ dataDir, handler: server.handleTailnet, logger: log });
   if (process.env.JARVIS_BACKEND === "booqy") for (const missing of ["ORCHESTRATOR_FIRE_URL", "ORCHESTRATOR_TOKEN"].filter((n) => !process.env[n])) log(`${missing} is not set: relaying to the Orchestrator will fail`);
-  process.on("SIGTERM", () => server.close(() => process.exit(0)));
+  // Open event streams never end by themselves, so close them too: otherwise a restart hangs on any open HUD.
+  for (const s of ["SIGTERM", "SIGINT"]) process.on(s, () => { server.close(() => process.exit(0)); server.closeAllConnections(); });
 }
 
 // The city runs inside this process: Jarvis's session, the core agents and the ledger at ~/.jarvis.
 // shortcut: one process at a time owns the ledger (this server or the CLI), two would both resume the same tickets; add a lock when both must run.
 async function cityChat(dataDir) {
-  const { assertNoApiKey, createCity, createRunner, loadPolicy, sdkEnv } = await import("city");
+  const { OPENCLAW_BIN, assertNoApiKey, createCity, createOpenClawRunner, createRunner, loadPolicy, sdkEnv } = await import("city");
   assertNoApiKey();
   const policy = loadPolicy();
-  const runner = createRunner({ policy, env: await sdkEnv(withJarvisBin(process.env)) });
-  const city = createCity({ runner, policy, log });
+  const env = await sdkEnv(withJarvisBin(process.env));
+  const runner = createRunner({ policy, env });
+  const home = process.env.JARVIS_HOME ?? join(homedir(), ".jarvis");
+  const openclawRunner = existsSync(OPENCLAW_BIN) ? createOpenClawRunner({ policy, env, dataDir: home }) : undefined;
+  const city = createCity({ runner, openclawRunner, policy, log });
   const chat = createCityChat({ city, runner, dataDir, logger: log });
   city.resume().catch((err) => log(`resume failed: ${err.message}`));
   return chat;

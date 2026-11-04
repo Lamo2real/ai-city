@@ -1,0 +1,9 @@
+{
+  "id": "city-bridge",
+  "name": "AI City bridge",
+  "description": "The city's tools and policy gate inside an OpenClaw run.",
+  "categories": ["other"],
+  "contracts": { "tools": ["city_report", "city_ask_user", "city_remember", "city_recall", "city_read_skill", "city_ask_colleague"] },
+  "activation": { "onStartup": true },
+  "configSchema": { "type": "object", "additionalProperties": false }
+}

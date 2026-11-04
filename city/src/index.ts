@@ -8,3 +8,7 @@ export type { City, CityEvent, CityOptions, AgentSpec } from "./runtime.ts";
 export { loadCorePrompt } from "./agents.ts";
 export type { AgentPrompt } from "./agents.ts";
 export type { Ticket, Question } from "./ledger.ts";
+export { OPENCLAW_BIN, createOpenClawRunner } from "./openclaw.ts";
+export { createTrace, health, loadIntegrations, probeIntegrations, workforce } from "./observability.ts";
+export type { IntegrationDef, IntegrationState } from "./observability.ts";
+export type { CityInboundEvent, EventRoute } from "./runtime.ts";
