@@ -20,7 +20,8 @@ export function questionText(e) {
 
 export const resultText = (e) => `[result for ticket ${e.ticket_id}, ${e.status}] ${e.summary} Tell the owner in plain words.`;
 
-export function createCityChat({ city, runner, dataDir, logger = () => {} }) {
+// `warm` (optional) keeps a process parked per conversation, so a turn skips start-up. Without it: one process per turn.
+export function createCityChat({ city, runner, warm, dataDir, logger = () => {} }) {
   const prompt = loadCorePrompt("jarvis");
   const file = join(dataDir, "city-sessions.json");
   let sessions = {};
@@ -28,26 +29,33 @@ export function createCityChat({ city, runner, dataDir, logger = () => {} }) {
   const queues = new Map();
   const listeners = new Set();
   const owners = new Map(); // ticket id → HUD session that started it
-  let lastSession = Object.keys(sessions)[0] ?? "hud";
+  let lastSession = Object.keys(sessions).at(-1) ?? "hud"; // the file keeps the most recently used last
 
   function remember(sessionId, sdkId) {
+    delete sessions[sessionId];
     sessions[sessionId] = sdkId;
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     writeFileSync(`${file}.tmp`, JSON.stringify(sessions), { mode: 0o600 });
     renameSync(`${file}.tmp`, file);
   }
 
+  const request = (sessionId) => ({
+    agentId: "jarvis", systemPrompt: prompt.body, model: prompt.model, effort: prompt.effort, allowedTools: prompt.tools, tools: city.toolsFor("jarvis").filter((t) => prompt.tools.includes(`mcp__jarvis__${t.name}`)),
+    resume: sessions[sessionId],
+  });
+
   async function turn(message, sessionId, { onEvent, signal } = {}) {
     lastSession = sessionId;
     const before = new Set(city.openTickets().map((t) => t.id));
     let result;
     try {
-      result = await runner({
-        agentId: "jarvis", systemPrompt: prompt.body, model: prompt.model, effort: prompt.effort, allowedTools: prompt.tools, tools: city.toolsFor("jarvis").filter((t) => prompt.tools.includes(`mcp__jarvis__${t.name}`)),
-        prompt: message, resume: sessions[sessionId], signal,
+      const req = {
+        ...request(sessionId), prompt: message, signal,
         onText: (text) => onEvent?.({ type: "text", text }),
+        onTextEnd: () => onEvent?.({ type: "flush" }),
         onTool: (name, input) => onEvent?.({ type: "tool", name, input }),
-      });
+      };
+      result = await (warm ? warm.run(sessionId, req) : runner(req));
     } catch (err) {
       // A conversation the SDK no longer has is not worth failing over.
       if (!sessions[sessionId] || !/no conversation found/i.test(err.message)) throw err;
@@ -71,6 +79,8 @@ export function createCityChat({ city, runner, dataDir, logger = () => {} }) {
   chat.on = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
   chat.city = city; // for the City View's snapshot, events and bus endpoints
   chat.idle = () => Promise.allSettled([...queues.values()]);
+  // Called when a client appears (and at start-up), so even its first reply is quick.
+  chat.warmUp = (sessionId = Object.keys(sessions).at(-1)) => { if (sessionId) warm?.warmUp(sessionId, request(sessionId)); };
 
   // The city speaks through Jarvis: its question or result becomes a Jarvis turn, told unprompted.
   async function relay(text, ticketId) {

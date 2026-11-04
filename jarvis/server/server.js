@@ -703,7 +703,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 // The city runs inside this process: Jarvis's session, the core agents and the ledger at ~/.jarvis.
 // shortcut: one process at a time owns the ledger (this server or the CLI), two would both resume the same tickets; add a lock when both must run.
 async function cityChat(dataDir) {
-  const { OPENCLAW_BIN, assertNoApiKey, createCity, createOpenClawRunner, createRunner, loadPolicy, sdkEnv } = await import("city");
+  const { OPENCLAW_BIN, assertNoApiKey, createCity, createOpenClawRunner, createRunner, createWarmRunner, loadPolicy, sdkEnv } = await import("city");
   assertNoApiKey();
   const policy = loadPolicy();
   const env = await sdkEnv(withJarvisBin(process.env));
@@ -711,7 +711,10 @@ async function cityChat(dataDir) {
   const home = process.env.JARVIS_HOME ?? join(homedir(), ".jarvis");
   const openclawRunner = existsSync(OPENCLAW_BIN) ? createOpenClawRunner({ policy, env, dataDir: home }) : undefined;
   const city = createCity({ runner, openclawRunner, policy, log });
-  const chat = createCityChat({ city, runner, dataDir, logger: log });
+  // JARVIS_WARM_CLAUDE=off goes back to one process per turn, as in chat.js.
+  const warm = process.env.JARVIS_WARM_CLAUDE === "off" ? undefined : createWarmRunner({ policy, env });
+  const chat = createCityChat({ city, runner, warm, dataDir, logger: log });
+  chat.warmUp();
   city.resume().catch((err) => log(`resume failed: ${err.message}`));
   return chat;
 }

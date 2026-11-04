@@ -3,24 +3,36 @@
 // answer to a greeting, get none. The lines say what is actually happening.
 const MIN_SENTENCE = 12;
 
+// The first piece goes at the first clause end, so speech starts before the first full sentence
+// exists. Only ever cut after whitespace: a secret has none, so it reaches scrubSecrets whole.
 export function sentenceSplitter(emit) {
   let buffer = "";
+  let first = true;
+  const clauseEnd = /(?:[.!?…]+|[,;:—–])["')\]]*\s+/g;
   const sentenceEnd = /[.!?…]+["')\]]*\s+/g;
   return {
     push(text) {
       buffer += text;
       let from = 0;
-      sentenceEnd.lastIndex = 0;
-      for (let m = sentenceEnd.exec(buffer); m; m = sentenceEnd.exec(buffer)) {
-        const end = m.index + m[0].length;
-        if (end - from < MIN_SENTENCE) continue;
-        emit(buffer.slice(from, end).trim());
-        from = end;
+      let scan = 0;
+      for (;;) {
+        const end = first ? clauseEnd : sentenceEnd;
+        end.lastIndex = scan;
+        const m = end.exec(buffer);
+        if (!m) break;
+        scan = m.index + m[0].length;
+        if (scan - from < MIN_SENTENCE) continue;
+        emit(buffer.slice(from, scan).trim());
+        from = scan;
+        first = false;
       }
       buffer = buffer.slice(from);
     },
     flush() {
-      if (buffer.trim()) emit(buffer.trim());
+      if (buffer.trim()) {
+        emit(buffer.trim());
+        first = false;
+      }
       buffer = "";
     },
   };
