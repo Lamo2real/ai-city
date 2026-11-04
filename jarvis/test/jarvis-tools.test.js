@@ -37,7 +37,7 @@ for (const file of files) {
 }
 
 test("jarvis holds exactly the three dedicated CLIs and no shell, and its prompt never mentions osascript", () => {
-  assert.deepEqual(toolsOf("jarvis.md").filter((t) => /^Bash/.test(t)).sort(), ["Bash(jarvis-mail:*)", "Bash(jarvis-safari:*)", "Bash(jarvis-spotify:*)"]);
+  assert.deepEqual(toolsOf("jarvis.md").filter((t) => /^Bash\b/.test(t)).sort(), ["Bash(jarvis-mail:*)", "Bash(jarvis-safari:*)", "Bash(jarvis-spotify:*)"]);
   assert.doesNotMatch(readFileSync(join(DIR, "jarvis.md"), "utf8"), /osascript/i);
 });
 
