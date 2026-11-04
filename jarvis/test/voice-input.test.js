@@ -158,6 +158,41 @@ test("speech leaves out IDs, hashes, paths and code", () => {
   assert.equal(speechText("Two features on dev."), "Two features on dev.");
 });
 
+test("the first clause goes early, after that only whole sentences", async () => {
+  const { sentenceSplitter } = await import("../server/progress.js");
+  const out = [];
+  const split = sentenceSplitter((s) => out.push(s));
+  split.push("Oh, right, the lighthouse");
+  assert.deepEqual(out, [], "a clause too short to say alone waits");
+  split.push(" stood — on a rock, by the sea. It was old, and tall.");
+  assert.deepEqual(out, ["Oh, right, the lighthouse stood —", "on a rock, by the sea."]);
+  split.flush();
+  assert.deepEqual(out.at(-1), "It was old, and tall.");
+  const figures = [];
+  const numbers = sentenceSplitter((s) => figures.push(s));
+  numbers.push("Roughly 1,000,000 people live there");
+  numbers.flush();
+  assert.deepEqual(figures, ["Roughly 1,000,000 people live there"], "a comma inside a number is no clause");
+});
+
+test("a secret survives no way of cutting the stream: scrubSecrets always sees it whole", async () => {
+  const { sentenceSplitter } = await import("../server/progress.js");
+  const { scrubSecrets } = await import("../server/chat.js");
+  const token = `ghp_${"a1".repeat(20)}`;
+  const envSecret = "s3cr3t,value:with.punctuation";
+  const env = { ...process.env, ORCHESTRATOR_TOKEN: envSecret };
+  for (const reply of [`Here, sir, it is ${token}, as asked. ${envSecret} too.`, `${token} is it, sir.`, `Your key, sir: ${token}`, `Your long winded token is: ${token}. Done.`, `${envSecret}, sir, and more.`]) {
+    for (let size = 1; size <= 9; size++) {
+      const out = [];
+      const split = sentenceSplitter((s) => out.push(scrubSecrets(s, env)));
+      for (let i = 0; i < reply.length; i += size) split.push(reply.slice(i, i + size));
+      split.flush();
+      assert.equal(out.join(" ").includes("ghp_"), false, `token leaked at size ${size}: ${out}`);
+      assert.equal(out.join(" ").includes("s3cr3t"), false, `env secret leaked at size ${size}: ${out}`);
+    }
+  }
+});
+
 test("sentences split on real ends only, and progress lines match the tool", async () => {
   const { FILLERS, fillerLanguage, sentenceSplitter, toolFiller } = await import("../server/progress.js");
   const out = [];
@@ -165,7 +200,7 @@ test("sentences split on real ends only, and progress lines match the tool", asy
   split.push("Version 1.2 is live, sir. Hm. The next");
   split.push(" one is on dev");
   split.flush();
-  assert.deepEqual(out, ["Version 1.2 is live, sir.", "Hm. The next one is on dev"]);
+  assert.deepEqual(out, ["Version 1.2 is live,", "sir. Hm. The next one is on dev"]);
   const set = FILLERS.en;
   assert.equal(toolFiller("Bash", { command: "gh pr list -R x" }, set), set.github);
   assert.equal(toolFiller("Bash", { command: "gh pr merge 3 -R x" }, set), set.update);

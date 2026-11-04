@@ -189,3 +189,32 @@ test("city events reach the HUD on the same event stream", async () => {
   assert.ok(!cityEvents.includes("log"));
   es.destroy();
 });
+
+test("with a warm process: turns go through it, resume the session, and a finished block is spoken before the turn ends", async () => {
+  const calls = [];
+  const warm = {
+    warmUps: [],
+    warmUp(key, req) { this.warmUps.push([key, req.resume]); },
+    async run(key, req) {
+      calls.push([key, req.prompt, req.resume]);
+      req.onText("Oslo, sir.");
+      req.onTextEnd();
+      assert.deepEqual(events.at(-1), { type: "flush" }, "flushed while the turn is still running");
+      return { text: "Oslo, sir.", sessionId: "warm-1", costUsd: 0 };
+    },
+  };
+  const events = [];
+  const warmDir = mkdtempSync(join(tmpdir(), "jarvis-warm-"));
+  const warmChat = createCityChat({ city, runner: async () => { throw new Error("the cold runner must not run"); }, warm, dataDir: warmDir });
+  assert.equal(await warmChat("capital of Norway?", "voice", { onEvent: (e) => events.push(e) }), "Oslo, sir.");
+  await warmChat("and Peru?", "voice", { onEvent: (e) => events.push(e) });
+  assert.deepEqual(calls, [["voice", "capital of Norway?", undefined], ["voice", "and Peru?", "warm-1"]]);
+  warmChat.warmUp();
+  assert.deepEqual(warm.warmUps.at(-1), ["voice", "warm-1"], "with no id, the most recent conversation");
+  // A restart warms the conversation used last, not the first one in the file.
+  await warmChat("hi", "other", {});
+  await warmChat("hi again", "voice", {});
+  const restarted = createCityChat({ city, runner: async () => ({}), warm, dataDir: warmDir });
+  restarted.warmUp();
+  assert.deepEqual(warm.warmUps.at(-1), ["voice", "warm-1"]);
+});

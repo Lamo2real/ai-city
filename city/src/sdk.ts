@@ -1,6 +1,6 @@
 // One turn of one agent through the Claude Agent SDK. Everything the runtime
 // needs from the SDK goes through `Runner`, so tests can swap in a fake.
-import { USAGE_LIMIT_ERROR_PREFIXES, createSdkMcpServer, query, tool, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { USAGE_LIMIT_ERROR_PREFIXES, createSdkMcpServer, query, tool, type Options, type Query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import type { z } from "zod";
@@ -24,6 +24,7 @@ export interface TurnRequest {
   resume?: string | null;
   cwd?: string;
   onText?: (text: string) => void;
+  onTextEnd?: () => void; // a text block is complete, so whatever is held for a sentence end can go
   onTool?: (name: string, input: unknown) => void;
   onSession?: (id: string) => void; // as soon as the session has an id, so it can be asked about mid-turn
   signal?: AbortSignal;
@@ -74,71 +75,73 @@ export function outsideServers(agentId: string, allowedTools: string[], policy: 
   return Object.fromEntries(usable.map(([name, s]) => [name, { type: "stdio" as const, command: atHome(s.command), args: s.args.map(atHome) }]));
 }
 
-export function createRunner({ policy, env, queryFn = query }: { policy: Policy; env: Record<string, string>; queryFn?: QueryFn }): Runner {
-  return async (req) => {
-    const abort = new AbortController();
-    req.signal?.addEventListener("abort", () => abort.abort(), { once: true });
-    const jarvis = createSdkMcpServer({
-      name: "jarvis",
-      tools: req.tools.map((t) => tool(t.name, t.description, t.schema, async (args) => {
-        try {
-          return { content: [{ type: "text", text: JSON.stringify(await t.handler(args as Record<string, unknown>)) }] };
-        } catch (err) {
-          return { content: [{ type: "text", text: `error: ${(err as Error).message}` }], isError: true };
-        }
-      })),
-    });
-    const options: Options = {
-      model: capModel(req.model),
-      fallbackModel: req.fallbackModel && capModel(req.fallbackModel) !== capModel(req.model) ? capModel(req.fallbackModel) : undefined,
-      effort: req.effort,
-      systemPrompt: { type: "custom", prompt: req.systemPrompt },
-      allowedTools: req.allowedTools,
-      tools: builtinTools(req.allowedTools),
-      permissionMode: "dontAsk",
-      settingSources: [],
-      mcpServers: { ...outsideServers(req.agentId, req.allowedTools, policy), jarvis },
-      strictMcpConfig: true,
-      includePartialMessages: true,
-      persistSession: true,
-      cwd: req.cwd,
-      env,
-      abortController: abort,
-      resume: req.resume ?? undefined,
-      forkSession: req.forkSession,
-      // dontAsk denies anything that would prompt; the hook below gates every call, allowed or not.
-      hooks: {
-        PreToolUse: [{
-          hooks: [async (input) => {
-            if (input.hook_event_name !== "PreToolUse") return {};
-            if (req.guard) {
-              const g = req.guard(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>);
-              return g.allow ? {} : { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: g.message } };
-            }
-            const [decision, reason] = decide(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>, policy);
-            audit(policy, input.tool_name, decision, reason, req.agentId);
-            if (decision === "allow") return {};
-            // shortcut: "ask" is denied with the reason, the agent asks the owner through ask_user; add an approvals store when a gated action must be retried after a yes.
-            return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: `${reason} Not run. Ask the owner with ask_user if it is needed.` } };
-          }],
+function turnOptions(req: TurnRequest, policy: Policy, env: Record<string, string>, abort: AbortController): Options {
+  const jarvis = createSdkMcpServer({
+    name: "jarvis",
+    tools: req.tools.map((t) => tool(t.name, t.description, t.schema, async (args) => {
+      try {
+        return { content: [{ type: "text", text: JSON.stringify(await t.handler(args as Record<string, unknown>)) }] };
+      } catch (err) {
+        return { content: [{ type: "text", text: `error: ${(err as Error).message}` }], isError: true };
+      }
+    })),
+  });
+  return {
+    model: capModel(req.model),
+    fallbackModel: req.fallbackModel && capModel(req.fallbackModel) !== capModel(req.model) ? capModel(req.fallbackModel) : undefined,
+    effort: req.effort,
+    systemPrompt: { type: "custom", prompt: req.systemPrompt },
+    allowedTools: req.allowedTools,
+    tools: builtinTools(req.allowedTools),
+    permissionMode: "dontAsk",
+    settingSources: [],
+    mcpServers: { ...outsideServers(req.agentId, req.allowedTools, policy), jarvis },
+    strictMcpConfig: true,
+    includePartialMessages: true,
+    persistSession: true,
+    cwd: req.cwd,
+    env,
+    abortController: abort,
+    resume: req.resume ?? undefined,
+    forkSession: req.forkSession,
+    // dontAsk denies anything that would prompt; the hook below gates every call, allowed or not.
+    hooks: {
+      PreToolUse: [{
+        hooks: [async (input) => {
+          if (input.hook_event_name !== "PreToolUse") return {};
+          if (req.guard) {
+            const g = req.guard(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>);
+            return g.allow ? {} : { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: g.message } };
+          }
+          const [decision, reason] = decide(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>, policy);
+          audit(policy, input.tool_name, decision, reason, req.agentId);
+          if (decision === "allow") return {};
+          // shortcut: "ask" is denied with the reason, the agent asks the owner through ask_user; add an approvals store when a gated action must be retried after a yes.
+          return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: `${reason} Not run. Ask the owner with ask_user if it is needed.` } };
         }],
-      },
-    };
-    let text = "";
-    let sessionId = req.resume ?? "";
-    let costUsd = 0;
-    let tokens = 0;
-    let usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-    let contextTokens = 0;
-    let compact: TurnResult["compact"];
-    let durationMs = 0;
-    try {
-    let announced = false;
-    for await (const m of queryFn({ prompt: req.prompt, options }) as AsyncIterable<SDKMessage>) {
+      }],
+    },
+  };
+}
+
+// Reads one turn's messages, whichever executor shape delivers them. take() is true at the turn's result.
+function turnReader(req: TurnRequest, resume?: string | null) {
+  let text = "";
+  let sessionId = resume ?? "";
+  let costUsd = 0;
+  let tokens = 0;
+  let usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  let contextTokens = 0;
+  let compact: TurnResult["compact"];
+  let durationMs = 0;
+  let announced = false;
+  return {
+    take(m: SDKMessage): boolean {
       if (!announced && m.session_id) { announced = true; req.onSession?.(m.session_id); }
       if (m.type === "stream_event") {
         const e = m.event as { type: string; delta?: { type?: string; text?: string } };
         if (e.type === "content_block_delta" && e.delta?.type === "text_delta" && e.delta.text) req.onText?.(e.delta.text);
+        else if (e.type === "content_block_stop") req.onTextEnd?.();
       } else if (m.type === "assistant") {
         for (const part of m.message.content) if (part.type === "tool_use") req.onTool?.(part.name, part.input);
       } else if (m.type === "system" && m.subtype === "compact_boundary") {
@@ -156,16 +159,162 @@ export function createRunner({ policy, env, queryFn = query }: { policy: Policy;
           if (isUsageLimit(detail)) throw new UsageLimit(detail);
           throw new Error(`${req.agentId}: ${m.subtype}: ${detail}`);
         }
+        return true;
       }
-    }
+      return false;
+    },
+    finish(): TurnResult {
+      // A normal reply may mention limits; only a reply that IS the limit message counts.
+      if (USAGE_LIMIT_ERROR_PREFIXES.some((p) => text.startsWith(p))) throw new UsageLimit(text);
+      if (compact?.post) contextTokens = compact.post;
+      return { text, sessionId, costUsd, tokens, usage, contextTokens, durationMs, ...(compact ? { compact } : {}) };
+    },
+  };
+}
+
+// The SDK also throws on an error result, with the CLI's text inside its own sentence.
+const asLimit = (err: unknown) => (!(err instanceof UsageLimit) && isUsageLimit((err as Error).message ?? "") ? new UsageLimit((err as Error).message) : err);
+
+export function createRunner({ policy, env, queryFn = query }: { policy: Policy; env: Record<string, string>; queryFn?: QueryFn }): Runner {
+  return async (req) => {
+    const abort = new AbortController();
+    req.signal?.addEventListener("abort", () => abort.abort(), { once: true });
+    const turn = turnReader(req, req.resume);
+    try {
+      for await (const m of queryFn({ prompt: req.prompt, options: turnOptions(req, policy, env, abort) }) as AsyncIterable<SDKMessage>) turn.take(m);
     } catch (err) {
-      // The SDK also throws on an error result, with the CLI's text inside its own sentence.
-      if (!(err instanceof UsageLimit) && isUsageLimit((err as Error).message ?? "")) throw new UsageLimit((err as Error).message);
-      throw err;
+      throw asLimit(err);
     }
-    // A normal reply may mention limits; only a reply that IS the limit message counts.
-    if (USAGE_LIMIT_ERROR_PREFIXES.some((p) => text.startsWith(p))) throw new UsageLimit(text);
-    if (compact?.post) contextTokens = compact.post;
-    return { text, sessionId, costUsd, tokens, usage, contextTokens, durationMs, ...(compact ? { compact } : {}) };
+    return turn.finish();
+  };
+}
+
+// A process waiting for its next turn: start-up and every MCP handshake are already behind it. The session
+// is still persisted turn by turn, so a dead process costs one slow turn (the next one resumes), not memory.
+export interface WarmRunner {
+  run(key: string, req: TurnRequest): Promise<TurnResult>;
+  warmUp(key: string, req: TurnRequest): void;
+  close(): void;
+}
+
+const MAX_WARM = 2; // Each holds about 250 MB and its MCP children, so the least recently used one goes.
+const INTERRUPT_MS = 3000;
+
+interface Warm {
+  q: Query;
+  next: () => Promise<IteratorResult<SDKMessage>>;
+  send: (text: string) => void;
+  close: () => void;
+  session: string | null;
+  settling: Promise<void> | null; // an interrupted turn draining to its result
+  dead: boolean;
+}
+
+export function createWarmRunner({ policy, env, queryFn = query }: { policy: Policy; env: Record<string, string>; queryFn?: QueryFn }): WarmRunner {
+  const warms = new Map<string, Warm>();
+
+  function drop(key: string, w: Warm) {
+    w.close();
+    if (warms.get(key) === w) warms.delete(key);
+  }
+
+  function start(key: string, req: TurnRequest): Warm {
+    const abort = new AbortController();
+    const waiting: SDKUserMessage[] = [];
+    let wake: (() => void) | undefined;
+    let open = true;
+    const input = (async function* () {
+      while (open) {
+        if (!waiting.length) await new Promise<void>((r) => { wake = r; });
+        while (waiting.length) yield waiting.shift()!;
+      }
+    })();
+    const q = queryFn({ prompt: input, options: turnOptions(req, policy, env, abort) });
+    const iterator = q[Symbol.asyncIterator]();
+    const w: Warm = {
+      q,
+      next: () => iterator.next(),
+      send: (text) => { waiting.push({ type: "user", message: { role: "user", content: text }, parent_tool_use_id: null, session_id: "" }); wake?.(); },
+      close: () => { w.dead = true; open = false; wake?.(); abort.abort(); },
+      session: req.resume ?? null,
+      settling: null,
+      dead: false,
+    };
+    warms.delete(key);
+    warms.set(key, w);
+    for (const [k, other] of warms) if (warms.size > MAX_WARM && other !== w) drop(k, other);
+    return w;
+  }
+
+  // Stop the turn but keep the process, so the owner's next words (barge-in) still find it warm.
+  function interrupt(key: string, w: Warm, pending: Promise<IteratorResult<SDKMessage>>) {
+    const drained = (async () => {
+      await w.q.interrupt();
+      for (let read = pending; ; read = w.next()) {
+        const { value, done } = await read;
+        if (done) return false;
+        if (value.type === "result") return true; // Same session: the caller's id for it, if it has one yet, still fits.
+      }
+    })().catch(() => false);
+    const timeout = new Promise<false>((r) => { setTimeout(r, INTERRUPT_MS, false).unref?.(); });
+    w.settling = Promise.race([drained, timeout]).then((ok) => {
+      if (!ok) drop(key, w);
+      w.settling = null;
+    });
+  }
+
+  async function deliver(key: string, w: Warm, req: TurnRequest): Promise<TurnResult> {
+    const turn = turnReader(req, w.session);
+    const stopped = new Promise<never>((_, reject) => {
+      const onAbort = () => reject(Object.assign(new Error("turn cancelled"), { cancelled: true }));
+      if (req.signal?.aborted) onAbort();
+      else req.signal?.addEventListener("abort", onAbort, { once: true });
+    });
+    stopped.catch(() => {});
+    w.send(req.prompt);
+    let began = false;
+    for (;;) {
+      const pending = w.next();
+      const { value, done } = await Promise.race([pending, stopped]).catch((err) => {
+        if (err.cancelled) interrupt(key, w, pending);
+        else err.unstarted = !began;
+        throw err;
+      });
+      if (done) throw Object.assign(new Error(`${req.agentId}: the warm process ended`), { unstarted: !began });
+      if (value.type === "stream_event" || value.type === "assistant") began = true;
+      if (turn.take(value)) break;
+    }
+    const result = turn.finish();
+    w.session = result.sessionId;
+    return result;
+  }
+
+  return {
+    async run(key, req) {
+      let w = warms.get(key);
+      if (w?.settling) await w.settling;
+      w = warms.get(key);
+      const reusing = !!w && !w.dead && w.session === (req.resume ?? null);
+      if (w && !reusing) drop(key, w);
+      const warm = reusing ? w! : start(key, req);
+      warms.delete(key);
+      warms.set(key, warm); // most recently used last
+      try {
+        return await deliver(key, warm, req);
+      } catch (err) {
+        if ((err as { cancelled?: boolean }).cancelled) throw err;
+        drop(key, warm);
+        // A parked process can die unseen. Nothing of this turn has happened yet, so a new one can take it.
+        if ((err as { unstarted?: boolean }).unstarted && reusing && !isUsageLimit((err as Error).message ?? "")) return this.run(key, req);
+        throw asLimit(err);
+      }
+    },
+    warmUp(key, req) {
+      const w = warms.get(key);
+      if (!w || w.dead) start(key, req);
+    },
+    close() {
+      for (const [k, w] of warms) drop(k, w);
+    },
   };
 }
