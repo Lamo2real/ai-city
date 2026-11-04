@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { audit } from "../mail/audit.js";
+import { redactTokens, scrubSecrets } from "./chat.js";
 import { bearer, createTokenCheck } from "./token-check.js";
 
 export const MAIL_GATE_SERVICE = "jarvis.mail-gate";
@@ -40,10 +41,13 @@ export function describeEmail(summary) {
   ].filter(Boolean).join("; ");
   return `email to ${oneLine(who, 300)}, subject "${oneLine(summary.subject, 200)}"`;
 }
+// The draft's recipients, subject and first lines come from the model and the mail it read: anything token-shaped in
+// what the owner is told or shown is redacted here, at the source, and never reaches the HUD, the chat or a speaker.
+const clean = (text) => redactTokens(scrubSecrets(text));
 export function holdNotice(item) {
   const first = oneLine(item.summary.first_lines?.[0], 160);
   const why = (item.summary.why ?? []).map((w) => oneLine(w, 160)).join("; ") || "it needs your approval";
-  return `Email to ${describeEmail(item.summary).slice("email to ".length)}${first ? `, starts: «${first}»` : ""}, held because ${why}. Say exactly: I confirm the email, or: Cancel the email.`;
+  return clean(`Email to ${describeEmail(item.summary).slice("email to ".length)}${first ? `, starts: «${first}»` : ""}, held because ${why}. Say exactly: I confirm the email, or: Cancel the email.`);
 }
 
 export function createMailGate({ dataDir, keychain, logger = () => {}, now = Date.now, ttlMs = TTL_MS, auditPath }) {
@@ -116,7 +120,7 @@ export function createMailGate({ dataDir, keychain, logger = () => {}, now = Dat
     approve(item, channel);
     return {
       forward: "[Jarvis server] The owner approved the pending email. Send it now by running exactly the same jarvis-mail command again.",
-      note: `Approved: ${describeEmail(item.summary)}.`,
+      note: clean(`Approved: ${describeEmail(item.summary)}.`),
     };
   }
 

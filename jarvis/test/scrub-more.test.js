@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { redactKnownTokens, redactTokens, scrubSecrets } from "../server/chat.js";
+import { createMailGate, holdNotice } from "../server/mail-gate.js";
 import { createMergeGate } from "../server/merge.js";
 import { createServer, scrubDeep } from "../server/server.js";
 
@@ -104,4 +105,35 @@ test("GET /api/confirm/pending is scrubbed, but the confirmation's id, repo and 
   assert.equal(c.ci, "2 passed [redacted]");
   assert.equal(c.number, 7);
   gate.cancel("pend");
+});
+
+// ---- the mail gate's hold and approve notices ----
+const mailItem = (n) => ({ confirm_id: `confirm-${n}-abcdefgh`, draft_hash: String(n).repeat(64).slice(0, 64), summary: { to: [`Pat <pat@example.com>`], subject: `Invoice ${FAMILIES.github}`, first_lines: [`use ${FAMILIES.telegram} and ${FAMILIES.bearer} and ${FAMILIES.aws}`], why: [`it mentions ${FAMILIES.anthropic}`] } });
+const newGate = () => createMailGate({ dataDir: mkdtempSync(join(tmpdir(), "jarvis-mailscrub-")), keychain: { get: async () => null }, auditPath: join(dir, "mail-audit.jsonl") });
+
+test("the mail hold notice is scrubbed at the source, and still carries the exact confirmation words", () => {
+  const gate = newGate();
+  assert.ok(gate.register(mailItem(1)));
+  const text = gate.announce();
+  assert.equal(has(text), false, text);
+  assert.match(text, /\[redacted\]/);
+  assert.match(text, /Email to pat@example\.com, subject "Invoice \[redacted\]"/);
+  assert.ok(text.endsWith("Say exactly: I confirm the email, or: Cancel the email."), "the phrase the owner must say is untouched");
+  assert.equal(has(holdNotice({ summary: mailItem(2).summary })), false, "holdNotice itself");
+});
+
+test("the mail 'Approved' note and the different-email notice are scrubbed, and approval still works as before", () => {
+  const gate = newGate();
+  gate.register(mailItem(3));
+  gate.announce();
+  const approved = gate.intercept("I confirm the email", "hud");
+  assert.match(approved.forward, /^\[Jarvis server\] The owner approved the pending email\./);
+  assert.equal(has(approved.note), false, approved.note);
+  assert.match(approved.note, /^Approved: email to pat@example\.com, subject "Invoice \[redacted\]"\.$/);
+  // A newer draft the owner was not told about: the notice inside the refusal is scrubbed too, and nothing is approved.
+  gate.register(mailItem(4));
+  const refused = gate.intercept("I confirm the email", "hud");
+  assert.equal(refused.forward, undefined);
+  assert.match(refused.reply, /^That is a different email/);
+  assert.equal(has(refused.reply), false, refused.reply);
 });
