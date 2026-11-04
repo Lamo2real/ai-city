@@ -388,3 +388,28 @@ test("a later report that corrects a ticket's status goes through; a repeat is i
   assert.equal(city.ledger.getTicket(t.id)?.result?.summary, "actually done");
   city.close();
 });
+
+test("an existing install's core rows are refreshed from the prompts: old tools like osascript are dropped", async () => {
+  const ledgerPath = join(dir(), "ledger.db");
+  const first = createCity({ runner: fakeRunner({}).runner, dataDir: dir(), ledgerPath, policy });
+  first.ledger.updateAgent("jarvis", { tools: ["mcp__jarvis__send_ticket", "Bash(osascript:*)"] }); // what an old release stored
+  first.close();
+
+  const { runner, calls } = fakeRunner({
+    // A ticket to Jarvis makes the runtime run a Jarvis turn through the fake runner.
+    orchestrator: async (req) => {
+      if (req.prompt.startsWith("[ticket from jarvis]")) await use(req, "send_ticket", { ticket: { to: "jarvis", goal: "tell the owner" } });
+    },
+  });
+  const city = createCity({ runner, dataDir: dir(), ledgerPath, policy });
+  city.sendTicket({ to: "orchestrator", goal: "anything" });
+  await city.idle();
+
+  const prompt = city.promptOf("jarvis");
+  assert.ok(!city.agent("jarvis").tools.some((t) => /osascript/.test(t)), "the stored row is refreshed");
+  const jarvisTurn = calls.find((c) => c.agentId === "jarvis");
+  assert.ok(jarvisTurn, "Jarvis got a turn");
+  assert.deepEqual(jarvisTurn.allowedTools, prompt.tools);
+  assert.ok(!jarvisTurn.allowedTools.some((t) => /osascript/.test(t)));
+  city.close();
+});
