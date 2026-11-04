@@ -22,6 +22,15 @@ class JarvisSession:
         self.timeout = timeout
         self._sock: socket.socket | None = None
 
+    def warm(self) -> None:
+        """Ask the server to have a process ready, so the first reply is as quick as the rest.
+        Only a head start: a server that is down or slow costs the slower first turn, nothing more."""
+        req = urllib.request.Request(f"{self.base_url}/api/warm", data=json.dumps({"sessionId": self.session_id}).encode(), headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            urllib.request.urlopen(req, timeout=2).close()
+        except OSError:
+            pass
+
     def turn(self, text: str) -> Iterator[dict]:
         """Send the owner's words; yield the server's events: filler, sentence, done, error.
         voice=False: this pipeline speaks through its own TTS, the server sends no audio."""

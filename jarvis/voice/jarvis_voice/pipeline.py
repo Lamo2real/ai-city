@@ -187,6 +187,8 @@ def main() -> None:
 
     logger.remove()  # Pipecat's DEBUG output drowns the tts:, timing and barge-in lines the owner reads
     logger.add(sys.stderr, level="WARNING")
+    JarvisSession(cfg.get("server", "http://127.0.0.1:7777"), cfg.get("session_id", "owner")).warm()
+
     async def run() -> None:  # Pipecat's task needs a running event loop from the moment it is built
         runner, task = build_pipeline(cfg, transport=real_transport(cfg.get("echo_cancellation", True)), services=build_tts(cfg, api_key), probe=OnlineProbe())
         print("Jarvis is listening. Ctrl-C stops him.", flush=True)
