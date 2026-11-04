@@ -2,13 +2,14 @@
 // tailnet listener (after Tailscale's owner check). The phone talks to Jarvis's normal conversation,
 // the same session as voice and the HUD, so there is one interface to the city.
 // `node server/app-api.js pair | unpair` manages the pairing token.
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createKeychain } from "./keychain.js";
 import { readConfig } from "./tailnet.js";
+import { bearer, createTokenCheck } from "./token-check.js";
 
 export const PREFIX = "/api/app/v1";
 export const PAIRING_SERVICE = "jarvis.phone-pairing";
@@ -24,8 +25,6 @@ const RATE_WINDOW_MS = 60_000;
 const KEEPALIVE_MS = 25_000;
 const QR_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "../scripts/qr.swift");
 
-const sha = (s) => createHash("sha256").update(s).digest();
-const bearer = (req) => /^Bearer (\S+)$/.exec(req.headers.authorization ?? "")?.[1] ?? "";
 
 function sendJson(res, status, value, headers = {}) {
   res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", ...headers });
@@ -52,38 +51,12 @@ function readBody(req) {
 // chatStream(req, res, { message, sessionId, voice }) runs the normal streaming chat with phone=true.
 // events.subscribe(fn) calls fn({ sessionId, text }) for Jarvis's unprompted replies and returns an unsubscribe.
 export function createAppApi({ keychain, chatStream, events, now = Date.now, logger = () => {}, keepaliveMs = KEEPALIVE_MS }) {
-  let pairedHash = null;
-  let readAt = -Infinity;
+  const authorized = createTokenCheck({ keychain, service: PAIRING_SERVICE, now, rereadMs: REREAD_MS, logger });
   let failures = 0;
   let lockouts = 0;
   let lockedUntil = 0;
   let hits = [];
   let chatBusy = false;
-
-  async function loadPairing() {
-    readAt = now();
-    try {
-      const token = await keychain.get(PAIRING_SERVICE);
-      pairedHash = token ? sha(token) : null;
-    } catch {
-      pairedHash = null;
-      logger("phone pairing could not be read from Keychain");
-    }
-  }
-  const matches = (hash) => pairedHash !== null && timingSafeEqual(hash, pairedHash);
-
-  // A token that doesn't match triggers a re-read at most every 10 s, so re-pairing needs no restart.
-  async function authorized(token) {
-    if (!token) return null;
-    const hash = sha(token);
-    if (readAt === -Infinity) await loadPairing();
-    if (matches(hash)) return hash;
-    if (now() - readAt >= REREAD_MS) {
-      await loadPairing();
-      if (matches(hash)) return hash;
-    }
-    return null;
-  }
 
   function registerFailure() {
     if (++failures < FAILS_BEFORE_LOCK) return;
