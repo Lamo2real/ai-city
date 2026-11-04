@@ -272,7 +272,7 @@ test("a fresh ticket starts with what the department remembers; a worker cannot 
   await city.idle();
   const turn = calls.find((c) => c.agentId === "mm-dev")!;
   assert.match(turn.prompt, /From memory[\s\S]*Invoices are exported as CSV/);
-  assert.deepEqual(turn.tools.map((t) => t.name).sort(), ["ask_user", "read_skill", "recall", "remember", "report"], "a worker carries only its own tools");
+  assert.deepEqual(turn.tools.map((t) => t.name).sort(), ["ask_colleague", "ask_user", "read_skill", "recall", "remember", "report"], "a worker carries only its own tools");
   city.close();
 });
 
