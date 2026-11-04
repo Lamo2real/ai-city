@@ -25,7 +25,7 @@ test("templates fill every placeholder and refuse a missing one", () => {
   const text = renderTemplate("worker", { id: "ios-dev", specialty: "iOS", parent: "app-manager", tools: "Read, Edit" });
   const p = parsePrompt(text);
   assert.equal(p.name, "ios-dev");
-  assert.deepEqual(p.tools, ["Read", "Edit"]);
+  assert.deepEqual(p.tools, ["mcp__jarvis__report", "mcp__jarvis__ask_user", "Read", "Edit"]);
   assert.match(p.body, /@ios-dev/);
   assert.throws(() => renderTemplate("manager", { id: "m" }), /needs \{\{department\}\}/);
 });

@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { z } from "zod";
-import { AGENTS_DIR, loadCorePrompt, parsePrompt, renderTemplate, type AgentPrompt } from "./agents.ts";
+import { AGENTS_DIR, WORKER_TOOLS, loadCorePrompt, parsePrompt, renderTemplate, type AgentPrompt } from "./agents.ts";
 import { checksText, runChecks, type Check, type Exec } from "./checks.ts";
 import { now, openLedger, type AgentRow, type Question, type QuestionRow, type Ticket } from "./ledger.ts";
 import { auditPath, canonDepartment, departmentCap, departmentKey, loadPolicy, type Policy } from "./policy.ts";
@@ -148,7 +148,7 @@ export function createCity(opts: CityOptions) {
       agentId, systemPrompt: p.body, model: a.model, effort: (a.effort as AgentPrompt["effort"]) ?? p.effort,
       // Core agents get exactly their prompt's tools. Hired agents get the prompt's own tools (report, ask_user, …)
       // plus what the spec granted (Bash, Write, …).
-      allowedTools: a.kind === "core" ? [...p.tools] : [...new Set([...p.tools, ...a.tools])], tools: toolsFor(agentId), prompt: text, resume: a.session_id, cwd: cwdFor(ticket), onText,
+      allowedTools: a.kind === "core" ? [...p.tools] : [...new Set([...p.tools, ...a.tools, ...(a.kind === "worker" ? WORKER_TOOLS : [])])], tools: toolsFor(agentId), prompt: text, resume: a.session_id, cwd: cwdFor(ticket), onText,
     });
     ledger.updateAgent(agentId, { session_id: result.sessionId, last_active_at: now() });
     const delta = ledger.recordTurn(agentId, ticket?.id ?? null, result.sessionId, result.costUsd, result.usage ?? {}, result.tokens ?? 0);
@@ -270,6 +270,7 @@ export function createCity(opts: CityOptions) {
     if (spec.kind === "worker" && ledger.children(by).length >= policy.caps.max_workers_per_manager) throw new Error(`cap reached: ${policy.caps.max_workers_per_manager} workers per manager`);
     if (ledger.spendToday(department) >= policy.caps.daily_spend_usd_per_department) throw new Error(`cap reached: ${department} has spent today's budget`);
     // shortcut: tools are not checked against a per-department allowlist, policy.json has none yet; add one when departments get scopes.
+    if (spec.kind === "worker") spec.tools = [...new Set([...WORKER_TOOLS, ...spec.tools])];
     const text = spec.kind === "manager"
       ? renderTemplate("manager", { id: spec.id, department, mission: spec.mission, model: spec.model, tools_summary: spec.tools.join(", ") }, agentsDir)
       : renderTemplate("worker", { id: spec.id, specialty: spec.role, parent: by, tools: spec.tools.join(", ") }, agentsDir);
