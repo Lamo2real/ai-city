@@ -106,6 +106,17 @@ export function writesSensitiveField(code) {
   return writes && names;
 }
 
+// Static pre-check for `js`: code that reads the page's cookies (session tokens are cookies) is refused before it runs.
+// A plain `document.cookie = "..."` write is not a read and stays allowed. This is a best-effort text check: it does not
+// see names assembled at run time, so the real protection is the HttpOnly flag on session cookies.
+const COOKIE_READS = [
+  /\bdocument\s*\.\s*cookie\b(?!\s*=(?!=))/,                 // document.cookie, .cookie.split(...), cookie += ..., cookie == ...
+  /\bdocument\s*\[\s*(['"`])cookie\1\s*\](?!\s*=(?!=))/,   // document["cookie"]
+  /\bcookieStore\b/,                                            // the async Cookie Store API
+  /\{[^}]*\bcookie\b[^}]*\}\s*=\s*(window\s*\.\s*)?document\b/, // const { cookie } = document
+];
+export const readsCookies = (code) => COOKIE_READS.some((re) => re.test(code));
+
 // Ways round the in-page guard: reach it, get a fresh page realm (an iframe) with unpatched setters, read the original
 // property descriptors, or replace inputs by writing markup / editing attributes. Code using them is refused outright.
 const GUARD_BYPASSES = [
