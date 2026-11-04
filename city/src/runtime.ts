@@ -313,11 +313,13 @@ export function createCity(opts: CityOptions) {
   function guardFor(a: AgentRow, ticket?: Ticket): NonNullable<TurnRequest["guard"]> {
     return (toolName, input) => {
       const touched = SHELL_TOOLS.test(toolName) ? sortedJson(input) : FILE_TOOLS.test(toolName) ? String((input as { file_path?: unknown; path?: unknown }).file_path ?? (input as { path?: unknown }).path ?? "") : "";
-      if (a.kind !== "core" && CITY_INTERNALS.test(touched)) {
+      // By the owner's decision workers are not held by the policy rules or this check. Every call is still audited,
+      // and an autonomy level the owner set on a department still applies.
+      if (a.kind === "manager" && CITY_INTERNALS.test(touched)) {
         audit(policy, toolName, "deny", "the city's own controls", a.id);
         return { allow: false, message: "That touches the city's own controls (its API, ledger, policy or audit log), which agents do not use directly. Ask the owner instead." };
       }
-      let [decision, reason] = decide(toolName, input, policy);
+      let [decision, reason] = a.kind === "worker" ? (["allow", ""] as ReturnType<typeof decide>) : decide(toolName, input, policy);
       if (decision === "allow" && !toolName.startsWith("mcp__jarvis__") && !toolName.startsWith("mcp__city__") && !READ_TOOLS.has(toolName)) {
         const level = autonomyOf(a);
         if (level === "read_only") [decision, reason] = ["deny", `The ${a.department} department is read-only.`];

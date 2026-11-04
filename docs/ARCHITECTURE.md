@@ -183,7 +183,7 @@ The aim is that a prompt can be ignored or talked around and the tool layer stil
 
 ## Limits, stated plainly
 
-- **No OS sandbox, by the owner's decision (2026-11-04).** Workers get full tools by default and can read anything the owner's account can, including credentials. The policy rules are the only check on a call, and they are regular expressions, so a script file gets past them. Agents read outside content, so a planted instruction can reach all of this.
+- **Workers run free, by the owner's decision (2026-11-04).** No OS sandbox, full tools by default, and `guardFor` applies neither the policy rules nor the city-controls check to a worker, so a worker can force-push, merge, read the Keychain, pay, destroy infrastructure, and change the ledger, audit log or policy file. Calls are still audited, though a worker could change that log too. Department autonomy levels still apply, and GitHub's protection of `main` is enforced outside the Mac, so pushes and merges to `main` still need a PR with CI passing. Agents read outside content, so a planted instruction can reach all of this.
 - **No inbound webhooks.** They would need the Gateway to be publicly reachable, which the owner has forbidden. Events come from schedules and from a local `POST /api/city/events` on `127.0.0.1`.
 - **Schedules are off.** `jarvis/bin/city-automations enable <id>` installs one in OpenClaw's scheduler, and it needs the Gateway. The Gateway is not running (nothing listens on port 18789 as of this writing). Nothing runs on a schedule today.
 - **Anthropic models only.** No non-Anthropic provider is configured or used.
