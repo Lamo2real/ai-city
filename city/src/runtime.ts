@@ -439,7 +439,9 @@ export function createCity(opts: CityOptions) {
     snapshot: () => {
       const agents = ledger.agents();
       const departments = [...new Set(agents.map((a) => a.department).filter((d): d is string => !!d))];
-      return { agents, tickets: ledger.ticketsByStatus("open", "in_progress", "in_review", "waiting_on_owner"), questions: ledger.openQuestions(), usage: ledger.usageToday(), spend: Object.fromEntries(departments.map((d) => [d, ledger.spendToday(d)])) };
+      return { agents, tickets: ledger.ticketsByStatus("open", "in_progress", "in_review", "waiting_on_owner"), questions: ledger.openQuestions(), usage: ledger.usageToday(), spend: Object.fromEntries(departments.map((d) => [d, ledger.spendToday(d)])),
+        // The limits the city enforces, read from the loaded policy each time so the HUD never hardcodes them.
+        caps: { max_concurrent_agents: policy.caps.max_concurrent_agents, max_workers_per_manager: policy.caps.max_workers_per_manager, daily_spend_usd_per_department: policy.caps.daily_spend_usd_per_department, max_review_rounds: policy.caps.max_review_rounds } };
     },
     // The last n things an agent did, from the policy gate's audit log.
     auditTail(agentId: string, n = 10): Array<{ ts: number; tool: string; decision: string; reason: string }> {

@@ -146,6 +146,20 @@ test("the phone can never confirm a merge to main", async () => {
   gate.cancel("mac");
 });
 
+test("GET /api/confirm/pending: the phone route sees null, a bad sessionId is a 400, and it only reads", async () => {
+  const cookie = await signIn();
+  const file = gate.requestFile();
+  writeFileSync(file, JSON.stringify(mergeRequest));
+  gate.collect(file, "mac2");
+  const r = await call("/api/confirm/pending?sessionId=mac2", { cookie });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.json(), { confirm: null });
+  assert.equal((await call("/api/confirm/pending?sessionId=bad%20id", { cookie })).status, 400);
+  assert.equal(confirmCalls, 0);
+  assert.ok(gate.current("mac2"), "reading changed nothing");
+  gate.cancel("mac2");
+});
+
 test("the phone route does not take audio", async () => {
   const cookie = await signIn();
   assert.equal((await call("/api/listen", { method: "POST", cookie, body: { audio: "" } })).status, 403);

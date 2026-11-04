@@ -15,7 +15,7 @@ export const FEED_MAX = 40;
 const RECENT_MS = { done: 6000, review_fail: 20000, hired: 4000, retired: 4000 };
 
 export function initialState(now = Date.now()) {
-  return { agents: {}, tickets: {}, questions: {}, departments: {}, reviews: {}, costs: {}, usage: null, spend: {}, feed: [], recent: {}, now };
+  return { agents: {}, tickets: {}, questions: {}, departments: {}, reviews: {}, costs: {}, usage: null, spend: {}, caps: null, feed: [], recent: {}, now };
 }
 
 export const deptOf = (agent) => (agent.id === "jarvis" || CORE.has(agent.id) ? "HQ" : agent.department || "other");
@@ -45,6 +45,7 @@ export function applySnapshot(state, snap, now = Date.now()) {
   for (const q of snap.questions ?? []) next.questions[q.id] = q;
   next.usage = snap.usage ?? null;
   next.spend = snap.spend ?? {};
+  next.caps = snap.caps ?? null; // the limits the server enforces; null when the server did not send them
   return next;
 }
 
@@ -176,4 +177,57 @@ export function inboxItems(state, confirm, now = Date.now()) {
     .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? "") || String(a.id).localeCompare(String(b.id)));
   for (const q of qs) items.push({ kind: "question", id: q.id, path: q.question.path ?? "", questions: q.question.questions ?? [], created_at: q.created_at });
   return items;
+}
+
+// ---------- Status board: limits, agents and tickets, as plain data ----------
+export const STALE_MS = 2 * 3600 * 1000;
+export const TICKET_ORDER = ["open", "in_progress", "in_review", "waiting_on_owner"];
+
+// How the city is doing against its caps. A cap is null when the server did not send one: the board says so, it never guesses.
+export function limits(state) {
+  const caps = state.caps ?? {};
+  const cap = (k) => (typeof caps[k] === "number" ? caps[k] : null);
+  const agents = Object.values(state.agents);
+  const active = agents.filter((a) => a.kind !== "core" && a.state === "active").length; // the rule runtime.ts applies when hiring
+  const workersMax = agents.filter((a) => a.kind === "manager").reduce((m, mgr) => Math.max(m, agents.filter((a) => a.parent === mgr.id && a.state === "active").length), 0);
+  const spendCap = cap("daily_spend_usd_per_department");
+  const departments = Object.entries(state.spend ?? {}).map(([dept, usd]) => ({ dept, usd, cap: spendCap, over: spendCap !== null && usd > spendCap, pct: spendCap ? Math.min(100, (usd / spendCap) * 100) : null }));
+  return {
+    known: state.caps !== null && state.caps !== undefined,
+    agents: { active, max: cap("max_concurrent_agents") },
+    workersPerManager: { largest: workersMax, max: cap("max_workers_per_manager") },
+    departments,
+    usage: state.usage ? { turns: state.usage.turns, tokens: state.usage.tokens, usd: state.usage.usd } : null,
+  };
+}
+
+const ms = (iso) => { const t = Date.parse(iso ?? ""); return Number.isNaN(t) ? null : t; };
+export function relTime(msAgo) {
+  if (msAgo === null || msAgo === undefined) return "—";
+  const s = Math.max(0, Math.round(msAgo / 1000));
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  return `${Math.floor(s / 86400)} d ago`;
+}
+export function ageText(msAgo) { return msAgo === null ? "—" : relTime(msAgo).replace(" ago", "").replace("just now", "<1 min"); }
+
+// Open work grouped by status, oldest first. `stale`: nothing has touched the ticket for more than two hours.
+export function ticketGroups(state, now = Date.now()) {
+  return TICKET_ORDER.map((status) => ({
+    status,
+    tickets: Object.values(state.tickets).filter((t) => t.status === status).map((t) => {
+      const created = ms(t.created_at), updated = ms(t.updated_at);
+      return { id: t.id, to: t.to, goal: t.goal, ageMs: created === null ? null : now - created, stale: updated !== null && now - updated > STALE_MS };
+    }).sort((a, b) => (b.ageMs ?? -1) - (a.ageMs ?? -1)),
+  }));
+}
+
+// One row per live agent. Core agents come separately; retired agents are not listed.
+export function agentRows(state, now = Date.now()) {
+  const rows = Object.values(state.agents).filter((a) => a.state !== "retired").map((a) => {
+    const t = currentTicket(state, a.id), last = ms(a.last_active_at);
+    return { id: a.id, role: a.role, state: a.state, model: a.model, modelName: MODEL_NAME[a.model] ?? a.model, department: deptOf(a), goal: t?.goal ?? null, lastActiveMs: last === null ? null : now - last, core: a.kind === "core" };
+  });
+  return { core: rows.filter((r) => r.core), others: rows.filter((r) => !r.core) };
 }

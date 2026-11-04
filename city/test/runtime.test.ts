@@ -446,3 +446,12 @@ test("spend_approval: only the orchestrator can send one, to Jarvis, valid for a
   await assert.rejects(send("orchestrator", { ...base, approval: approval({ extra: 1 }) }), /unknown field/);
   city.close();
 });
+
+test("snapshot carries the caps from the loaded policy, not a copy", () => {
+  const custom = { ...policy, caps: { ...policy.caps, max_concurrent_agents: 7, max_workers_per_manager: 3, daily_spend_usd_per_department: 12.5, max_review_rounds: 4 } };
+  const c = createCity({ runner: fakeRunner({}).runner, dataDir: dir(), ledgerPath: ":memory:", policy: custom });
+  assert.deepEqual(c.snapshot().caps, { max_concurrent_agents: 7, max_workers_per_manager: 3, daily_spend_usd_per_department: 12.5, max_review_rounds: 4 });
+  const real = createCity({ runner: fakeRunner({}).runner, dataDir: dir(), ledgerPath: ":memory:", policy });
+  assert.equal(real.snapshot().caps.max_concurrent_agents, policy.caps.max_concurrent_agents);
+  c.close(); real.close();
+});
