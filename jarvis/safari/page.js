@@ -57,7 +57,7 @@ var s;try{s=JSON.stringify(r===undefined?null:r)}catch(e){s=JSON.stringify(Strin
   history: (dir) => script("nav", `${dir === "reload" ? "location.reload()" : dir === "back" ? "history.back()" : "history.forward()"};return "{}"`),
 };
 
-export const PAYMENT_TEXT = /place order|buy now|pay now|checkout|betala|köp/i;
+export const PAYMENT_TEXT = /\b(pay|buy|purchase)\b|place (your )?order|confirm (purchase|order|payment)|checkout|betala|köp/i;
 
 // The page looks like a payment page (card inputs, payment-like URL), or the thing being clicked / submitted does
 // (a button that says "Buy now", a form whose action is a payment URL). `js` is only gated by the page-level signals:

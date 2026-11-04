@@ -222,7 +222,7 @@ test("Safari is launched when it isn't running", async () => {
 
 test("only http, https and about:blank can be opened or navigated to", async () => {
   const r = rig();
-  for (const bad of ["file:///etc/passwd", "data:text/html,<script>1</script>", "javascript:alert(document.cookie)", "about:srcdoc", "ftp://x.test/", "view-source:https://a.test"]) {
+  for (const bad of ["file:///etc/passwd", "data:text/html,<script>1</script>", "javascript:alert(document.cookie)", "about:srcdoc", "ftp://x.test/", "view-source:https://a.test", " JavaScript:alert(1)", "JAVASCRIPT:alert(1)", "\tjavascript:alert(1)\n", "DaTa:text/html,x", "  data:text/html,x", "FILE:///etc/passwd", " file:///etc/passwd", "jav\tascript:alert(1)"]) {
     assert.throws(() => normalizeUrl(bad), { code: "BAD_URL" }, bad);
     await assert.rejects(r.safari.open(bad), { code: "BAD_URL" }, bad);
     await assert.rejects(r.safari.navigate(TAB, bad), { code: "BAD_URL" }, bad);
@@ -284,7 +284,7 @@ test("short numeric code inputs are treated like one-time codes", () => {
 
 test("payment gating also covers 'Buy now'-style buttons and forms that post to a payment URL", async () => {
   const quiet = { url: "https://a.test/cart", cardInputs: false };
-  for (const [text, gated] of [["Place order", true], ["BUY NOW", true], ["Betala", true], ["Köp", true], ["Proceed to checkout", true], ["Add to cart", false]]) {
+  for (const [text, gated] of [["Place order", true], ["Pay", true], ["Buy", true], ["Confirm purchase", true], ["Confirm order", true], ["BUY NOW", true], ["Betala", true], ["Köp", true], ["Proceed to checkout", true], ["Add to cart", false]]) {
     const r = rig({ page: { probe: { ...quiet, targetText: text }, click: { url: quiet.url, submits: false } } });
     if (gated) await assert.rejects(r.safari.click(TAB, "#b"), { code: "SPEND_NEEDS_APPROVAL" }, text);
     else assert.equal((await r.safari.click(TAB, "#b")).ok, true, text);
