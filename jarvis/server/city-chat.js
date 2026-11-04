@@ -56,6 +56,7 @@ export function createCityChat({ city, runner, dataDir, logger = () => {} }) {
       return turn(message, sessionId, { onEvent, signal });
     }
     onEvent?.({ type: "flush" });
+    city.recordJarvisTurn(result, prompt.model);
     if (result.sessionId) remember(sessionId, result.sessionId);
     for (const t of city.openTickets()) if (!before.has(t.id)) owners.set(t.id, sessionId);
     return result.text.trim();

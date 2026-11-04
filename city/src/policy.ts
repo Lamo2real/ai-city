@@ -91,7 +91,8 @@ export function decide(toolName: string, toolInput: Record<string, unknown>, pol
   return found;
 }
 
-export const auditPath = (policy: Policy) => policy.audit_log.replace(/^~(?=$|\/)/, homedir());
+// A scratch JARVIS_HOME keeps its audit lines too, so a test run never writes into the real log.
+export const auditPath = (policy: Policy) => (process.env.JARVIS_HOME && policy.audit_log.startsWith("~/.jarvis/") ? policy.audit_log.replace("~/.jarvis", process.env.JARVIS_HOME) : policy.audit_log.replace(/^~(?=$|\/)/, homedir()));
 
 export function audit(policy: Policy, toolName: string, decision: Decision, reason: string, agent?: string): void {
   const path = auditPath(policy);

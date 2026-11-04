@@ -30,7 +30,7 @@ const runner = async (req) => {
     req.onText?.(reply.slice(0, 5));
     req.onText?.(reply.slice(5));
     if (/forward/.test(req.prompt)) await req.tools.find((t) => t.name === "send_ticket").handler({ ticket: { to: "orchestrator", goal: req.prompt } });
-    return { text: reply, sessionId: req.resume ?? `sdk-${turns.length}`, costUsd: 0 };
+    return { text: reply, sessionId: req.resume ?? `sdk-${turns.length}`, costUsd: 0.01 };
   }
   return { text: req.agentId === "secretary" ? "**Done:** the thing." : "", sessionId: `sdk-${req.agentId}`, costUsd: 0 };
 };
@@ -65,6 +65,7 @@ test("typed and spoken turns share one Jarvis session and memory", async () => {
   await chat("and times two?", "hud");
   assert.equal(turns.length, 2);
   assert.equal(turns[0].resume, undefined);
+  assert.ok(city.ledger.costReport().by_agent.jarvis, "Jarvis's own turns count in the costs");
   assert.equal(turns[1].resume, "sdk-1", "the second turn resumes the first turn's session");
   assert.equal(turns[1].agentId, "jarvis");
   assert.equal(turns[1].model, "claude-haiku-5-5");

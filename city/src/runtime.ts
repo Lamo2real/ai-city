@@ -18,7 +18,7 @@ import { checksText, runChecks, type Check, type Exec } from "./checks.ts";
 import { now, openLedger, type AgentRow, type Question, type QuestionRow, type Ticket } from "./ledger.ts";
 import { audit, auditPath, canonDepartment, contextWindow, decide, departmentCap, departmentKey, loadPolicy, sortedJson, type Policy } from "./policy.ts";
 import { validate } from "./schemas.ts";
-import { UsageLimit, type JarvisTool, type Runner, type TurnRequest, type TurnResult } from "./sdk.ts";
+import { UsageLimit, type JarvisTool, type Runner, type TurnRequest, type TurnResult, capModel } from "./sdk.ts";
 
 export type CityEvent =
   // For Jarvis: what the owner must hear.
@@ -352,7 +352,7 @@ export function createCity(opts: CityOptions) {
     const log2 = (method: string, after: number, sessionAfter: string | null) => ledger.addCompaction({ agent_id: a.id, session_before: a.session_id ?? null, session_after: sessionAfter, tokens_before: before, tokens_after: after, method });
     try {
       const r = await request(a, ticket, { prompt: `/compact ${KEEP}`, resume: a.session_id, tools: false });
-      ledger.recordTurn(a.id, ticket?.id ?? null, r.sessionId, r.costUsd, r.usage ?? {}, r.tokens ?? 0);
+      ledger.recordTurn(a.id, ticket?.id ?? null, r.sessionId, r.costUsd, r.usage ?? {}, r.tokens ?? 0, { model: capModel(a.model), durationMs: r.durationMs });
       if (r.compact) {
         ledger.updateAgent(a.id, { session_id: r.sessionId, context_tokens: r.compact.post });
         log2("sdk_compact", r.compact.post, r.sessionId);
@@ -366,7 +366,7 @@ export function createCity(opts: CityOptions) {
     let summary = "";
     try {
       const r = await request(a, ticket, { prompt: `Write a handover summary of this whole session for your successor, under 1000 words. ${KEEP}`, resume: a.session_id, model: "claude-haiku-5-5", tools: false });
-      ledger.recordTurn(a.id, ticket?.id ?? null, r.sessionId, r.costUsd, r.usage ?? {}, r.tokens ?? 0);
+      ledger.recordTurn(a.id, ticket?.id ?? null, r.sessionId, r.costUsd, r.usage ?? {}, r.tokens ?? 0, { model: capModel(a.model), durationMs: r.durationMs });
       summary = r.text.trim();
     } catch (err) {
       if (err instanceof UsageLimit) throw err;
@@ -401,7 +401,7 @@ export function createCity(opts: CityOptions) {
       allowedTools: allowedFor(a), tools: toolsForTurn(a), prompt: text, resume: resumeId, cwd: cwdFor(ticket), onText,
     });
     ledger.updateAgent(agentId, { session_id: result.sessionId, session_key: key, context_tokens: result.contextTokens ?? 0, last_active_at: now() });
-    const delta = ledger.recordTurn(agentId, ticket?.id ?? null, result.sessionId, result.costUsd, result.usage ?? {}, result.tokens ?? 0, { model, durationMs: result.durationMs });
+    const delta = ledger.recordTurn(agentId, ticket?.id ?? null, result.sessionId, result.costUsd, result.usage ?? {}, result.tokens ?? 0, { model: capModel(model), durationMs: result.durationMs });
     emit({ type: "cost.update", agent: agentId, ticket_id: ticket?.id ?? null, usd: delta, tokens: result.tokens ?? 0, today: ledger.usageToday() });
     return result;
   }
@@ -1001,6 +1001,11 @@ export function createCity(opts: CityOptions) {
     startWorkflow: (name: string, inputs: Record<string, string> = {}, project?: string) => startWorkflow("orchestrator", name, inputs, project),
     workflows: () => loadWorkflows(opts.workflowsDir ?? WORKFLOWS_DIR),
     ingestEvent,
+    // Jarvis's conversation runs outside the ticket flow, and its turns still count.
+    recordJarvisTurn: (r: TurnResult, model: string) => {
+      const delta = ledger.recordTurn("jarvis", null, r.sessionId, r.costUsd, r.usage ?? {}, r.tokens ?? 0, { model: capModel(model), durationMs: r.durationMs });
+      emit({ type: "cost.update", agent: "jarvis", ticket_id: null, usd: delta, tokens: r.tokens ?? 0, today: ledger.usageToday() });
+    },
     trace: (ticketId: string) => traceLog.forTicket(ticketId, ledger),
     listSkills: () => listSkills(skillsDir),
     toolsForTurn: (id: string) => toolsForTurn(agent(id)),
