@@ -1,10 +1,12 @@
 // The City View: a procedural voxel city of the agents, drawn by three.js from city-state.js.
 // Everything here is original blocky art built from boxes; nothing is copied from any game.
 import * as THREE from "./vendor/three.module.js";
-import { CORE, MODEL_COLOR, MODEL_NAME, agentPanel, agentStatus, applySnapshot, deptColor, deptOf, departmentPanel, fmt, initialState, layout, propFor, reduce, topBar } from "./city-state.js";
+import { CORE, COST_NOTE, INTEGRATION_MEANS, MODEL_COLOR, MODEL_NAME, ageText, agentPanel, agentStatus, applyLive, applySnapshot, checkText, courierFor, departmentNames, departmentPanel, deptColor, deptOf, estUsd, gateStatus, initialState, integrationGroups, layout, parkedRows, propFor, reduce, relTime, stockholmTime, topBar, traceLines, usdRows, workforceGroups } from "./city-state.js";
 
 const REACTIONS = ["On it!", "Five more minutes...", "I swear it compiled locally", "Have you tried turning it off and on?", "Coffee first.", "Shipping it. Probably.", "Who touched my branch?", "Reviewing my own code. Bold.", "The tests pass on my machine", "Ask the manager."];
 const PROP_COLOR = { laptop: 0xbfc7d5, camera: 0x222222, chart: 0x3bd36b, wrench: 0x9a9a9a, ticket: 0xffd21e, clipboard: 0xf4e4c1, coffee: 0x6b3e26, notebook: 0xe8d9b5, magnifier: 0x88ccff, baton: 0xffffff };
+// A worker in one of these states wears the mark over its head. Waiting on the owner has its own question mark.
+const STATE_MARK = { failed: ["!", "#ff3b2e"], blocked: ["!", "#ffd21e"], paused: ["II", "#9fd0ff"], cancelled: ["x", "#b57a4a"] };
 const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 const hash = (s) => { let h = 2166136261; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return (h >>> 0) / 4294967295; };
 const rand = (seed) => { let x = Math.floor(hash(seed) * 1e9) || 1; return () => { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; return ((x >>> 0) % 10000) / 10000; }; };
@@ -135,6 +137,7 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
   function setupLayout() {
     const l = layout(state);
     const places = [l.hq, ...l.buildings];
+    for (const [name, b] of buildings) if (!places.some((p) => p.dept === name)) { scene.remove(b); buildings.delete(name); } // deleted or renamed
     for (const p of places) {
       if (!buildings.has(p.dept)) {
         const b = makeBuilding(p.dept, p.color, p.dept === "HQ");
@@ -143,6 +146,7 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
         scene.add(b);
         buildings.set(p.dept, b);
       }
+      buildings.get(p.dept).visible = !p.archived;
     }
     // Roads: a cross through HQ and a ring, from instanced dark blocks. Trees in the gaps.
     if (roads) scene.remove(roads);
@@ -167,7 +171,7 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
     spots.forEach((v, i) => { m.makeTranslation(v.x, 0.5, v.y); trunk.setMatrixAt(i, m); m.makeTranslation(v.x, 1.6, v.y); crown.setMatrixAt(i, m); });
     trees.add(trunk, crown);
     scene.add(trees);
-    clickable.buildings = [...buildings.values()];
+    clickable.buildings = [...buildings.values()].filter((b) => b.visible);
     syncPeople();
     renderDom();
   }
@@ -212,7 +216,8 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
   function onEvent(e) {
     const before = state;
     state = reduce(state, e);
-    if (e.type === "agent.hired" || e.type === "agent.retired") setupLayout(); else syncPeople();
+    if (e.type === "agent.hired" || e.type === "agent.retired" || e.type === "department.created" || e.type === "department.updated") setupLayout(); else syncPeople();
+    const hop = courierFor(e); if (hop) courier(hop);
     if (e.type === "result" || (e.type === "ticket.status" && e.ticket.to === "orchestrator" && e.ticket.status === "done")) {
       const s = people.get("secretary"), j = people.get("jarvis");
       if (s && j) s.userData.walk = { to: j.position.clone().add(new THREE.Vector3(-1.2, 0, 0)), speed: 9, then: () => { s.userData.walk = { to: home(s.userData.agent), speed: 7 }; } };
@@ -228,8 +233,28 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
       if (b && e.verdict === "FAIL") { b.userData.lampUntil = performance.now() + 20000; if (!reduced()) smoke(b.position.clone().add(new THREE.Vector3(0, b.userData.floors + 0.5, 0))); }
     }
     if (e.type === "ticket.status" && e.ticket.status === "done" && !reduced()) { const p = people.get(e.ticket.to); if (p) confetti(p.position.clone().add(new THREE.Vector3(0, 2.5, 0))); }
-    if (e.type === "question.asked" || e.type === "question.answered" || e.type === "cost.update" || e.type === "ticket.status") renderDom();
+    if (["question", "question.asked", "question.answered", "cost.update", "ticket.status", "worker.state", "tickets.parked", "city.paused", "city.resumed"].includes(e.type)) renderDom();
+    // The gate's counters and the open panel's numbers only come from the server: read them again once the events settle.
+    if (["ticket.status", "worker.state", "cost.update", "tickets.parked", "city.paused", "city.resumed", "turn.failed"].includes(e.type)) refreshSoon();
+    if (open?.agent) { const v = panel.querySelector("[data-status] .v"); if (v) v.textContent = agentStatus(state, open.agent).replace(/_/g, " "); }
     feedDom();
+  }
+
+  // A parcel carried between two agents, only when a real ticket event says it moved.
+  function courier({ from, to, kind }) {
+    const a = people.get(from), b = people.get(to);
+    if (!a || !b || reduced()) return;
+    const parcel = part(0.5, 0.35, 0.5, kind === "ticket" ? 0xffd21e : 0x2fd36b, 0, 0, 0, { emissive: kind === "ticket" ? 0x665200 : 0x0f5a2c });
+    const start = a.position.clone().add(new THREE.Vector3(0, 1.4, 0)), life = 1400;
+    let t = 0;
+    parcel.position.copy(start);
+    scene.add(parcel);
+    effects.push({ mesh: parcel, until: performance.now() + life, update: (dt) => {
+      t = Math.min(1, t + (dt * 1000) / life);
+      parcel.position.lerpVectors(start, b.position, t);
+      parcel.position.y += 1.4 * (1 - t) + Math.sin(t * Math.PI) * 3;
+    } });
+    root.dataset.couriers = String(Number(root.dataset.couriers ?? 0) + 1);
   }
 
   // Effects: little instanced bursts with a lifetime.
@@ -300,24 +325,38 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
   let open = null;
   function closePanel() { open = null; panel.hidden = true; panel.replaceChildren(); }
   function showPanel(title, kind) {
+    // The same panel redrawn with fresher data keeps the reader's place and focus.
+    const same = !panel.hidden && panel.dataset.kind === kind, top = panel.scrollTop;
     panel.hidden = false; panel.replaceChildren();
     const head = el("header"); head.append(el("h3", null, title), (() => { const b = el("button", "ibtn", "×"); b.setAttribute("aria-label", "Close"); b.onclick = closePanel; return b; })());
     panel.append(head);
     panel.dataset.kind = kind;
-    panel.querySelector("button")?.focus();
+    if (same) requestAnimationFrame(() => { panel.scrollTop = top; }); else panel.querySelector("button")?.focus();
     return panel;
   }
   const row = (k, v) => { const r = el("div", "row"); r.append(el("span", "k", k), el("span", "v", v)); return r; };
+  const costNote = () => el("p", "hint costnote", COST_NOTE);
+  const button = (cls, text, onclick) => { const b = el("button", cls, text); b.type = "button"; b.onclick = onclick; return b; };
+  // Where a panel's Back goes.
+  const reopen = (o) => { if (o?.agent) openAgent(o.agent); else if (o?.dept) openDept(o.dept); else if (o?.parked) openParked(); else if (o?.data) openData(o.data); };
+  const storyButton = (id) => { const from = open; return button("act", "Story", () => openData(storyView(id, from))); };
   async function openAgent(id) {
     open = { agent: id };
+    const mine = open;
     let audit = [];
     try { audit = await (await fetchImpl(`./api/city/audit?agent=${encodeURIComponent(id)}`)).json(); } catch { /* unknown: shown as nothing */ }
-    const p = agentPanel(state, id, audit);
+    if (open !== mine) return; // closed or replaced while the audit was on its way
+    const p = agentPanel(state, id, Array.isArray(audit) ? audit : []);
     if (!p) return;
     const box = showPanel(`${p.role}`, "agent");
     const badge = el("span", "badge", p.modelName); badge.style.background = p.modelColor;
     box.append(badge);
-    box.append(row("id", p.id), row("model", p.model), row("department", p.department), row("reports to", p.parent), row("status", p.status.replace(/_/g, " ")), row("ticket", p.ticket ? `${p.ticket.status.replace(/_/g, " ")}: ${p.ticket.goal}` : "—"), row("cost so far", p.costUsd === null ? "—" : `$${fmt(p.costUsd, 3)}`), row("tokens today", p.tokensToday === null ? "—" : String(p.tokensToday)));
+    const statusRow = row("status", p.status.replace(/_/g, " ")); statusRow.dataset.status = "";
+    box.append(row("id", p.id), row("model", p.model), row("department", p.department), row("reports to", p.parent), statusRow);
+    if (p.executor) box.append(row("runs on", p.executor));
+    box.append(row("ticket", p.ticket ? `${p.ticket.status.replace(/_/g, " ")}: ${p.ticket.goal}` : "—"), row("cost so far", p.costUsd === null ? "—" : estUsd(p.costUsd, 3)), row("tokens today", p.tokensToday === null ? "—" : String(p.tokensToday)), costNote());
+    const storyId = p.ticket?.id ?? p.lastTicket;
+    if (storyId) box.append(button("act", p.ticket ? "Story of this ticket" : `Story of ${storyId}`, () => openData(storyView(storyId, mine))));
     box.append(el("h4", null, "Last actions"));
     const ul = el("ul", "actions");
     if (!p.actions.length) ul.append(el("li", "mute", "—"));
@@ -335,29 +374,242 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
     open = { dept: name };
     const d = departmentPanel(state, name);
     const box = showPanel(`${name === "HQ" ? "Headquarters" : `${name} department`}`, "department");
-    box.append(row("manager", d.manager ?? "—"), row("workers", d.workers.length ? d.workers.join(", ") : "—"), row("today's cost, UTC", d.todayUsd === null ? "—" : `$${fmt(d.todayUsd, 2)}`));
+    if (d.state === "archived") box.append(el("p", "hint", "Archived. It has no building and no active agents until it is reactivated."));
+    if (d.mission) box.append(row("mission", d.mission));
+    box.append(row("manager", d.manager ?? "—"), row("workers", d.workers.length ? d.workers.map((w) => `${w} (${d.workerStates[w].replace(/_/g, " ")})`).join(", ") : "—"), row("today's cost, UTC", d.todayUsd === null ? "—" : estUsd(d.todayUsd)), costNote());
     box.append(el("h4", null, `Open tickets (${d.openTickets.length})`));
     const ul = el("ul", "tickets");
     if (!d.openTickets.length) ul.append(el("li", "mute", "—"));
-    for (const t of d.openTickets) ul.append(el("li", null, `${t.to}: ${t.status.replace(/_/g, " ")} — ${t.goal}`));
+    for (const t of d.openTickets) { const li = el("li", "withact"); li.append(el("span", null, `${t.to}: ${t.status.replace(/_/g, " ")} — ${t.goal}`), storyButton(t.id)); ul.append(li); }
     box.append(ul);
-    const b = buildings.get(name); if (b) { const z = el("button", "ibtn wide", "Zoom in"); z.onclick = () => zoomInto(b); box.append(z); }
+    if (d.released.length) {
+      box.append(el("h4", null, `Released (${d.released.length})`));
+      const past = el("ul", "tickets");
+      for (const r of d.released) { const li = el("li", "withact"); li.append(el("span", null, `${r.id}: ${r.role}`), button("act", "Details", () => openAgent(r.id))); past.append(li); }
+      box.append(past);
+    }
+    const b = buildings.get(name); if (b?.visible) { const z = el("button", "ibtn wide", "Zoom in"); z.onclick = () => zoomInto(b); box.append(z); }
+  }
+
+  // ---------- Panels read from the backend. The phone listener answers 403 for these routes; the panel says so. ----------
+  async function getJson(url) {
+    try {
+      const r = await fetchImpl(url);
+      const j = await r.json().catch(() => ({}));
+      if (r.status === 403) return { restricted: true };
+      return r.ok ? { data: j } : { error: j.error || `server error ${r.status}` };
+    } catch { return { error: "no connection" }; }
+  }
+  const unavailable = (res, what) => el("p", "mute", res.restricted ? `${what} is not available from the phone. Open Jarvis on the Mac to see it.` : `Could not load ${what} (${res.error}). Nothing is shown until it answers.`);
+  const atTime = (t) => new Date(t).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+  // A view is { kind, title, what, sections: [{ url, render(box, data), loading? }], back? }. First open shows each
+  // section's own loading line; a refresh keeps the old numbers up until the new ones are here.
+  async function openData(view, quiet = false) {
+    open = { data: view };
+    const mine = open;
+    const fill = (holder, sec, res) => { holder.replaceChildren(); if (res.data) sec.render(holder, res.data); else holder.append(unavailable(res, view.what)); };
+    const frame = () => { const box = showPanel(view.title, view.kind); if (view.back) box.append(button("act back", "Back", () => reopen(view.back))); return box; };
+    if (quiet) {
+      const results = await Promise.all(view.sections.map((sec) => getJson(sec.url)));
+      if (open !== mine) return;
+      const box = frame();
+      view.sections.forEach((sec, i) => { const holder = el("section"); fill(holder, sec, results[i]); box.append(holder); });
+      return;
+    }
+    const box = frame();
+    await Promise.all(view.sections.map(async (sec) => {
+      const holder = el("section"); holder.append(el("p", "mute", sec.loading ?? "Loading…")); box.append(holder);
+      const res = await getJson(sec.url);
+      if (open === mine) fill(holder, sec, res);
+    }));
+  }
+
+  const tag = (text, cls = "") => el("span", `tag ${cls}`, text.replace(/_/g, " "));
+  const WORKER_TONE = { working: "good", completed: "good", failed: "bad", blocked: "bad", cancelled: "bad", paused: "warn", review: "warn" };
+  function workerItem(w) {
+    const li = el("li", "wk"); li.dataset.worker = w.id;
+    const head = el("div", "wkhead"); head.append(state.agents[w.id] ? button("link", w.id, () => openAgent(w.id)) : el("b", null, w.id), tag(w.state, WORKER_TONE[w.state]));
+    const rate = w.success_rate === null ? "no finished tickets" : `${Math.round(w.success_rate * 100)}% success`;
+    const stats = el("div", "mute", `${w.completed} done · ${w.failed} failed · ${rate} · median ${w.median_completion_ms === null ? "—" : ageText(w.median_completion_ms)} · busy ${ageText(w.busy_ms)} · `);
+    stats.append(el("span", "nowrap", estUsd(w.cost_usd, 3)));
+    li.append(head,
+      el("div", "mute", `${w.role} · ${w.department ?? "no department"} · ${w.executor} · ${MODEL_NAME[w.model] ?? w.model}`),
+      el("div", null, w.assignment ?? "no current assignment"),
+      stats);
+    return li;
+  }
+  const workforceView = () => ({ kind: "workforce", title: "Workforce", what: "Workforce", sections: [{ url: "./api/city/workforce", render(box, wf) {
+    const t = wf.totals ?? {}, g = workforceGroups(wf);
+    box.append(el("p", null, `${t.hired_ever ?? 0} hired ever · ${t.active ?? 0} active · ${t.working ?? 0} working · ${t.in_review ?? 0} in review · ${t.blocked ?? 0} blocked · ${t.failed ?? 0} failed · ${t.released ?? 0} released`));
+    if (!g.current.length && !g.released.length) { box.append(el("p", "mute", "No workers have been hired yet.")); return; }
+    box.append(costNote());
+    const list = (title, rows) => { box.append(el("h4", null, `${title} (${rows.length})`)); const ul = el("ul"); ul.append(...rows.map(workerItem)); if (!rows.length) ul.append(el("li", "mute", "None.")); box.append(ul); };
+    list("Current", g.current);
+    list("Released", g.released);
+  } }] });
+
+  function costTable(title, rows, cell = (r) => document.createTextNode(r.name)) {
+    const wrap = el("div"); wrap.append(el("h4", null, title));
+    if (!rows.length) { wrap.append(el("p", "mute", "Nothing recorded.")); return wrap; }
+    const t = el("table", "costs"), head = el("tr");
+    for (const h of ["", "Est. value", "Tokens", "Turns"]) head.append(el("th", null, h));
+    t.append(head);
+    for (const r of rows) { const tr = el("tr"), name = el("td"); name.append(cell(r)); tr.append(name, el("td", null, estUsd(r.usd, r.usd >= 1 ? 2 : 3)), el("td", null, Number(r.tokens ?? 0).toLocaleString("en-US")), el("td", null, String(r.turns ?? 0))); t.append(tr); }
+    wrap.append(t);
+    return wrap;
+  }
+  const costsView = () => { const view = { kind: "costs", title: "Costs (estimates)", what: "Costs", sections: [{ url: "./api/city/costs", render(box, c) {
+    box.append(el("p", "hint costnote", c.note || COST_NOTE));
+    box.append(costTable("Totals, UTC", [{ name: "Today", ...c.today }, { name: "This month", ...c.month }]));
+    box.append(row("done, month", String(c.done_tickets ?? 0)), row("failed, month", String(c.failed_tickets ?? 0)), row("per done ticket", estUsd(c.usd_per_done_ticket)));
+    box.append(costTable("This month by model", usdRows(c.by_model).map((r) => ({ ...r, name: MODEL_NAME[r.name] ?? r.name }))), costTable("This month by department", usdRows(c.by_department)), costTable("This month by agent", usdRows(c.by_agent)));
+    box.append(costTable("This month by ticket (top 20)", (c.by_ticket ?? []).map((r) => ({ ...r, name: r.ticket_id })), (r) => button("link", r.name, () => openData(storyView(r.name, { data: view })))));
+  } }] }; return view; };
+
+  const INTEGRATION_TONE = { operational: "good", needs_owner: "bad", unavailable: "bad" };
+  const healthView = () => ({ kind: "health", title: "Health", what: "Health", sections: [
+    { url: "./api/city/health", render(box, h) {
+      box.append(el("p", "hint", `Read from the ledger at ${atTime(Date.now())}.`));
+      box.append(row("paused until", h.paused_until ? `${stockholmTime(Date.parse(h.paused_until))} Stockholm` : "not paused"), row("turns", `${h.turns_running} running · ${h.turns_waiting} waiting`), row("open tickets", String(h.tickets_open)), row("stale, 1 h+", h.tickets_stale?.length ? h.tickets_stale.join(", ") : "none"), row("parked", String(h.tickets_parked)), row("waiting on you", String(h.tickets_waiting_on_owner)), row("failed today, UTC", String(h.failed_today)), row("last model turn", h.last_model_turn ? `${atTime(h.last_model_turn)} (${relTime(Date.now() - Date.parse(h.last_model_turn))})` : "none recorded"), row("active agents", String(h.active_agents)));
+    } },
+    { url: "./api/city/integrations", loading: "Probing integrations. This can take up to 20 s.", render(box, res) {
+      const checked = Date.parse(res.checked_at ?? "");
+      box.append(el("h4", null, "Integrations"), el("p", "hint", Number.isNaN(checked) ? "Time of the check unknown." : `Probed at ${atTime(checked)} (${relTime(Date.now() - checked)}). The server probes at most every five minutes.`));
+      const groups = integrationGroups(res.integrations);
+      if (!groups.length) box.append(el("p", "mute", "No integrations are configured."));
+      for (const g of groups) {
+        box.append(el("h4", null, g.category));
+        const ul = el("ul");
+        for (const i of g.items) {
+          const li = el("li", "wk"); li.dataset.integration = i.name;
+          const head = el("div", "wkhead"); head.append(el("b", null, i.name), tag(i.status, INTEGRATION_TONE[i.status]));
+          li.append(head, el("div", null, i.detail ?? "no detail"));
+          const what = checkText(i.check); if (what) li.append(el("div", "mute", `checked: ${what}`));
+          if (i.note) li.append(el("div", "mute", i.note));
+          ul.append(li);
+        }
+        box.append(ul);
+      }
+      const legend = el("dl", "legend");
+      for (const [k, v] of INTEGRATION_MEANS) legend.append(el("dt", null, k.replace(/_/g, " ")), el("dd", null, v));
+      box.append(el("h4", null, "What the words mean"), legend);
+    } },
+  ] });
+
+  const storyView = (id, back) => ({ kind: "story", title: `Story of ${id}`, what: "This ticket's story", back, key: id, sections: [{ url: `./api/city/trace?ticket=${encodeURIComponent(id)}`, render(box, events) {
+    const lines = traceLines(Array.isArray(events) ? events : []);
+    if (!lines.length) { box.append(el("p", "mute", "No events recorded for this ticket.")); return; }
+    const ul = el("ul", "story");
+    for (const l of lines) { const li = el("li", "line"); li.append(el("span", "t", atTime(l.at)), el("span", null, l.text)); ul.append(li); }
+    box.append(ul);
+  } }] });
+
+  // ---------- Parked tickets: the owner resumes or cancels, one or all ----------
+  let parkedBlocked = false; // the server said this listener may not act on tickets
+  const parkedIds = () => parkedRows(state).map((t) => t.id).join();
+  function openParked() {
+    const rows = parkedRows(state);
+    const note = open?.parked ? open.note : "";
+    open = { parked: true, note, ids: parkedIds() };
+    const box = showPanel(`Parked tickets (${rows.length})`, "parked");
+    const g = gateStatus(state);
+    if (g.paused) box.append(el("p", "hint", `The city is paused until ${g.paused.text} Stockholm. A resumed ticket waits for that.`));
+    if (!rows.length) box.append(el("p", "mute", "Nothing is parked."));
+    else box.append(el("p", "hint", "These tickets do nothing until you decide. Resuming one starts its agent again."));
+    const say = el("p", "hint saynote", note); say.setAttribute("role", "status");
+    const setBusy = (busy) => { for (const b of box.querySelectorAll("button.needsauth")) b.disabled = busy || parkedBlocked; };
+    const act = async (action, ids) => {
+      setBusy(true);
+      const res = await (async () => {
+        try {
+          const r = await fetchImpl(`./api/city/tickets/${action}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) });
+          const j = await r.json().catch(() => ({}));
+          if (r.status === 403) { parkedBlocked = true; return "Resuming and cancelling are not available from the phone. Open Jarvis on the Mac to decide."; }
+          if (!r.ok) return `Nothing changed: ${j.error || `server error ${r.status}`}`;
+          const n = (action === "resume" ? j.resumed : j.cancelled)?.length ?? 0;
+          return `${action === "resume" ? "Resumed" : "Cancelled"} ${n} of ${ids.length}.`;
+        } catch { return "Could not reach the server. Nothing changed."; }
+      })();
+      say.textContent = res;
+      if (open?.parked) open.note = res;
+      setBusy(false);
+      await refresh();
+    };
+    // Cancelling is final and a resume-all starts many turns: both ask for a second click.
+    const armed = (cls, label, sure, run) => {
+      let timer = null;
+      const b = button(`${cls} needsauth`, label, () => {
+        if (timer === null) { b.textContent = sure; b.classList.add("sure"); timer = setTimeout(() => { timer = null; b.textContent = label; b.classList.remove("sure"); }, 4000); return; }
+        clearTimeout(timer); timer = null; b.textContent = label; b.classList.remove("sure"); run();
+      });
+      return b;
+    };
+    if (rows.length > 1) {
+      const all = el("div", "acts");
+      all.append(armed("act main", `Resume all (${rows.length})`, `Sure? Resume ${rows.length}`, () => act("resume", rows.map((t) => t.id))), armed("act", `Cancel all (${rows.length})`, `Sure? Cancel ${rows.length}`, () => act("cancel", rows.map((t) => t.id))));
+      box.append(all);
+    }
+    box.append(say);
+    const ul = el("ul");
+    for (const t of rows) {
+      const li = el("li", "wk"); li.dataset.parked = t.id;
+      const acts = el("div", "acts");
+      acts.append(button("act main needsauth", "Resume", () => act("resume", [t.id])), armed("act", "Cancel", "Sure? Cancel it", () => act("cancel", [t.id])), storyButton(t.id));
+      li.append(el("div", null, t.goal), el("div", "mute", `${t.to} · from ${t.from} · ${t.id} · opened ${relTime(t.ageMs)} · last touched ${relTime(t.quietMs)}`), acts);
+      ul.append(li);
+    }
+    box.append(ul);
+    setBusy(false);
+  }
+
+  // What only the server can say again: the gate's counters, parked tickets, spend. Never reloads the scene.
+  let refreshTimer = null;
+  const refreshSoon = () => { clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 1500); };
+  async function refresh() {
+    if (root.offsetParent === null || document.hidden) return;
+    try {
+      const r = snapshotImpl ? await snapshotImpl() : await fetchImpl("./api/city");
+      if (r.ok) state = applyLive(state, await r.json());
+    } catch { /* the stream's own banner says when the server is gone */ }
+    renderTop();
+    if (open?.parked && open.ids !== parkedIds()) openParked();
+    if (open?.data) openData(open.data, true);
+  }
+
+  function renderTop() {
+    const t = topBar(state), d = daylight(), g = gateStatus(state), parked = parkedRows(state).length;
+    const value = stat("EST. VALUE, NOT A CHARGE", t.usage ? estUsd(t.usage.usd) : "—"); value.title = COST_NOTE;
+    $("#citytop").replaceChildren(
+      stat("AGENTS", `${t.agentsActive} active · ${t.agentsTotal} total`), stat("TICKETS RUNNING", String(t.ticketsRunning)), stat("QUESTIONS", String(t.questionsWaiting)), stat("PARKED", String(parked)),
+      stat("TURNS", g.known ? `${g.running ?? "—"} running · ${g.waiting ?? "—"} waiting` : "—"),
+      stat("USAGE TODAY, UTC", t.usage ? `${t.usage.turns} turns · ${Math.round(t.usage.tokens / 1000)}k tokens` : "—"), value,
+      stat("STOCKHOLM", `${d.text} ${d.light > 0.5 ? "☀" : d.light > 0.2 ? "◐" : "☾"}`),
+    );
+    const banner = $("#citypaused");
+    banner.hidden = !g.paused;
+    banner.replaceChildren();
+    if (g.paused) {
+      banner.append(el("b", null, `City paused until ${g.paused.text} Stockholm (in ${g.paused.inText}).`), el("span", null, ` ${g.running ?? "—"} turns running, ${g.waiting ?? "—"} waiting. Turns in progress continue after the reset.`));
+      if (g.paused.reason) banner.append(el("div", "why", g.paused.reason));
+    }
+    $("#cityparked").hidden = !parked;
+    $("#cityparkedsum").textContent = `${parked} parked ${parked === 1 ? "ticket waits" : "tickets wait"} for you.`;
   }
 
   function renderDom() {
-    const t = topBar(state), d = daylight();
-    $("#citytop").replaceChildren(
-      stat("AGENTS", `${t.agentsActive} active · ${t.agentsTotal} total`), stat("TICKETS RUNNING", String(t.ticketsRunning)), stat("QUESTIONS", String(t.questionsWaiting)),
-      stat("USAGE TODAY, UTC", t.usage ? `${t.usage.turns} turns · ${Math.round(t.usage.tokens / 1000)}k tokens · $${fmt(t.usage.usd, 2)}` : "—"),
-      stat("STOCKHOLM", `${d.text} ${d.light > 0.5 ? "☀" : d.light > 0.2 ? "◐" : "☾"}`),
-    );
+    renderTop();
+    const names = ["HQ", ...departmentNames(state)];
     const list = $("#citydepts"); list.replaceChildren(el("h3", null, "Departments"));
-    for (const name of ["HQ", ...Object.keys(state.departments)]) { const b = el("button", "dept", name); b.style.borderLeftColor = deptColor(name); b.dataset.building = name; b.onclick = () => openDept(name); list.append(b); }
+    for (const name of names) { const off = state.departments[name]?.state === "archived"; const b = el("button", off ? "dept off" : "dept", off ? `${name} (archived)` : name); b.style.borderLeftColor = deptColor(name); b.dataset.building = name; b.onclick = () => openDept(name); list.append(b); }
+    list.append(el("h3", null, "Records"));
+    for (const [key, label, go] of [["workforce", "Workforce", () => openData(workforceView())], ["costs", "Costs (estimates)", () => openData(costsView())], ["health", "Health", () => openData(healthView())], ["parked", `Parked (${parkedRows(state).length})`, openParked]]) { const b = el("button", "dept rec", label); b.dataset.view = key; b.onclick = go; list.append(b); }
     const a11y = $("#citylist"); a11y.replaceChildren();
-    for (const name of ["HQ", ...Object.keys(state.departments)]) { const b = el("button", null, `Building: ${name}`); b.dataset.building = name; b.onclick = () => openDept(name); a11y.append(b); }
+    for (const name of names) { const b = el("button", null, `Building: ${name}`); b.dataset.building = name; b.onclick = () => openDept(name); a11y.append(b); }
     for (const a of Object.values(state.agents)) { if (a.state === "retired") continue; const b = el("button", null, `Agent: ${a.id} (${a.role}, ${MODEL_NAME[a.model] ?? a.model})`); b.dataset.agent = a.id; b.onclick = () => { const p = people.get(a.id); if (p) clickAgent(p); else openAgent(a.id); }; a11y.append(b); }
     feedDom();
     if (open?.dept) openDept(open.dept);
+    if (open?.parked && open.ids !== parkedIds()) openParked();
   }
   const stat = (k, v) => { const s = el("div", "stat"); s.append(el("span", "k", k), el("b", null, v)); return s; };
   function feedDom() {
@@ -389,6 +641,9 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
   events.addEventListener("jarvis-sse-error", () => { streamLost = true; problem("Live updates from Jarvis stopped. Reconnecting…"); });
   events.addEventListener("jarvis-sse-open", () => { if (streamLost) { streamLost = false; problem(null); load(); } });
 
+  $("#cityparkedbtn").onclick = () => openParked();
+  setInterval(refresh, 20000); // the gate's counters have no events of their own
+
   // The frame loop: walks, bobs, status animations, camera tweens, day and night.
   let last = performance.now(), fpsN = 0, fpsT = last;
   function frame(now) {
@@ -401,7 +656,7 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
     const s = 22 / view.zoom, aspect = w / Math.max(1, h);
     camera.left = -s * aspect; camera.right = s * aspect; camera.top = s; camera.bottom = -s;
     camera.position.set(view.target.x + 60, 60, view.target.z + 60); camera.lookAt(view.target); camera.updateProjectionMatrix();
-    const d = daylight();
+    const d = daylight(), halted = !!gateStatus(state).paused;
     sun.intensity = 0.25 + d.light * 0.9; sky.intensity = 0.35 + d.light * 0.5;
     (scene.background ??= new THREE.Color()).setHSL(0.62, 0.5, 0.03 + d.light * 0.35);
     for (const b of buildings.values()) {
@@ -418,14 +673,21 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
         if (dist < 0.1 || still) { p.position.copy(to); const then = u.walk.then; u.walk = null; then?.(); } else { p.position.lerp(to, Math.min(1, (u.walk.speed * dt) / dist)); p.lookAt(to.x, p.position.y, to.z); const sw = Math.sin(now / 90) * 0.5; u.legL.rotation.x = sw; u.legR.rotation.x = -sw; u.armL.rotation.x = -sw; u.armR.rotation.x = sw; }
       } else if (!still) {
         u.legL.rotation.x = u.legR.rotation.x = 0;
-        const typing = st === "working" ? Math.sin(now / 70 + u.bob) * 0.35 : 0;
-        u.armL.rotation.x = -0.6 * (st === "working") + typing; u.armR.rotation.x = -0.6 * (st === "working") - typing;
+        const busy = st === "working" && !halted; // a paused city's turns are waiting, nobody is typing
+        const typing = busy ? Math.sin(now / 70 + u.bob) * 0.35 : 0;
+        u.armL.rotation.x = -0.6 * busy + typing; u.armR.rotation.x = -0.6 * busy - typing;
         if (a.id === "jarvis") p.position.y = 0.4 + Math.sin(now / 600) * 0.2;
         if (a.id === "orchestrator") u.prop && (u.prop.rotation.z = Math.sin(now / 250) * 0.8);
-        if (st === "working" && Math.random() < dt * 1.5) sparks(p.position.clone().add(new THREE.Vector3(0.6, 1.4, 0.4)));
+        if (busy && Math.random() < dt * 1.5) sparks(p.position.clone().add(new THREE.Vector3(0.6, 1.4, 0.4)));
       }
       u.mug.visible = st === "idle" && !CORE.has(a.id);
       u.mark.visible = st === "waiting_on_owner";
+      if (u.markFor !== st) {
+        u.markFor = st;
+        if (u.stateMark) { u.stateMark.removeFromParent(); u.stateMark.material.map.dispose(); u.stateMark.material.dispose(); u.stateMark = null; }
+        const m = STATE_MARK[st];
+        if (m) { u.stateMark = textSprite(m[0], { fg: m[1], bg: "rgba(0,0,0,0)", size: 48 }); u.stateMark.position.set(0, 3.6, 0); p.add(u.stateMark); }
+      }
       if (u.mark.visible && !still) u.mark.position.y = 3.6 + Math.abs(Math.sin(now / 250)) * 0.5;
       u.label.visible = view.zoom > 1.8;
       if (u.reaction) {
