@@ -470,7 +470,7 @@ export async function handleCity(req, res, city, path, phone = false) {
   if (req.method === "GET" && path === "/api/city") return sendJson(res, 200, scrubDeep(city.snapshot()));
   const url = new URL(req.url, "http://localhost");
   if (req.method === "GET") {
-    const { health, loadIntegrations, probeIntegrations, workforce } = await import("city");
+    const { departmentReport, health, loadIntegrations, probeIntegrations, workforce } = await import("city");
     if (path === "/api/city/agent") {
       const id = url.searchParams.get("id") ?? "";
       if (!/^[\w-]{1,64}$/.test(id) || !city.ledger.getAgent(id)) return sendJson(res, 404, { error: "no such agent" });
@@ -478,6 +478,10 @@ export async function handleCity(req, res, city, path, phone = false) {
     }
     if (path === "/api/city/costs") return sendJson(res, 200, city.ledger.costReport());
     if (path === "/api/city/workforce") return sendJson(res, 200, scrubDeep(workforce(city.ledger)));
+    if (path === "/api/city/report") {
+      const days = Number(url.searchParams.get("days") ?? 7);
+      return days > 0 && days <= 365 ? sendJson(res, 200, scrubDeep(departmentReport(city.ledger, { days }))) : sendJson(res, 400, { error: "bad days" });
+    }
     if (path === "/api/city/health") return sendJson(res, 200, health(city.ledger, city.gate));
     if (path === "/api/city/departments") return sendJson(res, 200, scrubDeep(city.ledger.departments().filter((d) => d.state !== "deleted")));
     if (path === "/api/city/skills") return sendJson(res, 200, city.listSkills().map(({ name, description, version }) => ({ name, description, version })));
@@ -697,7 +701,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 // The city runs inside this process: Jarvis's session, the core agents and the ledger at ~/.jarvis.
 // shortcut: one process at a time owns the ledger (this server or the CLI), two would both resume the same tickets; add a lock when both must run.
 async function cityChat(dataDir) {
-  const { OPENCLAW_BIN, assertNoApiKey, createCity, createOpenClawRunner, createRunner, loadPolicy, sdkEnv } = await import("city");
+  const { OPENCLAW_BIN, assertNoApiKey, createCity, createImprover, createOpenClawRunner, createRunner, loadPolicy, sdkEnv } = await import("city");
   assertNoApiKey();
   const policy = loadPolicy();
   const env = await sdkEnv(withJarvisBin(process.env));
@@ -706,6 +710,8 @@ async function cityChat(dataDir) {
   const openclawRunner = existsSync(OPENCLAW_BIN) ? createOpenClawRunner({ policy, env, dataDir: home }) : undefined;
   const city = createCity({ runner, openclawRunner, policy, log });
   const chat = createCityChat({ city, runner, dataDir, logger: log });
+  const [repo] = JSON.parse(await readFile(AUTOMATIONS_PATH, "utf8")).github_repos ?? [];
+  if (repo) createImprover({ city, repo, log });
   city.resume().catch((err) => log(`resume failed: ${err.message}`));
   return chat;
 }

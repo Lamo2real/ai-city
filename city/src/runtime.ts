@@ -12,6 +12,7 @@ import { canMove, type WorkerState } from "./lifecycle.ts";
 import { createMemory, SECRET, type MemoryScope, type Visibility } from "./memory.ts";
 import { createGate } from "./scheduler.ts";
 import { createTrace } from "./observability.ts";
+import { lessonFor } from "./measure.ts";
 import { estimateUsd } from "./openclaw.ts";
 import { checkWorkflow, fill, loadWorkflows, WORKFLOWS_DIR, type Workflow } from "./workflows.ts";
 import { branchState, allocateWorkspace, releaseWorkspace } from "./workspaces.ts";
@@ -450,7 +451,7 @@ export function createCity(opts: CityOptions) {
     if (id) aborts.set(id, (aborts.get(id) ?? new Set()).add(ctrl));
     const guard = guardFor(a, ticket);
     let acted = false;
-    return gate.run(({ attempt, signal, restarted }) => run({
+    return gate.run(({ attempt, signal, restarted }) => { if (attempt && id) ledger.updateTicket(id, { retries: (ledger.getTicket(id)?.retries ?? 0) + 1 }); return run({
       ...req, attempt, signal, capabilities: a.capabilities, fallbackModel: policy.models?.fallback?.[req.model],
       guard: (tool, input) => {
         const d = guard(tool, input);
@@ -459,7 +460,7 @@ export function createCity(opts: CityOptions) {
         return d;
       },
       prompt: restarted ? `[Your previous attempt was cut off. Check what is already done before repeating anything.]\n${req.prompt}` : req.prompt,
-    }), ctrl.signal, { nested: a.id === "reviewer" || !!req.forkSession, canRetry: () => !acted }).finally(() => { if (id) { aborts.get(id)?.delete(ctrl); if (!aborts.get(id)?.size) aborts.delete(id); } });
+    }); }, ctrl.signal, { nested: a.id === "reviewer" || !!req.forkSession, canRetry: () => !acted }).finally(() => { if (id) { aborts.get(id)?.delete(ctrl); if (!aborts.get(id)?.size) aborts.delete(id); } });
   }
 
   const request = (a: AgentRow, ticket: Ticket | undefined, over: { prompt: string; resume?: string | null; model?: string; tools?: boolean }) => {
@@ -600,6 +601,7 @@ export function createCity(opts: CityOptions) {
     const t = setStatus(ticketId, status, { result: { ...current.result, summary: summary.slice(0, 800), artifacts } });
     if (status === "done") setWorker(t.to, "review");
     else if (status === "failed") setWorker(t.to, "failed");
+    if (status === "done" || status === "failed") keepLesson(t);
     if (TERMINAL.has(status)) retireIfDone(t.to);
     const report = `[report from ${t.to} on ticket ${t.id}] status: ${status}. ${summary}${artifacts.length ? ` Artifacts: ${artifacts.join(", ")}` : ""}`;
     if (!OWNER_SIDE.has(t.from)) {
@@ -612,6 +614,15 @@ export function createCity(opts: CityOptions) {
     deliver("secretary", `[result for the owner's ticket ${t.id}] goal: ${t.goal}\n${report}`, t)
       .then((r) => emit({ type: "result", ticket_id: t.id, status, summary: r.text.trim() || summary, artifacts }))
       .catch((err: Error) => { log(`secretary failed: ${err.message}`); emit({ type: "result", ticket_id: t.id, status, summary, artifacts }); });
+  }
+
+  // Automatic and cheap: no model call, and the secret filter refuses the whole line if it has to.
+  function keepLesson(t: Ticket): void {
+    const a = ledger.getAgent(t.to);
+    if (!a || t.kind === "direct_instruction") return;
+    const { usd } = ledger.db.prepare("SELECT COALESCE(SUM(usd), 0) AS usd FROM costs WHERE ticket_id = ?").get(t.id) as { usd: number };
+    try { memory.remember({ ...lessonFor(t, a, usd), agent: a.id, ticket_id: t.id }); }
+    catch (err) { log(`${t.id}: no lesson kept: ${(err as Error).message}`); }
   }
 
   function retireIfDone(agentId: string): void {
@@ -1337,6 +1348,10 @@ export function createCity(opts: CityOptions) {
     askAgent,
     findAgent,
     checkMerges,
+    // For the self-improvement gate: the Reviewer and the owner, reached the usual way.
+    review: (ticketId: string, prompt: string) => deliver("reviewer", prompt, ledger.getTicket(ticketId)).then((r) => r.text),
+    askOwner: (ticketId: string, text: string, why: string) => ask("orchestrator", { ticket_id: ticketId, blocking: false, questions: [{ text, default: "ok", options: ["ok"], ...(why ? { why } : {}) }] }),
+    tellOwner: (ticketId: string, summary: string, artifacts: string[]) => emit({ type: "result", ticket_id: ticketId, status: "done", summary, artifacts }),
     close: () => { closed = true; clearInterval(mergeTimer); ledger.close(); },
   };
 }

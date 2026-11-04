@@ -25,6 +25,7 @@ export interface Ticket {
   deadline?: string | null;
   status: TicketStatus;
   review_rounds?: number;
+  retries?: number; // turns the reliability gate ran again after a transient error
   result?: { summary?: string; artifacts?: string[]; checks?: { name: string; passed: boolean }[]; cost_usd?: number };
   depends_on?: string[];
   gate?: boolean;

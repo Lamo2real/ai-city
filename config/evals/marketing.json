@@ -1,0 +1,14 @@
+{
+  "department": "Marketing",
+  "mission": "Writes copy that follows the brief.",
+  "tasks": [
+    {
+      "id": "taglines-to-brief",
+      "goal": "Write three taglines for Lumo, a solar desk lamp, to {{workdir}}/taglines.txt: exactly three lines, one tagline per line, each at most 60 characters, nothing else in the file. At least one must contain the word Lumo.",
+      "acceptance_criteria": ["three lines, each at most 60 characters, one naming Lumo"],
+      "pass": [
+        { "type": "command", "argv": ["node", "-e", "const a=require('assert');const l=require('fs').readFileSync('taglines.txt','utf8').trim().split('\\n');a.strictEqual(l.length,3);a.ok(l.every(x=>x.trim()&&x.length<=60));a.ok(l.some(x=>/lumo/i.test(x)))"] }
+      ]
+    }
+  ]
+}
