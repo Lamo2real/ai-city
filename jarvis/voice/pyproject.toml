@@ -8,7 +8,7 @@ dependencies = []
 [project.optional-dependencies]
 # The real pipeline. Audio in and out, Silero VAD and smart-turn come with `local` and
 # `local-smart-turn`; Kokoro and Piper are the offline fallbacks; Cartesia is in core.
-pipeline = ["pipecat-ai[local,local-smart-turn,mlx-whisper,kokoro,piper]==1.15.0"]
+pipeline = ["pipecat-ai[local,local-smart-turn,silero,whisper,mlx-whisper,kokoro,piper]==1.15.0"]
 
 [dependency-groups]
 dev = ["pytest>=8"]

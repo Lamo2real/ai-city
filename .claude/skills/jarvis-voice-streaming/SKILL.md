@@ -28,7 +28,7 @@ The prompt makes Haiku open with a short contextual lead-in ("Math it is —"). 
 
 ## Voice
 - Main: Cartesia Sonic (latest model), one stock British male voice, picked by ear and fixed in `config/voice.json`. Swedish via the same model when the owner speaks Swedish.
-- Offline fallback: Kokoro-MLX `bm_george` (English); Piper sv_SE (Swedish).
+- Offline fallback: Kokoro `bm_george` (English, Pipecat's ONNX service); Piper sv_SE (Swedish).
 - Original voice only: never clone or imitate a real actor's or film character's voice.
 - API key from Keychain `jarvis.cartesia`. Keep one warm WebSocket to avoid cold-start latency.
 

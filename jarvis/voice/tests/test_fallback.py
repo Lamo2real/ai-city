@@ -1,4 +1,6 @@
-from jarvis_voice.fallback import EngineRouter, detect_language, select_engine
+import time
+
+from jarvis_voice.fallback import EngineRouter, OnlineProbe, detect_language, select_engine
 
 
 def test_language_is_guessed_from_the_words():
@@ -23,3 +25,12 @@ def test_pulling_the_network_shows_in_the_log_once():
     assert router.route("Hej, det är klart nu.") == ("piper", "sv")
     assert router.route("Hello sir, the report is ready.") == ("cartesia", "en")
     assert lines == ["tts: cartesia (en, online)", "tts: kokoro (en, offline fallback)", "tts: piper (sv, offline fallback)", "tts: cartesia (en, online)"]
+
+
+def test_the_probe_answers_from_memory_and_follows_the_network():
+    answers = [True, False]
+    probe = OnlineProbe(check=lambda: answers.pop(0) if len(answers) > 1 else answers[0], every_s=0.01)
+    deadline = time.monotonic() + 2
+    while probe() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert probe() is False
