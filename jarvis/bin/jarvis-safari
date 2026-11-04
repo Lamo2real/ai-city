@@ -93,11 +93,11 @@ export async function run(argv, deps) {
 }
 
 async function defaultDeps() {
-  const [{ createSafariMac }, { createSafari }, { createAudit }, { createLedgerCheck }] = await Promise.all([
-    import("../safari/mac.js"), import("../safari/safari.js"), import("../safari/audit.js"), import("../safari/ledger.js"),
+  const [{ createSafariMac }, { createSafari }, { createAudit }, { createSpendCheck }] = await Promise.all([
+    import("../safari/mac.js"), import("../safari/safari.js"), import("../safari/audit.js"), import("../safari/spend.js"),
   ]);
   const readStdin = async () => { let s = ""; for await (const c of process.stdin) s += c; return s; };
-  return { readStdin, safari: createSafari({ mac: createSafariMac(), audit: createAudit(), isApproved: createLedgerCheck() }) };
+  return { readStdin, safari: createSafari({ mac: createSafariMac(), audit: createAudit(), spend: createSpendCheck() }) };
 }
 
 const isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);

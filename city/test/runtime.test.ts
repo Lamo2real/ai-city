@@ -413,3 +413,33 @@ test("an existing install's core rows are refreshed from the prompts: old tools 
   assert.ok(!jarvisTurn.allowedTools.some((t) => /osascript/.test(t)));
   city.close();
 });
+
+test("spend_approval: only the orchestrator can send one, to Jarvis, valid for at most 30 minutes, stored done, never dispatched", async () => {
+  const { runner, calls } = fakeRunner({});
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy });
+  const inMin = (m: number) => new Date(Date.now() + m * 60_000).toISOString();
+  const approval = (extra: Record<string, unknown> = {}) => ({ origin: "https://shop.test", max_amount: 49.9, currency: "EUR", expires_at: inMin(20), ...extra });
+  const send = (agentId: string, ticket: Record<string, unknown>) => city.toolsFor(agentId).find((t) => t.name === "send_ticket")!.handler({ ticket }) as Promise<{ id: string; status: string; from: string }>;
+  const base = { to: "jarvis", kind: "spend_approval", goal: "Owner approved the shoes" };
+
+  const t = await send("orchestrator", { ...base, approval: approval() });
+  assert.deepEqual([t.status, t.from], ["done", "orchestrator"]);
+  assert.equal(city.ledger.getTicket(t.id)!.approval!.origin, "https://shop.test");
+  await city.idle();
+  assert.equal(calls.length, 0, "an approval is a permission slip: no agent turn");
+
+  // forged: a status/from the sender chose, or a sender that isn't the orchestrator
+  const forged = await send("orchestrator", { ...base, status: "open", from: "owner", approval: approval() });
+  assert.deepEqual([forged.status, forged.from], ["done", "orchestrator"]);
+  await assert.rejects(send("jarvis", { ...base, from: "orchestrator", approval: approval() }), /only the orchestrator/);
+  assert.throws(() => city.sendTicket({ ...base, approval: approval() }), /only the orchestrator/);
+
+  await assert.rejects(send("orchestrator", { ...base, approval: approval({ expires_at: inMin(31) }) }), /at most 30 minutes/);
+  await assert.rejects(send("orchestrator", { ...base, approval: approval({ expires_at: inMin(-1) }) }), /in the future/);
+  await assert.rejects(send("orchestrator", { ...base, approval: approval({ origin: "https://shop.test/checkout" }) }), /exactly an http\(s\) origin/);
+  await assert.rejects(send("orchestrator", { ...base, approval: approval({ origin: "javascript:alert(1)" }) }), /origin/);
+  await assert.rejects(send("orchestrator", { ...base }), /needs an approval/);
+  await assert.rejects(send("orchestrator", { ...base, to: "orchestrator", approval: approval() }), /goes to jarvis/);
+  await assert.rejects(send("orchestrator", { ...base, approval: approval({ extra: 1 }) }), /unknown field/);
+  city.close();
+});

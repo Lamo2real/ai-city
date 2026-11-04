@@ -60,6 +60,7 @@ const CORE: Array<{ name: "jarvis" | "orchestrator" | "secretary" | "reviewer"; 
   { name: "secretary", parent: "orchestrator" },
   { name: "reviewer", parent: "orchestrator" },
 ];
+const SPEND_APPROVAL_MAX_MS = 30 * 60 * 1000;
 const OWNER_SIDE = new Set(["owner", "jarvis"]);
 const TERMINAL = new Set<Ticket["status"]>(["done", "failed", "cancelled"]);
 const newId = (prefix: string) => `${prefix}-${randomUUID().slice(0, 8)}`;
@@ -216,13 +217,34 @@ export function createCity(opts: CityOptions) {
     retireIfDone(a.parent);
   }
 
+  function checkSpendApproval(t: Ticket): void {
+    const a = t.approval;
+    if (t.to !== "jarvis") throw new Error("a spend_approval ticket goes to jarvis");
+    if (!a) throw new Error("a spend_approval ticket needs an approval { origin, max_amount, currency, expires_at }");
+    let u: URL;
+    try { u = new URL(a.origin); } catch { throw new Error("approval.origin must be a URL origin like https://shop.example"); }
+    if (!/^https?:$/.test(u.protocol) || u.origin !== a.origin) throw new Error("approval.origin must be exactly an http(s) origin: scheme and host, no path");
+    const expires = Date.parse(a.expires_at);
+    const ahead = expires - Date.parse(now());
+    if (!Number.isFinite(expires) || ahead <= 0) throw new Error("approval.expires_at must be in the future");
+    if (ahead > SPEND_APPROVAL_MAX_MS) throw new Error("approval.expires_at must be at most 30 minutes ahead");
+  }
+
   function sendTicket(from: string, input: Record<string, unknown>): Ticket {
     const draft = { id: newId("t"), status: "open", created_at: now(), kind: "task", ...input, from: typeof input.from === "string" && input.from ? input.from : from } as Record<string, unknown>;
     for (const k of Object.keys(draft)) if (draft[k] === undefined) delete draft[k];
+    // A spend approval is a permission slip, so nobody can forge one: only the Orchestrator sends it, as itself, to Jarvis.
+    if (draft.kind === "spend_approval") {
+      if (from !== "orchestrator") throw new Error("only the orchestrator can send a spend_approval ticket");
+      draft.from = from;
+      draft.status = "done";
+    }
     const ticket = validate<Ticket>("ticket", draft);
     agent(ticket.to);
+    if (ticket.kind === "spend_approval") checkSpendApproval(ticket);
     if (!ledger.putTicket(ticket)) return ledger.getTicket(ticket.id)!;
     emit({ type: "ticket.status", ticket, previous: null });
+    if (ticket.kind === "spend_approval") return ticket; // read by jarvis-safari from the ledger; there is no work to dispatch
     if (ticket.kind === "direct_instruction" && OWNER_SIDE.has(ticket.from)) {
       // The owner's reply, relayed by Jarvis, is the answer to what that agent asked.
       for (const q of ledger.openQuestions().filter((o) => o.question.asked_by === ticket.to)) {

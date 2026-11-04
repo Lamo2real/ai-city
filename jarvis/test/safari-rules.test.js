@@ -6,15 +6,15 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import vm from "node:vm";
 import { createSafari, normalizeUrl } from "../safari/safari.js";
-import { pageJs, isPaymentPage, writesSensitiveField, wrapContent } from "../safari/page.js";
+import { pageJs, isPaymentPage, writesSensitiveField, guardBypass, wrapContent } from "../safari/page.js";
 import { createAudit } from "../safari/audit.js";
-import { createLedgerCheck } from "../safari/ledger.js";
+import { createSpendCheck } from "../safari/spend.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "safari-test-"));
 const marker = (src) => /^\/\*jarvis:(\w+)\*\//.exec(src)?.[1];
 
 // A fake Safari: answers page scripts by their marker.
-function rig({ page = {}, ledger = () => false } = {}) {
+function rig({ page = {}, spend = () => ({ ok: false, reason: null }) } = {}) {
   const runs = [];
   const mac = {
     isRunning: async () => true, launch: async () => runs.push("launch"),
@@ -29,7 +29,7 @@ function rig({ page = {}, ledger = () => false } = {}) {
   const dir = tmp();
   const audit = createAudit({ path: join(dir, "Jarvis", "access-audit.jsonl"), now: () => new Date("2026-01-01T00:00:00Z") });
   const lines = () => { try { return readFileSync(audit.path, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-  return { safari: createSafari({ mac, audit, isApproved: ledger }), runs, audit, lines };
+  return { safari: createSafari({ mac, audit, spend }), runs, audit, lines };
 }
 const TAB = { window: 1, index: 0 };
 const SHOP = { probe: { url: "https://shop.test/checkout?token=abc", cardInputs: false } };
@@ -52,9 +52,10 @@ test("js that writes into a password or code field is refused before anything ru
   assert.equal(writesSensitiveField(`document.querySelector("input[type=password]").value`), false); // reading is fine
 });
 
-test("the in-page guard blocks writes to password fields and lets other fields through", () => {
-  class Input { constructor(a) { this.a = a; this._v = ""; } get value() { return this._v; } set value(v) { this._v = v; } get type() { return this.a.type || "text"; } set type(v) { this.a.type = v; } get defaultValue() { return ""; } set defaultValue(v) {} getAttribute(k) { return this.a[k] ?? null; } setAttribute(k, v) { this.a[k] = v; } focus() {} dispatchEvent() {} get tagName() { return "INPUT"; } }
+function domRig(extra = {}) {
+  class Input { constructor(a) { this.a = a; this._v = ""; } get value() { return this._v; } set value(v) { this._v = v; } get type() { return this.a.type || "text"; } set type(v) { this.a.type = v; } get defaultValue() { return ""; } set defaultValue(v) {} getAttribute(k) { return this.a[k] ?? null; } setAttribute(k, v) { this.a[k] = v; } focus() {} dispatchEvent() {} get tagName() { return "INPUT"; } get name() { return this.a.name; } get id() { return this.a.id; } }
   const fields = { "#pw": new Input({ type: "password" }), "#user": new Input({ type: "text" }), "#otp": new Input({ type: "text", autocomplete: "one-time-code" }) };
+  for (const [k, a] of Object.entries(extra)) fields[k] = new Input(a);
   const ctx = {
     HTMLInputElement: Input, Element: Input, Event: class {}, EvalError, HTMLFormElement: class {},
     Document: class { execCommand() { return true; } },
@@ -62,7 +63,11 @@ test("the in-page guard blocks writes to password fields and lets other fields t
     location: { href: "https://a.test/" },
   };
   ctx.window = ctx; vm.createContext(ctx);
-  const go = (src) => JSON.parse(vm.runInContext(src, ctx));
+  return { ctx, fields, go: (src) => JSON.parse(vm.runInContext(src, ctx)) };
+}
+
+test("the in-page guard blocks writes to password fields and lets other fields through", () => {
+  const { fields, go } = domRig();
   assert.equal(go(pageJs.fill("#pw", "x")).error, "PASSWORD_FIELD");
   assert.equal(go(pageJs.fill("#otp", "123456")).error, "PASSWORD_FIELD");
   assert.equal(go(pageJs.fill("#user", "ali")).url, "https://a.test/");
@@ -103,30 +108,57 @@ test("click, submit and js on a payment page are refused without a spend ticket"
   }
 });
 
-test("a spend ticket must be a finished approval from the orchestrator (real ledger file, read-only)", async () => {
-  const path = join(tmp(), "ledger.db");
+// A real ledger file (as the city writes it) and a real used-tickets file, both in a temp dir.
+function spendRig() {
+  const dir = tmp();
+  const path = join(dir, "ledger.db");
   const db = new DatabaseSync(path);
   db.exec("CREATE TABLE tickets (id TEXT PRIMARY KEY, to_agent TEXT NOT NULL, from_agent TEXT NOT NULL, status TEXT NOT NULL, parent_id TEXT, json TEXT NOT NULL, updated_at TEXT NOT NULL)");
-  const add = db.prepare("INSERT INTO tickets VALUES (?, 'jarvis', ?, ?, NULL, '{}', 'now')");
-  add.run("ok-1", "orchestrator", "done"); add.run("pending-1", "orchestrator", "in_progress"); add.run("other-1", "spotify-api-dev", "done");
-  db.close();
-  const isApproved = createLedgerCheck({ path });
-  for (const [id, allowed] of [["ok-1", true], ["pending-1", false], ["other-1", false], ["missing", false]]) {
-    const r = rig({ page: { ...SHOP, submit: { url: "https://shop.test/checkout" } }, ledger: isApproved });
-    const p = r.safari.submit(TAB, "form", { spendTicket: id });
-    if (allowed) {
-      assert.equal((await p).ok, true);
-      assert.equal(r.lines().at(-1).spend_ticket, "ok-1");
-      assert.equal(r.lines().at(-1).result, "ok");
-    } else {
-      await assert.rejects(p, { code: "SPEND_NEEDS_APPROVAL" });
-      assert.equal(r.lines().at(-1).result, "refused:SPEND_NEEDS_APPROVAL");
-    }
+  const NOW = Date.parse("2026-01-01T12:00:00Z");
+  const at = (min) => new Date(NOW + min * 60_000).toISOString();
+  const add = (id, { from = "orchestrator", to = "jarvis", status = "done", kind = "spend_approval", approval, created = at(0) } = {}) =>
+    db.prepare("INSERT INTO tickets VALUES (?, ?, ?, ?, NULL, ?, 'now')").run(id, to, from, status, JSON.stringify({ id, from, to, status, kind, goal: "g", created_at: created, ...(approval && { approval }) }));
+  const ok = (extra = {}) => ({ origin: "https://shop.test", max_amount: 20, currency: "EUR", expires_at: at(20), ...extra });
+  const usedPath = join(dir, "Jarvis", "spend-used.json");
+  return { add, ok, at, usedPath, authorize: createSpendCheck({ ledgerPath: path, usedPath, now: () => NOW }), close: () => db.close() };
+}
+
+test("spend approvals: an ordinary finished orchestrator ticket, a wrong origin, an expired, a stale-window and a reused approval are all refused; a valid one works once", () => {
+  const r = spendRig();
+  r.add("approved", { approval: r.ok() });
+  r.add("ordinary", { kind: "task" });                                   // finished orchestrator ticket, but not an approval
+  r.add("open-one", { status: "open", approval: r.ok() });
+  r.add("from-worker", { from: "py-dev", approval: r.ok() });
+  r.add("to-other", { to: "secretary", approval: r.ok() });
+  r.add("expired", { approval: r.ok({ expires_at: r.at(-1) }) });
+  r.add("too-long", { approval: r.ok({ expires_at: r.at(31) }) });       // longer than 30 minutes from creation
+  r.add("no-approval", {});
+  r.close();
+  const url = "https://shop.test/checkout?x=1";
+  for (const [id, page, why] of [
+    ["ordinary", url, /isn't a spend approval/], ["open-one", url, /isn't a spend approval/], ["from-worker", url, /isn't a spend approval/], ["to-other", url, /isn't a spend approval/],
+    ["no-approval", url, /incomplete/], ["expired", url, /expired/], ["too-long", url, /too long/], ["missing", url, /doesn't exist/],
+    ["approved", "https://evil.test/checkout", /different site/], ["approved", "https://shop.test.evil.com/checkout", /different site/], ["approved", "http://shop.test/checkout", /different site/],
+  ]) {
+    const v = r.authorize(id, page);
+    assert.equal(v.ok, false, `${id} ${page}`);
+    assert.match(v.reason, why, `${id} ${page}`);
   }
-  assert.equal(createLedgerCheck({ path: join(tmp(), "none.db") })("ok-1"), false);
-  const writable = new DatabaseSync(path); // the check must not have changed the file
-  assert.equal(writable.prepare("SELECT count(*) AS n FROM tickets").get().n, 3);
-  writable.close();
+  assert.throws(() => statSync(r.usedPath), "refusals spend nothing");
+  assert.equal(r.authorize("approved", url).ok, true);
+  assert.match(r.authorize("approved", url).reason, /already used/);
+  assert.equal(statSync(r.usedPath).mode & 0o777, 0o600);
+  assert.ok(JSON.parse(readFileSync(r.usedPath, "utf8")).used.approved);
+});
+
+test("through the gate: a payment click or submit with a valid approval goes once, then needs a new one", async () => {
+  const r0 = spendRig();
+  r0.add("approved", { approval: r0.ok() });
+  r0.close();
+  const r = rig({ page: { ...SHOP, submit: { url: "https://shop.test/checkout" } }, spend: r0.authorize });
+  assert.equal((await r.safari.submit(TAB, "form", { spendTicket: "approved" })).ok, true);
+  assert.equal(r.lines().at(-1).spend_ticket, "approved");
+  await assert.rejects(r.safari.submit(TAB, "form", { spendTicket: "approved" }), (e) => e.code === "SPEND_NEEDS_APPROVAL" && /already used/.test(e.message));
 });
 
 test("non-payment pages need no ticket; plain clicks aren't audited but submitting ones are", async () => {
@@ -175,7 +207,7 @@ test("page errors map to plain errors; javascript: URLs are refused", async () =
   const r = rig({ page: { exists: { found: false }, read: { error: "NO_SUCH_ELEMENT" } } });
   await assert.rejects(r.safari.read(TAB), { code: "NO_SUCH_ELEMENT" });
   let t = 0;
-  const w = createSafari({ mac: { isRunning: async () => true, runJs: async () => JSON.stringify({ found: false }) }, audit: r.audit, isApproved: () => false, sleep: async () => {}, now: () => (t += 4000) });
+  const w = createSafari({ mac: { isRunning: async () => true, runJs: async () => JSON.stringify({ found: false }) }, audit: r.audit, spend: () => ({ ok: false }), sleep: async () => {}, now: () => (t += 4000) });
   await assert.rejects(w.wait(TAB, "#never", 10), { code: "WAIT_TIMEOUT" });
   assert.equal(normalizeUrl("example.com/a"), "https://example.com/a");
   for (const bad of ["javascript:alert(1)", "data:text/html,x", ""]) assert.throws(() => normalizeUrl(bad), { name: "SafariError" });
@@ -184,6 +216,81 @@ test("page errors map to plain errors; javascript: URLs are refused", async () =
 test("Safari is launched when it isn't running", async () => {
   const calls = [];
   const mac = { isRunning: async () => false, launch: async () => calls.push("launch"), windows: async () => (calls.push("windows"), []) };
-  await createSafari({ mac, audit: {}, isApproved: () => false }).windows();
+  await createSafari({ mac, audit: {}, spend: () => ({ ok: false }) }).windows();
   assert.deepEqual(calls, ["launch", "windows"]);
+});
+
+test("only http, https and about:blank can be opened or navigated to", async () => {
+  const r = rig();
+  for (const bad of ["file:///etc/passwd", "data:text/html,<script>1</script>", "javascript:alert(document.cookie)", "about:srcdoc", "ftp://x.test/", "view-source:https://a.test"]) {
+    assert.throws(() => normalizeUrl(bad), { code: "BAD_URL" }, bad);
+    await assert.rejects(r.safari.open(bad), { code: "BAD_URL" }, bad);
+    await assert.rejects(r.safari.navigate(TAB, bad), { code: "BAD_URL" }, bad);
+  }
+  assert.equal(normalizeUrl("about:blank"), "about:blank");
+  assert.equal(normalizeUrl("localhost:3000/a"), "https://localhost:3000/a");
+  assert.equal(normalizeUrl("http://a.test/x"), "http://a.test/x");
+});
+
+test("js code that reaches round the guard is refused before it runs", async () => {
+  const r = rig();
+  for (const code of [
+    `window.__jarvisGuard.set(document.querySelector("#a"), "x")`,
+    `document.body.appendChild(document.createElement("iframe")).contentWindow.HTMLInputElement`,
+    `frames[0].document`,
+    `Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set`,
+    `form.innerHTML = '<input type=text value=x>'`,
+    `el.outerHTML = "<input>"`,
+    `el.insertAdjacentHTML("afterend", "<input>")`,
+    `document.write("<input>")`,
+    `el.removeAttribute("type")`,
+    `el.attributes.type.value = "text"`,
+    `Reflect.set(el, "value", "x")`,
+  ]) {
+    await assert.rejects(r.safari.js(TAB, code), (e) => e.code === "PASSWORD_FIELD" && /won't run code/.test(e.message), code);
+    assert.ok(guardBypass(code), code);
+  }
+  assert.equal(r.runs.length, 0, "nothing reached the page");
+  assert.equal(guardBypass("document.title"), null);
+  assert.equal(guardBypass("document.querySelectorAll('a').length"), null);
+});
+
+test("the guard helper on the page refuses sensitive fields itself and can't be switched off", () => {
+  const { ctx, fields, go } = domRig();
+  go(pageJs.js("1")); // installs the guard
+  const G = vm.runInContext("window.__jarvisGuard", ctx);
+  assert.throws(() => G.set(fields["#pw"], "x"), /PASSWORD_FIELD/);
+  assert.throws(() => G.set(fields["#otp"], "1"), /PASSWORD_FIELD/);
+  G.set(fields["#user"], "ali");
+  assert.equal(fields["#user"]._v, "ali");
+  assert.ok(Object.isFrozen(G));
+  vm.runInContext("window.__jarvisGuard.sens = function(){return false}; window.__jarvisGuard.set = function(el, v){ el._v = v }", ctx);
+  assert.throws(() => G.set(fields["#pw"], "x"), /PASSWORD_FIELD/);
+  assert.equal(fields["#pw"]._v, "");
+});
+
+test("short numeric code inputs are treated like one-time codes", () => {
+  const { fields, go } = domRig({
+    "#pin": { inputmode: "numeric", maxlength: "6", name: "verification_code" },
+    "#zip": { inputmode: "numeric", maxlength: "5", name: "zip" },
+    "#long": { inputmode: "numeric", maxlength: "20", name: "verification_code" },
+    "#txt": { maxlength: "6", name: "verification_code" },
+    "#aria": { inputmode: "tel", maxlength: "4", "aria-label": "Enter your PIN" },
+  });
+  for (const sel of ["#pin", "#aria"]) assert.equal(go(pageJs.fill(sel, "123456")).error, "PASSWORD_FIELD", sel);
+  for (const sel of ["#zip", "#long", "#txt"]) assert.equal(go(pageJs.fill(sel, "12345")).url, "https://a.test/", sel);
+  assert.equal(fields["#pin"]._v, "");
+});
+
+test("payment gating also covers 'Buy now'-style buttons and forms that post to a payment URL", async () => {
+  const quiet = { url: "https://a.test/cart", cardInputs: false };
+  for (const [text, gated] of [["Place order", true], ["BUY NOW", true], ["Betala", true], ["Köp", true], ["Proceed to checkout", true], ["Add to cart", false]]) {
+    const r = rig({ page: { probe: { ...quiet, targetText: text }, click: { url: quiet.url, submits: false } } });
+    if (gated) await assert.rejects(r.safari.click(TAB, "#b"), { code: "SPEND_NEEDS_APPROVAL" }, text);
+    else assert.equal((await r.safari.click(TAB, "#b")).ok, true, text);
+  }
+  const post = rig({ page: { probe: { ...quiet, formAction: "https://pay.shop.test/payment/confirm" } } });
+  await assert.rejects(post.safari.submit(TAB, "form#f"), { code: "SPEND_NEEDS_APPROVAL" });
+  assert.equal(isPaymentPage({ url: "https://a.test/", targetText: "Buy now" }, "js"), false, "js is only gated by the page, best-effort");
+  assert.equal(isPaymentPage({ url: "https://a.test/", formAction: "https://a.test/billing" }, "submit"), true);
 });

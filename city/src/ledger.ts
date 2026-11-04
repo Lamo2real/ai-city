@@ -13,13 +13,14 @@ export interface Ticket {
   from: string;
   to: string;
   cc?: string[];
-  kind: "task" | "fix" | "direct_instruction" | "review";
+  kind: "task" | "fix" | "direct_instruction" | "review" | "spend_approval";
   goal: string;
   owner_words?: string;
   acceptance_criteria?: string[];
   scope?: string[];
   budget_usd?: number;
   deadline?: string | null;
+  approval?: { origin: string; max_amount: number; currency: string; expires_at: string };
   status: TicketStatus;
   review_rounds?: number;
   result?: { summary?: string; artifacts?: string[]; checks?: { name: string; passed: boolean }[]; cost_usd?: number };

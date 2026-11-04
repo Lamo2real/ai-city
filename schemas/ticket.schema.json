@@ -11,13 +11,25 @@
     "from": { "type": "string", "description": "agent id or 'owner'" },
     "to": { "type": "string" },
     "cc": { "type": "array", "items": { "type": "string" } },
-    "kind": { "enum": ["task", "fix", "direct_instruction", "review"] },
+    "kind": { "enum": ["task", "fix", "direct_instruction", "review", "spend_approval"] },
     "goal": { "type": "string" },
     "owner_words": { "type": "string", "description": "The owner's exact request, verbatim" },
     "acceptance_criteria": { "type": "array", "items": { "type": "string" } },
     "scope": { "type": "array", "items": { "type": "string" }, "description": "Repos, paths, accounts in scope" },
     "budget_usd": { "type": "number", "minimum": 0 },
     "deadline": { "type": ["string", "null"], "format": "date-time" },
+    "approval": {
+      "type": "object",
+      "description": "Only on kind spend_approval, sent by the Orchestrator to Jarvis after the owner approved a purchase. Single use; jarvis-safari checks the page origin and expiry.",
+      "required": ["origin", "max_amount", "currency", "expires_at"],
+      "additionalProperties": false,
+      "properties": {
+        "origin": { "type": "string", "description": "Scheme and host of the site the purchase may happen on, e.g. https://shop.example" },
+        "max_amount": { "type": "number", "minimum": 0 },
+        "currency": { "type": "string", "minLength": 3, "maxLength": 3 },
+        "expires_at": { "type": "string", "format": "date-time", "description": "At most 30 minutes after the ticket is sent" }
+      }
+    },
     "status": { "enum": ["open", "in_progress", "waiting_on_owner", "in_review", "done", "failed", "cancelled"] },
     "review_rounds": { "type": "integer", "minimum": 0, "default": 0 },
     "result": {

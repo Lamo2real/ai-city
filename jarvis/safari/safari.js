@@ -1,7 +1,7 @@
 // Safari commands with the owner's rules enforced in code: no passwords or codes, payments need approval,
 // page content is labelled as data, and risky actions are audited.
 import { SafariError, MESSAGES } from "./errors.js";
-import { pageJs, isPaymentPage, writesSensitiveField, wrapContent } from "./page.js";
+import { pageJs, isPaymentPage, writesSensitiveField, guardBypass, wrapContent } from "./page.js";
 
 const REFUSED = new Set(["PASSWORD_FIELD", "SPEND_NEEDS_APPROVAL"]);
 const PAGE_MESSAGES = {
@@ -15,15 +15,16 @@ const PAGE_MESSAGES = {
 export function normalizeUrl(input) {
   const raw = String(input ?? "").trim();
   if (!raw) throw new SafariError("BAD_URL", "I need a URL.");
-  const url = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`;
+  if (/^about:blank$/i.test(raw)) return "about:blank";
+  const url = /^[a-z][a-z0-9+.-]*:/i.test(raw) && !/^[a-z0-9.-]+:\d+(\/|$)/i.test(raw) ? raw : `https://${raw}`;
   let parsed;
   try { parsed = new URL(url); } catch { throw new SafariError("BAD_URL", "That doesn't look like a URL."); }
-  // javascript: and data: URLs would run code in a page without passing the guards.
-  if (!["http:", "https:", "file:", "about:"].includes(parsed.protocol)) throw new SafariError("BAD_URL", "I only open http, https and file addresses.");
+  // javascript:, data: and file: would run code or read local files without passing the guards.
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new SafariError("BAD_URL", "I only open http and https addresses.");
   return url;
 }
 
-export function createSafari({ mac, audit, isApproved, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now }) {
+export function createSafari({ mac, audit, spend, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now }) {
   async function ensureRunning() {
     if (!(await mac.isRunning())) await mac.launch();
   }
@@ -42,11 +43,14 @@ export function createSafari({ mac, audit, isApproved, sleep = (ms) => new Promi
   }
 
   // Payment gate for click / submit / js. Returns { url, spendTicket? } or throws SPEND_NEEDS_APPROVAL.
-  async function gate(tab, spendTicket) {
-    const probe = await page(tab, pageJs.probe());
-    if (!isPaymentPage(probe)) return { url: probe.url };
-    if (spendTicket && (await isApproved(spendTicket))) return { url: probe.url, spendTicket };
-    const msg = spendTicket ? `${MESSAGES.SPEND_NEEDS_APPROVAL} That ticket isn't a finished approval from the orchestrator.` : MESSAGES.SPEND_NEEDS_APPROVAL;
+  // A payment page is judged by its card inputs and URL; a click also by the button's text, a submit by the form's action.
+  // Using a valid approval spends it (spend.authorize records it), so a retry needs a new one.
+  async function gate(tab, spendTicket, action, selector) {
+    const probe = await page(tab, pageJs.probe(action === "js" ? undefined : selector));
+    if (!isPaymentPage(probe, action)) return { url: probe.url };
+    const verdict = spendTicket ? spend(spendTicket, probe.url) : { ok: false, reason: null };
+    if (verdict.ok) return { url: probe.url, spendTicket };
+    const msg = verdict.reason ? `${MESSAGES.SPEND_NEEDS_APPROVAL} I can't use that ticket: ${verdict.reason}.` : MESSAGES.SPEND_NEEDS_APPROVAL;
     throw Object.assign(new SafariError("SPEND_NEEDS_APPROVAL", msg), { url: probe.url, spend_ticket: spendTicket });
   }
 
@@ -88,7 +92,9 @@ export function createSafari({ mac, audit, isApproved, sleep = (ms) => new Promi
     js: (tab, code, { spendTicket } = {}) => opened(() =>
       audited({ action: "js", selector: null }, async () => {
         if (writesSensitiveField(code)) throw new SafariError("PASSWORD_FIELD", MESSAGES.PASSWORD_FIELD);
-        const g = await gate(tab, spendTicket);
+        const bypass = guardBypass(code);
+        if (bypass) throw new SafariError("PASSWORD_FIELD", `${MESSAGES.PASSWORD_FIELD} (I won't run code that touches ${bypass}.)`);
+        const g = await gate(tab, spendTicket, "js");
         let p = await page(tab, pageJs.js(code)).catch((e) => (e.code === "EVAL_BLOCKED" ? null : Promise.reject(e)));
         if (p === null) p = { url: g.url, value: JSON.stringify(await mac.runJs(tab.window, tab.index, pageJs.rawJs(code))), raw: true };
         const text = p.jsError ? `Error: ${p.jsError}` : p.value;
@@ -97,7 +103,7 @@ export function createSafari({ mac, audit, isApproved, sleep = (ms) => new Promi
 
     click: (tab, selector, { spendTicket } = {}) => opened(() =>
       audited({ action: "click", selector }, async () => {
-        const g = await gate(tab, spendTicket);
+        const g = await gate(tab, spendTicket, "click", selector);
         const p = await page(tab, pageJs.click(selector));
         return { ok: true, url: p.url, submits: p.submits, spend_ticket: g.spendTicket };
       }, (out) => out.submits || out.spend_ticket)),
@@ -110,7 +116,7 @@ export function createSafari({ mac, audit, isApproved, sleep = (ms) => new Promi
 
     submit: (tab, selector, { spendTicket } = {}) => opened(() =>
       audited({ action: "submit", selector }, async () => {
-        const g = await gate(tab, spendTicket);
+        const g = await gate(tab, spendTicket, "submit", selector);
         const p = await page(tab, pageJs.submit(selector));
         return { ok: true, url: p.url ?? g.url, spend_ticket: g.spendTicket };
       })),
