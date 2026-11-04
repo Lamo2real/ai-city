@@ -138,6 +138,29 @@ test("an OpenClaw worker's ticket waits for its answer, then ends with the run t
   city.close();
 });
 
+test("an answer that arrives before the asking run ends does not let that run finish the ticket", async () => {
+  let runs = 0;
+  let city!: ReturnType<typeof createCity>;
+  const openclawRunner: Runner = async (req) => {
+    runs++;
+    if (runs === 1) {
+      const t = JSON.parse(req.prompt.slice(req.prompt.indexOf('{"')));
+      const { id } = await req.tools.find((x) => x.name === "ask_user")!.handler({ question: { ticket_id: t.id, asked_by: req.agentId, path: "p", blocking: false, questions: [{ text: "which?", options: ["a", "b"], default: "a" }] } }) as { id: string };
+      while (city.ledger.getQuestion(id)?.status === "open") await new Promise((r) => setTimeout(r, 5));
+      return { text: "I am waiting for an answer.", sessionId: "o1", costUsd: 0, tokens: 0 };
+    }
+    return { text: "The real result.", sessionId: `o${runs}`, costUsd: 0, tokens: 0 };
+  };
+  const manager: Runner = async (req) => ({ text: req.prompt.includes("[question from") ? '{"answers":["a"]}' : "", sessionId: `s-${req.agentId}`, costUsd: 0, tokens: 0 });
+  city = createCity({ runner: manager, openclawRunner, dataDir: dir(), ledgerPath: ":memory:", policy: basePolicy() });
+  const { manager: m } = city.createDepartment({ name: "Ops12", mission: "work" });
+  await hireWorker(city, m, "oc-x", { executor: "openclaw" });
+  const t = await tool(city, m, "send_ticket")({ ticket: { to: "oc-x", goal: "go" } }) as { id: string };
+  await within(city.idle(), "the worker never finished", 3000);
+  assert.equal(city.ledger.getTicket(t.id)?.result?.summary, "The real result.");
+  city.close();
+});
+
 test("a turn that already acted is not run again; one that only read is, with a warning", async () => {
   const gateFast = { ...basePolicy() };
   const prompts: string[] = [];

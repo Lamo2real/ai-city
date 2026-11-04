@@ -447,7 +447,9 @@ export function createCity(opts: CityOptions) {
         // Not while it waits on a question: the run that gets the answer finishes the ticket it asked about.
         if (target.executor === "openclaw" && !closed && !ledger.openQuestions().some((o) => o.question.asked_by === t.to)) {
           const id = t.kind === "direct_instruction" ? t.parent_id : t.id;
-          if (id && ledger.getTicket(id)?.to === t.to && ledger.getTicket(id)?.status === "in_progress") finish(id, "done", r.text || "Finished without a message.", []);
+          // A quick answer can already be queued when the run that asked ends: the run that receives it finishes the ticket.
+          const followUp = ledger.inbox(t.to).some((x) => x.id !== t.id && x.kind === "direct_instruction" && x.parent_id === id && !TERMINAL.has(x.status));
+          if (id && !followUp && ledger.getTicket(id)?.to === t.to && ledger.getTicket(id)?.status === "in_progress") finish(id, "done", r.text || "Finished without a message.", []);
         }
         // A direct instruction is done once it has been heard; nobody reports on it.
         if (t.kind === "direct_instruction" && ledger.getTicket(t.id)?.status === "in_progress") { setStatus(t.id, "done"); retireIfDone(t.to); }
