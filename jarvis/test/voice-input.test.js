@@ -101,6 +101,26 @@ test("the Merge button needs the right id, for that session", async () => {
   assert.equal(ghCalls().filter((c) => c.startsWith("pr merge")).length, count + 1);
 });
 
+const get = (path) => new Promise((resolve, reject) => {
+  request({ host: "127.0.0.1", port, path, method: "GET" }, (res) => { let d = ""; res.on("data", (c) => { d += c; }); res.on("end", () => resolve({ status: res.statusCode, body: JSON.parse(d || "{}") })); }).on("error", reject).end();
+});
+
+test("GET /api/confirm/pending returns the waiting item without changing it; a bad sessionId is 400", async () => {
+  assert.deepEqual((await get(`/api/confirm/pending?sessionId=${SID}`)).body, { confirm: null });
+  addRequest();
+  const before = ghCalls().length;
+  const r = await get(`/api/confirm/pending?sessionId=${SID}`);
+  assert.equal(r.status, 200);
+  assert.equal(r.body.confirm.number, 7);
+  assert.equal(r.body.confirm.id, gate.describe(SID).id, "same id on every read");
+  assert.deepEqual((await get("/api/confirm/pending?sessionId=other")).body, { confirm: null });
+  assert.equal((await get("/api/confirm/pending?sessionId=bad%20id")).status, 400);
+  assert.equal((await get("/api/confirm/pending")).status, 400);
+  assert.equal(ghCalls().length, before, "reading merges nothing");
+  assert.ok(gate.current(SID), "and does not spend the confirmation");
+  gate.cancel(SID);
+});
+
 test("a confirmation expires after two minutes", async () => {
   addRequest();
   const { id } = gate.describe(SID);

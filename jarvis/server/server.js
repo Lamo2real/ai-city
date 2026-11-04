@@ -531,6 +531,12 @@ export function createServer({ booqyDir, dataDir, port, getState, chat, speak = 
     if (req.method === "GET" && path === "/api/live/status") return sendJson(res, 200, { available: !phone && liveAvailable() });
     if (req.method === "GET" && path === "/api/events") return events(req, res);
     if (path.startsWith("/api/city")) return await handleCity(req, res, talk.city, path);
+    // Read-only: what is waiting for this session, so another tab or Telegram-started merge shows up. Confirming is still POST /api/confirm only.
+    if (req.method === "GET" && path === "/api/confirm/pending") {
+      const sessionId = new URL(req.url, "http://localhost").searchParams.get("sessionId");
+      if (typeof sessionId !== "string" || !SESSION_ID.test(sessionId)) return sendJson(res, 400, { error: "bad sessionId" });
+      return sendJson(res, 200, { confirm: phone ? null : mergeGate.describe(sessionId) });
+    }
     if (req.method === "POST" && path === "/api/confirm") return await handleConfirm(req, res, { gate: mergeGate, speak });
     if (req.method === "POST" && path === "/api/listen") return await handleListen(req, res, { transcribe: hear });
     if (req.method !== "GET" && req.method !== "HEAD") return sendJson(res, 405, { error: "method not allowed" });
