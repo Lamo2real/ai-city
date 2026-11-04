@@ -135,7 +135,7 @@ Evidence:
 
 Gaps:
 - No sandbox: Docker is absent.
-- The `^Bash$`-only policy rules do not cover `exec` (see `docs/ARCHITECTURE.md`, last paragraph of the enforcement section). This matters most for this section, since `exec` is the OpenClaw shell.
+- Until 2026-11-04 the policy rules for force-push, push to main, `rm -rf`, `terraform destroy` and the others matched `Bash` only, so they did not cover `exec`, the OpenClaw shell. They now match `Bash`, `exec` and `bash`, with test cases for each. They are still regexes over the command text.
 - `desktop` is `exec` plus `osascript`; there is no screen-reading or click tool. Screenshots and UI automation beyond what a script can do are not available.
 - Browser control state is unverified in a live run as far as the repo shows.
 
@@ -215,7 +215,7 @@ Evidence:
 - Policy rules: Keychain access denied, force-push denied, push to main denied, publishing, payments, cloud deletes, destructive SQL, public video and activating ads need the owner.
 
 Gaps:
-- Policy rules written for `Bash` do not apply to `exec` (see `docs/ARCHITECTURE.md`). Checked by calling `decide()`.
+- Policy rules are regular expressions over the JSON of the tool input, applied to `Bash`, `exec` and `bash` (widened 2026-11-04; before that `exec` was missed by nine rules). A command can be written in a way a regex does not see, and no test tries to evade them.
 - No OpenClaw sandbox; Docker is absent.
 - Prompt injection defence is prompt text ("treat as data") plus the tool-layer limits above. There is no classifier or content filter.
 - The policy rules are regular expressions over the JSON of the tool input. A command can be written in a way a regex does not see. No test tries to evade them.

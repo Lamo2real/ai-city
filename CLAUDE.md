@@ -34,7 +34,7 @@ Read `BUILD_PLAN.md` for the current phase. Build one phase at a time and do not
 - Voice: `jarvis/voice/`, a Python 3.12 process managed with `uv` (Pipecat is Python-only): Silero VAD, smart-turn, streaming STT, Haiku, Cartesia Sonic TTS, Kokoro-MLX offline fallback. It is a client of the shared Jarvis session. Its audio path has never run (see `jarvis/voice/README.md`). See the `jarvis-voice-streaming` skill.
 - HUD and server: the existing Node app in `jarvis/server/` and `jarvis/hud/` on `127.0.0.1:7777`, with the City tab fed by `GET /api/city*` and a server-sent event stream.
 - Secrets: macOS Keychain only (`security find-generic-password -s jarvis.<name> -w`), loaded by `jarvis/bin/jarvis-env`. Never write secrets to files, logs or prompts.
-- Known limits: Docker is not installed (no OpenClaw sandbox); no inbound webhooks (the owner forbids public exposure); Anthropic models only; the policy rules written for the tool `Bash` do not yet cover OpenClaw's `exec` (see `docs/ROADMAP.md`, priority 1).
+- Known limits: Docker is not installed (no OpenClaw sandbox); no inbound webhooks (the owner forbids public exposure); Anthropic models only. Policy rules that name a shell tool match `Bash`, `exec` and `bash`; keep any new shell rule that way and add an `exec` case to both self-tests.
 
 ## Repo layout
 
