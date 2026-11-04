@@ -161,3 +161,20 @@ test("reset_session clears the stored session; only the orchestrator has it", as
   assert.equal(city.toolsFor("mgr-a").find((t) => t.name === "reset_session"), undefined);
   assert.throws(() => city.resetSession("mgr-a", "mgr-a"), /orchestrator only/);
 });
+
+test("a compaction turn records a per-turn cost delta, not the session's cumulative total", async () => {
+  let cum = 0;
+  const runner: Runner = async (req) => {
+    if (req.prompt.startsWith("/compact")) { cum = 0.13; return { text: "", sessionId: "S", costUsd: cum, usage: { input: 5, output: 1, cacheRead: 0, cacheWrite: 0 }, tokens: 6, contextTokens: 20_000, compact: { pre: 120_000, post: 20_000 } }; }
+    if (cum === 0) cum = 0.10;
+    return { text: "", sessionId: "S", costUsd: cum, contextTokens: 120_000, tokens: 10 };
+  };
+  const city = createCity({ runner, dataDir: mkdtempSync(join(tmpdir(), "city-")), ledgerPath: ":memory:", policy });
+  await city.toolsFor("orchestrator").find((t) => t.name === "hire_agent")!.handler({ spec: { id: "mgr-a", role: "m", kind: "manager", parent: "orchestrator", model: "claude-sonnet-5-5", mission: "m", tools: ["Read"], lifecycle: "persistent", budget_usd_per_day: 1, department: "IT" } });
+  const root = city.sendTicket({ to: "mgr-a", goal: "x" });
+  await city.idle();
+  city.sendTicket({ to: "mgr-a", goal: "y", parent_id: root.id });
+  await city.idle();
+  assert.equal(city.compactions()[0].method, "sdk_compact");
+  assert.ok(Math.abs(city.ledger.usageToday().usd - 0.13) < 1e-9, `got ${city.ledger.usageToday().usd}`);
+});
