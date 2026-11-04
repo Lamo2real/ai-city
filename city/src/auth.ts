@@ -30,11 +30,14 @@ export async function readKeychain(service: string): Promise<string | undefined>
 // inherit its context), and the OAuth token from the Keychain if the CLI is not
 // already logged in through its own store.
 const KEEP = new Set(["CLAUDE_CODE_OAUTH_TOKEN"]);
+// A worker can be steered by what it reads, and its shell inherits this. Tools that need access use their own login.
+const SECRET_NAME = /(TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|API_?KEY|ACCESS_?KEY|_PAT$|_KEY$)/i;
 export async function sdkEnv(env: NodeJS.ProcessEnv = process.env, keychain: (s: string) => Promise<string | undefined> = readKeychain): Promise<Record<string, string>> {
   assertNoApiKey(env);
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(env)) {
     if (v === undefined || k === "ANTHROPIC_API_KEY") continue;
+    if (SECRET_NAME.test(k) && !KEEP.has(k)) continue;
     if ((k === "CLAUDECODE" || k.startsWith("CLAUDE_CODE_") || k.startsWith("CLAUDE_AGENT_SDK_")) && !KEEP.has(k)) continue;
     out[k] = v;
   }
@@ -42,5 +45,6 @@ export async function sdkEnv(env: NodeJS.ProcessEnv = process.env, keychain: (s:
     const token = await keychain(OAUTH_KEYCHAIN_ITEM);
     if (token) out.CLAUDE_CODE_OAUTH_TOKEN = token;
   }
+  out.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = "1"; // Claude Code then keeps its own credentials out of the shells it starts
   return out;
 }

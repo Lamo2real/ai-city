@@ -1,10 +1,13 @@
 // Agent prompts live in agents/**/*.md with YAML-ish frontmatter (name, model,
 // effort, tools). This reads them and fills the {{placeholders}} of templates.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const AGENTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "agents");
+
+// Every worker can report to its sender and ask (its manager answers first), whatever its spec lists.
+export const WORKER_TOOLS = ["mcp__jarvis__report", "mcp__jarvis__ask_user", "mcp__jarvis__remember", "mcp__jarvis__recall", "mcp__jarvis__read_skill"];
 
 export interface AgentPrompt {
   name: string;
@@ -47,4 +50,29 @@ export function renderTemplate(kind: "manager" | "worker", values: Record<string
     if (!(key in values)) throw new Error(`template ${kind} needs {{${key}}}`);
     return values[key];
   });
+}
+
+// The organization's skills library: skills/<name>/SKILL.md. A new skill is a new folder, no code change.
+export const SKILLS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "skills");
+export interface Skill { name: string; description: string; version: string; path: string }
+export function listSkills(dir = SKILLS_DIR): Skill[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory() && existsSync(join(dir, e.name, "SKILL.md"))).map((e) => {
+    const path = join(dir, e.name, "SKILL.md");
+    const head = /^---\n([\s\S]*?)\n---/.exec(readFileSync(path, "utf8"))?.[1] ?? "";
+    const field = (k: string) => new RegExp(`^${k}:\\s*(.*)$`, "m").exec(head)?.[1].trim().replace(/^"(.*)"$/, "$1") ?? "";
+    return { name: e.name, description: field("description"), version: field("version") || "1", path };
+  }).sort((a, b) => a.name.localeCompare(b.name));
+}
+export function readSkill(name: string, dir = SKILLS_DIR): string {
+  if (!/^[a-z0-9-]+$/.test(name)) throw new Error("bad skill name");
+  const path = join(dir, name, "SKILL.md");
+  if (!existsSync(path)) throw new Error(`no skill ${name}; see list_skills`);
+  return readFileSync(path, "utf8");
+}
+// Cheap to carry in every prompt: names and one line each. The body is read only when needed.
+export function skillsIndex(names: string[], dir = SKILLS_DIR): string {
+  const all = new Map(listSkills(dir).map((s) => [s.name, s]));
+  const lines = [...new Set(names)].map((n) => all.get(n)).filter((s): s is Skill => !!s).map((s) => `- ${s.name}: ${s.description}`);
+  return lines.length ? `\n\n## Skills assigned to you\nRead one with read_skill before work it covers.\n${lines.join("\n")}` : "";
 }

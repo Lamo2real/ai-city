@@ -24,8 +24,16 @@ export interface Policy {
     max_workers_per_manager: number;
     daily_spend_usd_per_department: number;
     max_review_rounds: number;
+    max_concurrent_turns?: number;
+    turn_timeout_minutes?: number;
+    resume_max_age_hours?: number;
   };
+  // Compact a session before its next turn once its context reaches this share of the model's window.
+  session?: { compact_at_context_pct?: number; model_context_tokens?: Record<string, number> };
   rules: Rule[];
+  models?: { simple?: string; standard?: string; complex?: string; fallback?: Record<string, string>; prices_per_mtok?: Record<string, { input: number; output: number; cache_read: number; cache_write: number }> };
+  autonomy?: { read_tools?: string[] };
+  repos_roots?: string[];
 }
 
 // A department with no override gets the default, so a brand-new department is capped from its first hire.
@@ -36,6 +44,14 @@ export function departmentCap(policy: Policy, department: string): number {
   const caps = policy.caps.department_caps ?? {};
   const k = Object.keys(caps).find((name) => departmentKey(name) === departmentKey(department));
   return (k !== undefined ? caps[k] : undefined) ?? policy.caps.max_active_agents_per_department;
+}
+
+export const DEFAULT_CONTEXT_TOKENS = 200_000;
+// Window by model family (substring of the model id), from config/policy.json.
+export function contextWindow(model: string, policy: Policy): number {
+  const m = policy.session?.model_context_tokens ?? {};
+  const key = Object.keys(m).find((k) => k !== "default" && model.includes(k));
+  return (key ? m[key] : m.default) ?? DEFAULT_CONTEXT_TOKENS;
 }
 
 export const POLICY_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "config", "policy.json");
@@ -75,7 +91,8 @@ export function decide(toolName: string, toolInput: Record<string, unknown>, pol
   return found;
 }
 
-export const auditPath = (policy: Policy) => policy.audit_log.replace(/^~(?=$|\/)/, homedir());
+// A scratch JARVIS_HOME keeps its audit lines too, so a test run never writes into the real log.
+export const auditPath = (policy: Policy) => (process.env.JARVIS_HOME && policy.audit_log.startsWith("~/.jarvis/") ? policy.audit_log.replace("~/.jarvis", process.env.JARVIS_HOME) : policy.audit_log.replace(/^~(?=$|\/)/, homedir()));
 
 export function audit(policy: Policy, toolName: string, decision: Decision, reason: string, agent?: string): void {
   const path = auditPath(policy);

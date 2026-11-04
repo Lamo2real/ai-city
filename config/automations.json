@@ -1,0 +1,76 @@
+{
+  "routes": [
+    {
+      "match": "briefing.daily",
+      "agent": "secretary",
+      "goal": "Write the owner's daily briefing from the data below, in your usual structure."
+    },
+    {
+      "match": "github.run_failed",
+      "department": "Engineering",
+      "goal": "A GitHub Actions run failed. Find out why, and fix it or report what is needed.",
+      "complexity": "standard"
+    },
+    {
+      "match": "city.tickets_failed",
+      "agent": "orchestrator",
+      "goal": "Tickets failed recently. Decide for each: reassign, or tell the owner why it is dropped."
+    },
+    {
+      "match": "stripe.*",
+      "department": "Finance",
+      "goal": "A Stripe event arrived. Record it and report anything unusual. Never move money.",
+      "complexity": "simple"
+    },
+    {
+      "match": "lead.*",
+      "department": "Sales",
+      "goal": "A new lead arrived. Qualify it and report.",
+      "complexity": "simple"
+    },
+    {
+      "match": "aws.alarm",
+      "department": "Infrastructure",
+      "goal": "An AWS alarm fired. Investigate read-only and report.",
+      "complexity": "standard"
+    },
+    {
+      "match": "support.*",
+      "department": "Support",
+      "goal": "A customer support request arrived. Draft a reply and report; do not send it.",
+      "complexity": "simple"
+    }
+  ],
+  "schedules": [
+    {
+      "id": "daily-briefing",
+      "cron": "0 7 * * *",
+      "command": [
+        "jarvis/bin/city-event",
+        "briefing"
+      ],
+      "note": "One Sonnet turn a day."
+    },
+    {
+      "id": "github-failures",
+      "cron": "*/30 * * * *",
+      "command": [
+        "jarvis/bin/city-event",
+        "watch-github"
+      ],
+      "note": "No model call unless a run failed."
+    },
+    {
+      "id": "failed-tickets",
+      "cron": "0 * * * *",
+      "command": [
+        "jarvis/bin/city-event",
+        "watch-failures"
+      ],
+      "note": "No model call unless a ticket failed in the last hour."
+    }
+  ],
+  "github_repos": [
+    "Lamo2real/ai-city"
+  ]
+}
