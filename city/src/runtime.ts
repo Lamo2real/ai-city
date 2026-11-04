@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { z } from "zod";
-import { AGENTS_DIR, OPENCLAW_CAPABILITIES, SKILLS_DIR, WORKER_TOOLS, listSkills, loadCorePrompt, parsePrompt, readSkill, renderTemplate, skillsIndex, type AgentPrompt } from "./agents.ts";
+import { AGENTS_DIR, OPENCLAW_CAPABILITIES, SKILLS_DIR, WORKER_TOOLS, listSkills, loadCorePrompt, loadSkills, modelFor as hireModelFor, parsePrompt, readSkill, renderTemplate, skillsIndex, type AgentPrompt } from "./agents.ts";
 import { findOverlap, managerId, type Department } from "./departments.ts";
 import { canMove, type WorkerState } from "./lifecycle.ts";
 import { createMemory, SECRET, type MemoryScope, type Visibility } from "./memory.ts";
@@ -493,7 +493,7 @@ export function createCity(opts: CityOptions) {
   const allowedFor = (a: AgentRow): string[] => (a.kind === "core" ? [...promptOf(a).tools] : [...new Set([...promptOf(a).tools, ...a.tools, ...(a.kind === "worker" ? WORKER_TOOLS : [])])]);
   // An agent only carries the jarvis tools it may call: every extra tool schema is context it pays for on every turn.
   const toolsForTurn = (a: AgentRow): JarvisTool[] => { const allowed = new Set(allowedFor(a)); return toolsFor(a.id).filter((t) => allowed.has(`mcp__jarvis__${t.name}`)); };
-  const systemPromptFor = (a: AgentRow): string => promptOf(a).body + skillsIndex([...(a.skills ?? []), ...(a.department ? ledger.getDepartment(departmentKey(a.department))?.skills ?? [] : [])], skillsDir);
+  const systemPromptFor = (a: AgentRow): string => promptOf(a).body + (a.kind === "core" ? "" : `\n\n${loadSkills(agentsDir)}`) + skillsIndex([...(a.skills ?? []), ...(a.department ? ledger.getDepartment(departmentKey(a.department))?.skills ?? [] : [])], skillsDir);
   const modelFor = (a: AgentRow, ticket?: Ticket): string => (a.kind === "worker" && ticket?.complexity ? policy.models?.[ticket.complexity] ?? a.model : a.model);
 
   // Every model call in the city passes the gate: limit, usage-limit pause, retries, timeout, cancellation.
@@ -793,7 +793,7 @@ export function createCity(opts: CityOptions) {
     if (spec.kind === "worker" && ledger.children(by).length >= policy.caps.max_workers_per_manager) throw new Error(`cap reached: ${policy.caps.max_workers_per_manager} workers per manager`);
     if (overCap(department)) throw new Error(`cap reached: ${department} has spent today's budget`);
     // shortcut: tools are not checked against a per-department allowlist, policy.json has none yet; add one when departments get scopes.
-    const model = spec.model ?? policy.models?.[spec.complexity ?? "standard"] ?? "claude-sonnet-5-5";
+    const model = hireModelFor(spec.kind, by, spec.model ?? policy.models?.[spec.complexity ?? "standard"] ?? "claude-sonnet-5-5");
     if (spec.kind === "worker") spec.tools = [...new Set([...WORKER_TOOLS, ...spec.tools])];
     // By the owner's decision workers have no OS sandbox and full tools. The policy rules still apply to each call.
     // Browser only when asked for, because browser runs take turns: their ports are fixed.
