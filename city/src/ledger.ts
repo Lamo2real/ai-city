@@ -49,6 +49,15 @@ export interface AgentRow {
   total_cost_usd: number;
 }
 
+export interface Compaction {
+  agent_id: string;
+  session_before: string | null;
+  session_after: string | null;
+  tokens_before: number;
+  tokens_after: number;
+  method: string;
+}
+
 export interface Question {
   ticket_id: string;
   asked_by: string;
@@ -69,6 +78,7 @@ const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tickets (id TEXT PRIMARY KEY, to_agent TEXT NOT NULL, from_agent TEXT NOT NULL, status TEXT NOT NULL, parent_id TEXT, json TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, kind TEXT NOT NULL, parent TEXT NOT NULL, state TEXT NOT NULL, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS questions (id TEXT PRIMARY KEY, ticket_id TEXT NOT NULL, asked_by TEXT NOT NULL, status TEXT NOT NULL, json TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS compactions (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, session_before TEXT, session_after TEXT, tokens_before INTEGER NOT NULL, tokens_after INTEGER NOT NULL, method TEXT NOT NULL, ts TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS costs (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, ticket_id TEXT, usd REAL NOT NULL, tokens INTEGER NOT NULL DEFAULT 0, ts TEXT NOT NULL);
 -- The SDK's total_cost_usd is cumulative per session; this remembers the last one so each costs row is a delta.
 CREATE TABLE IF NOT EXISTS session_costs (session_id TEXT PRIMARY KEY, cumulative_usd REAL NOT NULL);
@@ -215,6 +225,16 @@ export function openLedger(path: string) {
       const day = now().slice(0, 10);
       const r = db.prepare("SELECT COALESCE(SUM(c.usd), 0) AS usd FROM costs c JOIN agents a ON a.id = c.agent_id WHERE c.ts >= ? AND json_extract(a.json, '$.department') = ?").get(day, department) as { usd: number };
       return r.usd;
+    },
+    // Every compaction: what it cost the session and how it was done (sdk_compact | handover_haiku | handover_ledger).
+    addCompaction(c: Compaction) {
+      db.prepare("INSERT INTO compactions (agent_id, session_before, session_after, tokens_before, tokens_after, method, ts) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .run(c.agent_id, c.session_before, c.session_after, c.tokens_before, c.tokens_after, c.method, now());
+    },
+    compactions: (agentId?: string) => db.prepare(`SELECT agent_id, session_before, session_after, tokens_before, tokens_after, method, ts FROM compactions ${agentId ? "WHERE agent_id = ?" : ""} ORDER BY id`).all(...(agentId ? [agentId] : [])) as unknown as Array<Compaction & { ts: string }>,
+    compactionStats(since = "") {
+      const rows = db.prepare("SELECT method, COUNT(*) AS n, SUM(tokens_before) AS before, SUM(tokens_after) AS after FROM compactions WHERE ts >= ? GROUP BY method").all(since) as unknown as Array<{ method: string; n: number; before: number; after: number }>;
+      return { count: rows.reduce((s, r) => s + r.n, 0), tokens_before: rows.reduce((s, r) => s + r.before, 0), tokens_after: rows.reduce((s, r) => s + r.after, 0), by_method: Object.fromEntries(rows.map((r) => [r.method, r.n])) };
     },
     close: () => db.close(),
   };

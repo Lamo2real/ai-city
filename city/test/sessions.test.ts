@@ -10,16 +10,23 @@ import type { Runner, TurnRequest } from "../src/sdk.ts";
 
 const policy = loadPolicy();
 let n = 0;
-function setup(ctx = 1000, pol = policy) {
+function setup(ctx = 1000, o: { sdkCompact?: boolean; haikuFails?: boolean } = {}) {
   const calls: TurnRequest[] = [];
-  const runner: Runner = async (req) => { calls.push(req); return { text: "", sessionId: `s${++n}`, costUsd: 0, contextTokens: ctx }; };
-  const city = createCity({ runner, dataDir: mkdtempSync(join(tmpdir(), "city-")), ledgerPath: ":memory:", policy: pol });
+  const runner: Runner = async (req) => {
+    calls.push(req);
+    if (req.prompt.startsWith("/compact")) {
+      if (o.sdkCompact === false) return { text: "", sessionId: "s-old", costUsd: 0, contextTokens: ctx };
+      return { text: "", sessionId: `c${++n}`, costUsd: 0, contextTokens: 20_000, compact: { pre: ctx, post: 20_000 } };
+    }
+    if (req.model.includes("haiku")) { if (o.haikuFails) throw new Error("haiku down"); return { text: "SUMMARY of work", sessionId: "h", costUsd: 0 }; }
+    return { text: "", sessionId: `s${++n}`, costUsd: 0, contextTokens: ctx };
+  };
+  const city = createCity({ runner, dataDir: mkdtempSync(join(tmpdir(), "city-")), ledgerPath: ":memory:", policy });
   const hire = (id: string, kind: "manager" | "worker", parent: string) => city.toolsFor(parent).find((t) => t.name === "hire_agent")!.handler({
     spec: { id, role: id, kind, parent, model: "claude-sonnet-5-5", mission: "m", tools: ["Read"], lifecycle: "persistent", budget_usd_per_day: 1, department: "IT" } });
   return { city, calls, hire };
 }
-// The scripted agents never report, so the runtime nags them; those reminder turns are not what is under test.
-const turnsOf = (calls: TurnRequest[], id: string) => calls.filter((c) => c.agentId === id && !c.prompt.includes("[reminder]"));
+const turnsOf = (calls: TurnRequest[], id: string) => calls.filter((c) => c.agentId === id && !c.prompt.includes("[reminder]") && !c.prompt.startsWith("/compact") && !c.model.includes("haiku"));
 
 test("a manager resumes within one root ticket and starts fresh on a new one, with a handover", async () => {
   const { city, calls, hire } = setup();
@@ -43,22 +50,50 @@ test("a manager resumes within one root ticket and starts fresh on a new one, wi
   assert.ok(t3.prompt.length < 6200);
 });
 
-test("a manager session over the context threshold rotates", async () => {
-  const { city, calls, hire } = setup(200_000);
-  await hire("mgr-a", "manager", "orchestrator");
-  const root = city.sendTicket({ to: "mgr-a", goal: "big" });
-  await city.idle();
-  city.sendTicket({ to: "mgr-a", goal: "more", parent_id: root.id });
-  await city.idle();
-  assert.equal(turnsOf(calls, "mgr-a")[1].resume, null);
-  assert.match(turnsOf(calls, "mgr-a")[1].prompt, /^\[handover/);
-  const small = setup(200_000, { ...policy, caps: { ...policy.caps, session_rotate_context_tokens: 300_000 } });
-  await small.hire("mgr-a", "manager", "orchestrator");
-  const r = small.city.sendTicket({ to: "mgr-a", goal: "big" });
-  await small.city.idle();
-  small.city.sendTicket({ to: "mgr-a", goal: "more", parent_id: r.id });
-  await small.city.idle();
-  assert.ok(turnsOf(small.calls, "mgr-a")[1].resume, "under a raised threshold it resumes");
+async function twoTurns(ctx: number, o = {}) {
+  const t = setup(ctx, o);
+  await t.hire("mgr-a", "manager", "orchestrator");
+  const root = t.city.sendTicket({ to: "mgr-a", goal: "big" });
+  await t.city.idle();
+  t.city.ledger.updateTicket(root.id, { status: "in_progress" });
+  t.city.sendTicket({ to: "mgr-a", goal: "more", parent_id: root.id });
+  await t.city.idle();
+  return { ...t, root, second: turnsOf(t.calls, "mgr-a")[1] };
+}
+
+test("a session at 60% of the window is compacted with the SDK's /compact before the next turn, and logged", async () => {
+  const { city, calls, second } = await twoTurns(120_000);
+  assert.ok(calls.some((c) => c.agentId === "mgr-a" && c.prompt.startsWith("/compact") && c.resume));
+  assert.ok(second.resume?.startsWith("c"), "the turn resumes the compacted session");
+  const [c] = city.compactions("mgr-a");
+  assert.deepEqual([c.method, c.tokens_before, c.tokens_after], ["sdk_compact", 120_000, 20_000]);
+  assert.ok(c.session_before && c.session_after);
+  const k = city.compactions().length; // reminder turns in this scripted setup compact too, as the fake keeps reporting 120k
+  assert.deepEqual(city.compactionStats(), { count: k, tokens_before: 120_000 * k, tokens_after: 20_000 * k, by_method: { sdk_compact: k } });
+});
+
+test("under 60% nothing is compacted", async () => {
+  const { city, calls, second } = await twoTurns(119_999);
+  assert.ok(!calls.some((c) => c.prompt.startsWith("/compact")));
+  assert.ok(second.resume);
+  assert.equal(city.compactions().length, 0);
+});
+
+test("if /compact does nothing, a fresh session gets a Haiku summary plus the ledger handover", async () => {
+  const { city, calls, second } = await twoTurns(150_000, { sdkCompact: false });
+  assert.equal(second.resume, null);
+  assert.match(second.prompt, /SUMMARY of work/);
+  assert.match(second.prompt, /Open tickets:/);
+  assert.ok(calls.some((c) => c.model === "claude-haiku-5-5" && c.resume));
+  assert.equal(city.compactions()[0].method, "handover_haiku");
+  assert.equal(city.compactions()[0].tokens_before, 150_000);
+});
+
+test("if Haiku also fails, the ledger handover alone seeds the fresh session", async () => {
+  const { city, second } = await twoTurns(150_000, { sdkCompact: false, haikuFails: true });
+  assert.equal(second.resume, null);
+  assert.match(second.prompt, /^\[handover/);
+  assert.equal(city.compactions()[0].method, "handover_ledger");
 });
 
 test("handover lists open tickets of the agent and its children, decisions and artifacts", async () => {

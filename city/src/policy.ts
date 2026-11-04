@@ -23,9 +23,18 @@ export interface Policy {
     max_workers_per_manager: number;
     daily_spend_usd_per_department: number;
     max_review_rounds: number;
-    session_rotate_context_tokens?: number; // a manager session bigger than this is replaced by a fresh one + handover
   };
+  // Compact a session before its next turn once its context reaches this share of the model's window.
+  session?: { compact_at_context_pct?: number; model_context_tokens?: Record<string, number> };
   rules: Rule[];
+}
+
+export const DEFAULT_CONTEXT_TOKENS = 200_000;
+// Window by model family (substring of the model id), from config/policy.json.
+export function contextWindow(model: string, policy: Policy): number {
+  const m = policy.session?.model_context_tokens ?? {};
+  const key = Object.keys(m).find((k) => k !== "default" && model.includes(k));
+  return (key ? m[key] : m.default) ?? DEFAULT_CONTEXT_TOKENS;
 }
 
 export const POLICY_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "config", "policy.json");

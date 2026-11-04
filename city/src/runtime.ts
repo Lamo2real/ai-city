@@ -9,9 +9,9 @@ import { z } from "zod";
 import { AGENTS_DIR, loadCorePrompt, parsePrompt, renderTemplate, type AgentPrompt } from "./agents.ts";
 import { checksText, runChecks, type Check, type Exec } from "./checks.ts";
 import { now, openLedger, type AgentRow, type Question, type QuestionRow, type Ticket } from "./ledger.ts";
-import { auditPath, loadPolicy, type Policy } from "./policy.ts";
+import { auditPath, contextWindow, loadPolicy, type Policy } from "./policy.ts";
 import { validate } from "./schemas.ts";
-import type { JarvisTool, Runner, TurnResult } from "./sdk.ts";
+import { UsageLimit, type JarvisTool, type Runner, type TurnResult } from "./sdk.ts";
 
 export type CityEvent =
   // For Jarvis: what the owner must hear.
@@ -173,14 +173,64 @@ export function createCity(opts: CityOptions) {
     return rootOf(ticket);
   }
 
+  const request = (a: AgentRow, ticket: Ticket | undefined, over: { prompt: string; resume?: string | null; model?: string; tools?: boolean }) => {
+    const p = promptOf(a);
+    return opts.runner({
+      agentId: a.id, systemPrompt: p.body, model: over.model ?? a.model, effort: over.tools === false ? "low" : ((a.effort as AgentPrompt["effort"]) ?? p.effort),
+      allowedTools: over.tools === false ? [] : [...new Set([...p.tools, ...a.tools])], tools: over.tools === false ? [] : toolsFor(a.id), prompt: over.prompt, resume: over.resume, cwd: cwdFor(ticket),
+    });
+  };
+  const KEEP = "Keep: your identity and role, open tickets (id, goal, status), decisions and answered questions, file paths and constraints. Drop raw logs and file dumps.";
+
+  // Compaction. 1) the SDK's own /compact on the resumed session (source: the CLI's built-in slash
+  // command; the SDK reports it with a compact_boundary message). 2) If that fails, a fresh session
+  // seeded with a summary written by Haiku, else the ledger handover alone.
+  async function compact(a: AgentRow, ticket?: Ticket): Promise<{ sessionId: string | null; handover: string }> {
+    const before = a.context_tokens ?? 0;
+    const log2 = (method: string, after: number, sessionAfter: string | null) => ledger.addCompaction({ agent_id: a.id, session_before: a.session_id ?? null, session_after: sessionAfter, tokens_before: before, tokens_after: after, method });
+    try {
+      const r = await request(a, ticket, { prompt: `/compact ${KEEP}`, resume: a.session_id, tools: false });
+      ledger.recordTurn(a.id, ticket?.id ?? null, r.sessionId, r.costUsd, r.usage ?? {}, r.tokens ?? 0);
+      if (r.compact) {
+        ledger.updateAgent(a.id, { session_id: r.sessionId, context_tokens: r.compact.post });
+        log2("sdk_compact", r.compact.post, r.sessionId);
+        return { sessionId: r.sessionId, handover: "" };
+      }
+    } catch (err) {
+      if (err instanceof UsageLimit) throw err;
+      log(`${a.id}: /compact failed: ${(err as Error).message}`);
+    }
+    const ledgerPart = handover(a.id);
+    let summary = "";
+    try {
+      const r = await request(a, ticket, { prompt: `Write a handover summary of this whole session for your successor, under 1000 words. ${KEEP}`, resume: a.session_id, model: "claude-haiku-5-5", tools: false });
+      ledger.recordTurn(a.id, ticket?.id ?? null, r.sessionId, r.costUsd, r.usage ?? {}, r.tokens ?? 0);
+      summary = r.text.trim();
+    } catch (err) {
+      if (err instanceof UsageLimit) throw err;
+      log(`${a.id}: haiku summary failed: ${(err as Error).message}`);
+    }
+    const carried = (summary ? `[summary of your earlier session, written by Haiku]\n${summary}\n\n` : "") + ledgerPart;
+    ledger.updateAgent(a.id, { session_id: null, context_tokens: 0 });
+    log2(summary ? "handover_haiku" : "handover_ledger", Math.ceil(carried.length / 4), null);
+    return { sessionId: null, handover: carried };
+  }
+
   async function turn(agentId: string, text: string, ticket?: Ticket, onText?: (t: string) => void): Promise<TurnResult> {
     const a = agent(agentId);
     const p = promptOf(a);
     const key = sessionKey(a, ticket);
-    const limit = policy.caps.session_rotate_context_tokens ?? 150000;
-    const resumeId = a.session_id && a.session_key === key && (a.kind === "worker" || (a.context_tokens ?? 0) <= limit) ? a.session_id : null;
+    let resumeId = a.session_id && a.session_key === key ? a.session_id : null;
+    // A session at compact_at_context_pct of its model's window is compacted before it runs another turn.
+    let carried = "";
+    if (resumeId && (a.context_tokens ?? 0) >= contextWindow(a.model, policy) * (policy.session?.compact_at_context_pct ?? 60) / 100) {
+      const c = await compact(a, ticket);
+      resumeId = c.sessionId;
+      carried = c.handover;
+    }
     // A fresh session for an agent that has had one before gets the handover in place of its history.
-    if (!resumeId && a.session_key != null && a.kind !== "worker") text = handover(agentId) + text;
+    if (!resumeId && !carried && a.session_key != null && a.kind !== "worker") carried = handover(agentId);
+    text = carried + text;
     log(`${agentId}: turn (${text.slice(0, 80).replace(/\s+/g, " ")})`);
     const result = await opts.runner({
       agentId, systemPrompt: p.body, model: a.model, effort: (a.effort as AgentPrompt["effort"]) ?? p.effort,
@@ -461,6 +511,8 @@ export function createCity(opts: CityOptions) {
     on(fn: (e: CityEvent) => void) { listeners.add(fn); return () => { listeners.delete(fn); }; },
     resume,
     resetSession,
+    compactions: (agentId?: string) => ledger.compactions(agentId),
+    compactionStats: (since?: string) => ledger.compactionStats(since),
     idle,
     openTickets: () => ledger.ticketsByStatus("open", "in_progress", "in_review", "waiting_on_owner"),
     // Everything the City View needs to draw the current state before events arrive.

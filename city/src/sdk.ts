@@ -32,6 +32,7 @@ export interface TurnResult {
   costUsd: number; // CUMULATIVE for the session (SDK total_cost_usd); the ledger turns it into a per-turn delta
   tokens?: number; // input + output + cache read + cache write tokens of the turn
   usage?: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  compact?: { pre: number; post: number }; // set when the SDK compacted the session this turn (a /compact prompt)
   contextTokens?: number; // input + cache_read + cache_write of the last result: how big the session is now
 }
 
@@ -102,12 +103,15 @@ export function createRunner({ policy, env, queryFn = query }: { policy: Policy;
     let tokens = 0;
     let usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
     let contextTokens = 0;
+    let compact: TurnResult["compact"];
     for await (const m of queryFn({ prompt: req.prompt, options }) as AsyncIterable<SDKMessage>) {
       if (m.type === "stream_event") {
         const e = m.event as { type: string; delta?: { type?: string; text?: string } };
         if (e.type === "content_block_delta" && e.delta?.type === "text_delta" && e.delta.text) req.onText?.(e.delta.text);
       } else if (m.type === "assistant") {
         for (const part of m.message.content) if (part.type === "tool_use") req.onTool?.(part.name, part.input);
+      } else if (m.type === "system" && m.subtype === "compact_boundary") {
+        compact = { pre: m.compact_metadata.pre_tokens, post: m.compact_metadata.post_tokens ?? 0 };
       } else if (m.type === "result") {
         sessionId = m.session_id;
         costUsd = m.total_cost_usd ?? 0;
@@ -123,6 +127,7 @@ export function createRunner({ policy, env, queryFn = query }: { policy: Policy;
       }
     }
     if (isUsageLimit(text)) throw new UsageLimit(text);
-    return { text, sessionId, costUsd, tokens, usage, contextTokens };
+    if (compact?.post) contextTokens = compact.post;
+    return { text, sessionId, costUsd, tokens, usage, contextTokens, ...(compact ? { compact } : {}) };
   };
 }
