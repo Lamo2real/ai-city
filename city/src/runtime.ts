@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { z } from "zod";
-import { AGENTS_DIR, loadCorePrompt, parsePrompt, renderTemplate, type AgentPrompt } from "./agents.ts";
+import { AGENTS_DIR, loadCorePrompt, loadSkills, modelFor, parsePrompt, renderTemplate, type AgentPrompt } from "./agents.ts";
 import { checksText, runChecks, type Check, type Exec } from "./checks.ts";
 import { now, openLedger, type AgentRow, type Question, type QuestionRow, type Ticket } from "./ledger.ts";
 import { auditPath, loadPolicy, type Policy } from "./policy.ts";
@@ -142,7 +142,7 @@ export function createCity(opts: CityOptions) {
     const p = promptOf(a);
     log(`${agentId}: turn (${text.slice(0, 80).replace(/\s+/g, " ")})`);
     const result = await opts.runner({
-      agentId, systemPrompt: p.body, model: a.model, effort: (a.effort as AgentPrompt["effort"]) ?? p.effort,
+      agentId, systemPrompt: a.kind === "core" ? p.body : `${p.body}\n\n${loadSkills(agentsDir)}`, model: a.model, effort: (a.effort as AgentPrompt["effort"]) ?? p.effort,
       // The prompt's own tools (report, ask_user, …) plus what the spec granted (Bash, Write, …).
       allowedTools: [...new Set([...p.tools, ...a.tools])], tools: toolsFor(agentId), prompt: text, resume: a.session_id, cwd: cwdFor(ticket), onText,
     });
@@ -248,6 +248,7 @@ export function createCity(opts: CityOptions) {
     if (spec.kind === "worker" && ledger.children(by).length >= policy.caps.max_workers_per_manager) throw new Error(`cap reached: ${policy.caps.max_workers_per_manager} workers per manager`);
     const department = spec.department ?? agent(by).department ?? "other";
     if (ledger.spendToday(department) >= policy.caps.daily_spend_usd_per_department) throw new Error(`cap reached: ${department} has spent today's budget`);
+    spec.model = modelFor(spec.kind, by, spec.model) as typeof spec.model;
     // shortcut: tools are not checked against a per-department allowlist, policy.json has none yet; add one when departments get scopes.
     const text = spec.kind === "manager"
       ? renderTemplate("manager", { id: spec.id, department, mission: spec.mission, model: spec.model, tools_summary: spec.tools.join(", ") }, agentsDir)

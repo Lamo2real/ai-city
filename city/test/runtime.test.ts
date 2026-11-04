@@ -388,3 +388,19 @@ test("a later report that corrects a ticket's status goes through; a repeat is i
   assert.equal(city.ledger.getTicket(t.id)?.result?.summary, "actually done");
   city.close();
 });
+
+test("managers and workers get the skills in their system prompt; core agents do not", async () => {
+  const { runner, calls } = fakeRunner({});
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy });
+  const hire = (by: string, s: Record<string, unknown>) => city.toolsFor(by).find((t) => t.name === "hire_agent")!.handler({ spec: s });
+  await hire("orchestrator", spec("sk-mgr", "manager", "orchestrator"));
+  await hire("sk-mgr", spec("sk-dev", "worker", "sk-mgr", { model: "claude-opus-5-5" }));
+  assert.equal(city.agent("sk-dev").model, "claude-sonnet-5-5");
+  city.sendTicket({ to: "sk-mgr", goal: "a" });
+  city.sendTicket({ to: "sk-dev", goal: "b", from: "sk-mgr" });
+  city.sendTicket({ to: "orchestrator", goal: "c" });
+  await city.idle();
+  for (const id of ["sk-mgr", "sk-dev"]) assert.match(calls.find((c) => c.agentId === id)!.systemPrompt, /lean context/i);
+  assert.doesNotMatch(calls.find((c) => c.agentId === "orchestrator")!.systemPrompt, /lean context/i);
+  city.close();
+});

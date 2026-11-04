@@ -1,6 +1,6 @@
 // Agent prompts live in agents/**/*.md with YAML-ish frontmatter (name, model,
 // effort, tools). This reads them and fills the {{placeholders}} of templates.
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -47,4 +47,17 @@ export function renderTemplate(kind: "manager" | "worker", values: Record<string
     if (!(key in values)) throw new Error(`template ${kind} needs {{${key}}}`);
     return values[key];
   });
+}
+
+// Skills (agents/skills/*.md) are shared rules appended to the prompt of every manager and worker.
+export function loadSkills(dir = AGENTS_DIR): string {
+  const d = join(dir, "skills");
+  if (!existsSync(d)) return "";
+  return readdirSync(d).filter((f) => f.endsWith(".md")).sort().map((f) => readFileSync(join(d, f), "utf8").trim()).join("\n\n");
+}
+
+// Managers default to Sonnet; Opus only when the orchestrator hires them. Workers are always Sonnet-or-lower.
+export function modelFor(kind: string, parent: string, requested: string): string {
+  if (requested !== "claude-opus-5-5") return requested;
+  return kind === "manager" && parent === "orchestrator" ? requested : "claude-sonnet-5-5";
 }
