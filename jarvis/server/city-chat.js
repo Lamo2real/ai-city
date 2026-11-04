@@ -77,7 +77,7 @@ export function createCityChat({ city, runner, dataDir, logger = () => {} }) {
     const sessionId = owners.get(ticketId) ?? lastSession;
     try {
       const reply = await chat(text, sessionId);
-      if (reply) for (const fn of listeners) fn({ sessionId, text: reply });
+      for (const fn of listeners) fn({ sessionId, text: reply || "" }); // silent turns too: a hold may have been registered
     } catch (err) {
       logger(`relay failed: ${err.message}`);
     }
