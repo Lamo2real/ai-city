@@ -105,7 +105,7 @@ Gaps:
 
 Evidence:
 - The SDK runner (`city/src/sdk.ts`) passes the in-process `jarvis` server, plus any server in `mcp_servers` in `config/policy.json` for the agents listed there, with `strictMcpConfig: true` and `settingSources: []`. Today that is `personal-assistant`, for Jarvis alone.
-- The city's own tools (20 of them, defined in `toolsFor` in `runtime.ts`): `hire_agent`, `retire_agent`, `list_registry`, `send_ticket`, `ask_user`, `request_review`, `review_deliverable`, `cancel_ticket`, `create_department`, `update_department`, `list_departments`, `remember`, `recall`, `list_skills`, `read_skill`, `allocate_workspace`, `list_workflows`, `start_workflow`, `report`, and `reset_session` (Orchestrator only). Each agent gets the subset its prompt lists.
+- The city's own tools (24 of them, defined in `toolsFor` in `runtime.ts`): `hire_agent`, `retire_agent`, `list_registry`, `send_ticket`, `ask_user`, `request_review`, `review_deliverable`, `cancel_ticket`, `create_department`, `update_department`, `list_departments`, `remember`, `recall`, `list_skills`, `read_skill`, `allocate_workspace`, `list_workflows`, `start_workflow`, `report`, `reset_session` (Orchestrator only), `ask_colleague` (workers only), and `city_status`, `agent_status`, `ask_agent` (Jarvis only). Each agent gets the subset its prompt lists.
 - `config/integrations.json` and `probeIntegrations` report what is installed or signed in. Status words are `operational` (a real probe answered), `authenticated` (credential present, not exercised), `available`, `unavailable`, `needs_owner`, `unknown`. A probe never reads a secret's value.
 - OpenClaw workers get `city_*` tools through the plugin and native tools by capability.
 

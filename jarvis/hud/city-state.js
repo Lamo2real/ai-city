@@ -148,6 +148,10 @@ export function reduce(state, event, now = Date.now()) {
     }
     case "jarvis.visit":
       return { ...state, now, feed: feed(state, `Jarvis ${event.kind === "ask" ? "asks" : "checks in with"} ${event.to}`, "worker", now) };
+    case "colleague.ask":
+      return { ...state, now, feed: feed(state, event.refused ? `${event.from} and ${event.to} have asked each other too much; ${event.from} was told to stop` : `${event.from} asks ${event.to}: ${event.question.slice(0, 60)}`, event.refused ? "fail" : "worker", now) };
+    case "colleague.answer":
+      return { ...state, now, feed: feed(state, event.answered_by === "ledger" ? `${event.from} got ${event.to}'s record, not an answer` : `${event.to} answers ${event.from}: ${event.answer.slice(0, 60)}`, "worker", now) };
     case "department.created":
     case "department.updated": {
       const d = event.department;
