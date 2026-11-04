@@ -206,6 +206,8 @@ export function limits(state) {
     known: state.caps !== null && state.caps !== undefined,
     // Total across departments. `max` is only set by an older server that still enforces a total cap.
     agents: { active, max: cap("max_concurrent_agents") },
+    // Only a server that sends the per-department cap says "no total cap"; an older snapshot keeps the plain label.
+    agentsLabel: defaultCap !== null ? "AGENTS ACTIVE (no total cap; per department below)" : "AGENTS ACTIVE",
     agentsByDepartment,
     agentCapPerDepartment: defaultCap,
     workersPerManager: { largest: workersMax, max: cap("max_workers_per_manager") },

@@ -149,7 +149,7 @@ export function openLedger(path: string) {
     },
     spendToday(department: string): number {
       const day = now().slice(0, 10);
-      const r = db.prepare("SELECT COALESCE(SUM(c.usd), 0) AS usd FROM costs c JOIN agents a ON a.id = c.agent_id WHERE c.ts >= ? AND json_extract(a.json, '$.department') = ?").get(day, department) as { usd: number };
+      const r = db.prepare("SELECT COALESCE(SUM(c.usd), 0) AS usd FROM costs c JOIN agents a ON a.id = c.agent_id WHERE c.ts >= ? AND lower(trim(json_extract(a.json, '$.department'))) = lower(trim(?))").get(day, department) as { usd: number };
       return r.usd;
     },
     close: () => db.close(),

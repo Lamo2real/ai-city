@@ -133,6 +133,7 @@ test("limits counts active non-core agents, the largest team, and flags a depart
   snap.agents.push({ ...snap.agents.find((a) => a.id === "ios-dev"), id: "old", state: "retired" });
   const L = limits(applySnapshot(initialState(T0), snap, T0));
   assert.deepEqual(L.agents, { active: 9, max: null }, "core and retired agents are not counted; there is no total cap any more");
+  assert.equal(L.agentsLabel, "AGENTS ACTIVE (no total cap; per department below)");
   assert.deepEqual(L.agentsByDepartment, [
     { dept: "App", active: 3, cap: 5, full: false }, { dept: "IT", active: 2, cap: 5, full: false },
     { dept: "Marketing", active: 2, cap: 5, full: false }, { dept: "Travel", active: 2, cap: 5, full: false },
@@ -159,6 +160,7 @@ test("a snapshot from before the restart (only max_concurrent_agents) still rend
   assert.deepEqual(L.agents, { active: 9, max: 10 });
   assert.ok(L.agentsByDepartment.every((d) => d.cap === null && d.full === false));
   assert.equal(L.agentCapPerDepartment, null);
+  assert.equal(L.agentsLabel, "AGENTS ACTIVE", "an old snapshot keeps the plain label");
 });
 
 test("limits never invent a cap the server did not send", () => {

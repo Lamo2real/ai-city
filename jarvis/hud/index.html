@@ -940,7 +940,7 @@ function renderLimits() {
   const strip = mk("div", "strip");
   // The total cap is gone: the limit is per department (below). An old server still sending max_concurrent_agents keeps the old tile.
   const legacyTotal = L.agents.max !== null;
-  strip.append(legacyTotal ? lim("AGENTS ACTIVE", of(L.agents.active, L.agents.max), L.agents.active >= L.agents.max) : lim("AGENTS ACTIVE", `${L.agents.active} active`),
+  strip.append(legacyTotal ? lim("AGENTS ACTIVE", of(L.agents.active, L.agents.max), L.agents.active >= L.agents.max) : lim(L.agentsLabel, `${L.agents.active} active`),
     withNote(lim("WORKERS PER MANAGER (MOST)", L.workersPerManager.max === null ? String(L.workersPerManager.largest) : of(L.workersPerManager.largest, L.workersPerManager.max), L.workersPerManager.max !== null && L.workersPerManager.largest >= L.workersPerManager.max), L.workersPerManager.max));
   if (L.usage) { const u = lim("USAGE TODAY", `${L.usage.turns} turns · ${Number(L.usage.tokens).toLocaleString("en-US")} tokens`); u.append(mk("span", "", `${fmtUsd(L.usage.usd)} (SDK cost estimate)`)); strip.append(u); } else strip.append(lim("USAGE TODAY", "—"));
   parts.push(strip);

@@ -495,3 +495,94 @@ test("resume over the department cap parks the ticket instead of crashing or byp
   assert.equal(city.ledger.getAgent("mgr-five")?.state, "retired");
   city.close();
 });
+
+const tool = (city: ReturnType<typeof createCity>, by: string, name: string) => city.toolsFor(by).find((t) => t.name === name)!.handler;
+
+test("a manager cannot hire a manager; what a manager hires inherits its department", async () => {
+  const { runner } = fakeRunner({});
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: capped });
+  await tool(city, "orchestrator", "hire_agent")({ spec: spec("mgr-it", "manager", "orchestrator", { department: "IT" }) });
+  await assert.rejects(tool(city, "mgr-it", "hire_agent")({ spec: spec("mgr-two", "manager", "mgr-it", { department: "HR" }) }), /only the orchestrator can hire managers/);
+  const w = await tool(city, "mgr-it", "hire_agent")({ spec: spec("wrk-one", "worker", "mgr-it", { department: "Other" }) }) as { department: string };
+  assert.equal(w.department, "IT", "a manager's hire cannot pick another department");
+  city.close();
+});
+
+test("'it', 'IT ' and ' I T' style variants are one department: the cap is shared and the first spelling is kept", async () => {
+  const { runner } = fakeRunner({});
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: { ...capped, caps: { ...capped.caps, department_caps: { "it": 3 } } } });
+  const hire = tool(city, "orchestrator", "hire_agent");
+  await hire({ spec: spec("agt-one", "manager", "orchestrator", { department: "IT" }) });
+  await hire({ spec: spec("agt-two", "manager", "orchestrator", { department: "it" }) });
+  const third = await hire({ spec: spec("agt-three", "manager", "orchestrator", { department: "IT " }) }) as { department: string };
+  assert.equal(third.department, "IT");
+  await assert.rejects(hire({ spec: spec("agt-four", "manager", "orchestrator", { department: " It" }) }), /cap reached: IT already has 3 active agents/);
+  assert.deepEqual([...new Set(city.ledger.agents().map((a) => a.department).filter(Boolean))], ["IT"]);
+  city.close();
+});
+
+test("retire_agent refuses core agents and agents the caller did not hire; the parent and the orchestrator may", async () => {
+  const { runner } = fakeRunner({});
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: capped });
+  await tool(city, "orchestrator", "hire_agent")({ spec: spec("mgr-one", "manager", "orchestrator") });
+  await tool(city, "orchestrator", "hire_agent")({ spec: spec("mgr-two", "manager", "orchestrator") });
+  await tool(city, "mgr-one", "hire_agent")({ spec: spec("wrk-one", "worker", "mgr-one") });
+  await assert.rejects(tool(city, "orchestrator", "retire_agent")({ id: "reviewer" }), /core agent/);
+  await assert.rejects(tool(city, "mgr-two", "retire_agent")({ id: "wrk-one" }), /did not hire wrk-one/);
+  assert.equal(city.ledger.getAgent("wrk-one")?.state, "active");
+  await tool(city, "mgr-one", "retire_agent")({ id: "wrk-one" });
+  assert.equal(city.ledger.getAgent("wrk-one")?.state, "retired");
+  await tool(city, "orchestrator", "retire_agent")({ id: "mgr-two" });
+  assert.equal(city.ledger.getAgent("mgr-two")?.state, "retired");
+  city.close();
+});
+
+async function parkedCity() {
+  const { runner, calls } = fakeRunner({});
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: capped });
+  const hire = tool(city, "orchestrator", "hire_agent");
+  for (const id of ["mgr-one", "mgr-two", "mgr-three", "mgr-four", "mgr-five"]) await hire({ spec: spec(id, "manager", "orchestrator") });
+  await tool(city, "orchestrator", "retire_agent")({ id: "mgr-five" });
+  await hire({ spec: spec("mgr-six", "manager", "orchestrator") });
+  city.ledger.putTicket({ id: "t-parked", from: "orchestrator", to: "mgr-five", kind: "task", goal: "g", status: "in_progress", created_at: new Date().toISOString() });
+  await city.resume();
+  await city.idle();
+  return { city, calls };
+}
+const parkedQuestions = (city: ReturnType<typeof createCity>) => city.ledger.openQuestions().filter((q) => q.question.ticket_id === "t-parked");
+
+test("resume over the cap asks the owner once; 'retry now' after freeing a slot resumes the ticket", async () => {
+  const { city, calls } = await parkedCity();
+  const qs = parkedQuestions(city);
+  assert.equal(qs.length, 1);
+  assert.equal(qs[0].question.asked_by, "orchestrator");
+  assert.notEqual(qs[0].question.blocking, true);
+  assert.equal(qs[0].question.questions[0].text, "Ticket t-parked to mgr-five cannot resume: IT is at its cap of 5. Retire an agent, raise department_caps, or cancel?");
+  assert.deepEqual(qs[0].question.questions[0].options, ["retry now", "cancel"]);
+  await city.resume(); // a second resume does not duplicate while the ticket is parked
+  assert.equal(parkedQuestions(city).length, 1);
+  // Still full: retry re-asks once.
+  city.answer(qs[0].id, "retry now");
+  assert.equal(city.ledger.getTicket("t-parked")?.status, "waiting_on_owner");
+  const again = parkedQuestions(city);
+  assert.equal(again.length, 1);
+  city.answer(again[0].id, "retry now");
+  assert.equal(parkedQuestions(city).length, 0, "re-asked only once");
+  // Free a slot and retry through a fresh question.
+  await tool(city, "orchestrator", "retire_agent")({ id: "mgr-six" });
+  city.ledger.putQuestion({ id: "q-manual", status: "open", question: { ...qs[0].question }, created_at: new Date().toISOString() });
+  city.answer("q-manual", "retry now");
+  await city.idle();
+  assert.equal(city.ledger.getAgent("mgr-five")?.state, "active");
+  assert.ok(calls.some((c) => c.agentId === "mgr-five" && c.prompt.includes("t-parked")));
+  assert.notEqual(city.ledger.getTicket("t-parked")?.status, "waiting_on_owner");
+  city.close();
+});
+
+test("answering 'cancel' closes the parked ticket", async () => {
+  const { city, calls } = await parkedCity();
+  city.answer(parkedQuestions(city)[0].id, "cancel");
+  assert.equal(city.ledger.getTicket("t-parked")?.status, "cancelled");
+  assert.equal(calls.filter((c) => c.agentId === "mgr-five").length, 0);
+  city.close();
+});

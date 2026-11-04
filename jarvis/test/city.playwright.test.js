@@ -292,7 +292,7 @@ test("Status opens on the AI City board: limits with a department over cap in re
   assert.equal(await page.getAttribute("#tab-aicity", "aria-selected"), "true");
   assert.ok(await page.isHidden("#booqytab"));
   const limitsText = await page.textContent("#ailimits");
-  assert.match(limitsText, /AGENTS ACTIVE\s*9 active/);
+  assert.match(limitsText, /AGENTS ACTIVE \(no total cap; per department below\)\s*9 active/);
   assert.match(limitsText, /AGENTS PER DEPARTMENT/);
   assert.match(limitsText, /App\s*3 \/ 5/);
   assert.match(limitsText, /WORKERS PER MANAGER \(MOST\)\s*2 \/ 4/);
