@@ -25,6 +25,7 @@ export interface Ticket {
   deadline?: string | null;
   status: TicketStatus;
   review_rounds?: number;
+  cap_block?: string | null; // set while a daily spend cap (a department or "global") is holding the ticket
   result?: { summary?: string; artifacts?: string[]; checks?: { name: string; passed: boolean }[]; cost_usd?: number };
   depends_on?: string[];
   gate?: boolean;

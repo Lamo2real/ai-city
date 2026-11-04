@@ -132,6 +132,11 @@ const FILE_TOOLS = /^(Write|Edit|MultiEdit|NotebookEdit|write|edit|apply_patch)$
 const CITY_INTERNALS = /\/api\/city\b|\bledger\.db\b|\baudit\.jsonl\b|openclaw-plugin|policy_gate\.py|config\/policy\.json/;
 const newId = (prefix: string) => `${prefix}-${randomUUID().slice(0, 8)}`;
 
+// Thrown instead of starting a turn that would run past a daily cap. The ticket is already waiting_on_owner.
+export class CapReached extends Error {}
+const RAISE_OPTION = "raise the limit for today";
+const PAUSE_OPTION = "pause until tomorrow";
+
 export function createCity(opts: CityOptions) {
   const dataDir = opts.dataDir ?? process.env.JARVIS_HOME ?? join(homedir(), ".jarvis");
   const agentsDir = opts.agentsDir ?? AGENTS_DIR;
@@ -149,6 +154,7 @@ export function createCity(opts: CityOptions) {
   const pending = new Map<string, number>();
   const reminded = new Set<string>();
   const running = new Set<Promise<void>>();
+  let capTimer: ReturnType<typeof setInterval> | undefined;
   let closed = false;
   const skillsDir = opts.skillsDir ?? SKILLS_DIR;
   const memory = createMemory(ledger.db);
@@ -385,6 +391,53 @@ export function createCity(opts: CityOptions) {
     return work;
   }
 
+  // Daily caps use the UTC day, like the ledger. Over = spend >= cap, unless the owner answered "raise" to
+  // today's question for that key. That override is the answered row in the ledger's questions table (id
+  // q-cap-<key>-<day>), so it survives restarts and expires with the day.
+  const today = () => now().slice(0, 10);
+  const capQuestionId = (key: string) => `q-cap-${key}-${today()}`;
+  const capRaised = (key: string) => /raise/i.test(ledger.getQuestion(capQuestionId(key))?.answer ?? "");
+  function overCap(department?: string): { key: string; spent: number; cap: number } | null {
+    const g = policy.caps.daily_spend_usd_global;
+    if (typeof g === "number") {
+      const spent = ledger.usageToday().usd;
+      if (spent >= g && !capRaised("global")) return { key: "global", spent, cap: g };
+    }
+    if (department) {
+      const cap = policy.caps.daily_spend_usd_per_department;
+      const spent = ledger.spendToday(department);
+      if (spent >= cap && !capRaised(department)) return { key: department, spent, cap };
+    }
+    return null;
+  }
+
+  // Park the ticket and ask the owner once per key per UTC day (the id is the dedupe key, open or answered).
+  function blockTurn(a: AgentRow, ticket: Ticket | undefined, over: { key: string; spent: number; cap: number }): never {
+    const id = capQuestionId(over.key);
+    if (!ledger.getQuestion(id)) {
+      const who = over.key === "global" ? "All departments together have" : `The ${over.key} department has`;
+      const question: Question = {
+        ticket_id: ticket?.id ?? "-", asked_by: a.id, path: pathOf(a.id), blocking: true,
+        questions: [{ text: `${who} spent $${over.spent.toFixed(2)} today, over the $${over.cap} daily cap. Raise the limit for today, or pause until tomorrow?`, options: [RAISE_OPTION, PAUSE_OPTION], default: PAUSE_OPTION, why: "Daily spend cap reached; no new turns start until you decide or the UTC day ends." }],
+      };
+      ledger.putQuestion({ id, status: "open", question, created_at: now() });
+      emit({ type: "question.asked", id, question, ticket_id: question.ticket_id });
+      emit({ type: "question", id, question, ticket_id: question.ticket_id });
+    }
+    if (ticket && !TERMINAL.has(ledger.getTicket(ticket.id)?.status ?? "done")) setStatus(ticket.id, "waiting_on_owner", { cap_block: over.key });
+    throw new CapReached(`${over.key} is over its daily spend cap ($${over.spent.toFixed(2)} of $${over.cap}); waiting on the owner`);
+  }
+
+  // Tickets held by a cap restart once their cap is lifted (a raise today, or a new UTC day).
+  function resumeCapBlocked(): void {
+    for (const t of ledger.ticketsByStatus("waiting_on_owner").filter((x) => x.cap_block)) {
+      const a = ledger.getAgent(t.to);
+      if (!a || overCap(a.department)) continue;
+      ledger.updateTicket(t.id, { cap_block: null });
+      dispatch(ledger.getTicket(t.id)!, "[the daily spend cap no longer blocks you; continue] ");
+    }
+  }
+
   // One turn at a time per agent: a message lands at a turn boundary, never mid-tool-call.
   function deliver(agentId: string, text: string, ticket?: Ticket, onText?: (t: string) => void): Promise<TurnResult> {
     const prev = queues.get(agentId) ?? Promise.resolve();
@@ -508,6 +561,8 @@ export function createCity(opts: CityOptions) {
   async function turn(agentId: string, text: string, ticket?: Ticket, onText?: (t: string) => void): Promise<TurnResult> {
     if (ticket && ledger.getTicket(ticket.id)?.status === "cancelled") throw new Error("ticket cancelled");
     const a = agent(agentId);
+    const over = overCap(a.department);
+    if (over) blockTurn(a, ticket, over);
     const p = promptOf(a);
     const key = sessionKey(a, ticket);
     let resumeId = a.executor !== "openclaw" && a.session_id && a.session_key === key ? a.session_id : null;
@@ -560,6 +615,7 @@ export function createCity(opts: CityOptions) {
         if (t.kind === "direct_instruction" && ledger.getTicket(t.id)?.status === "in_progress") { setStatus(t.id, "done"); retireIfDone(t.to); }
       })
       .catch((err: Error) => {
+        if (err instanceof CapReached) { log(`${t.to}: ${err.message}`); return; }
         log(`${t.to}: turn failed: ${err.message}`);
         const latest = ledger.getTicket(t.id);
         if (!latest || TERMINAL.has(latest.status)) return; // it had already ended: a late error changes nothing, and dependents may have started
@@ -587,7 +643,7 @@ export function createCity(opts: CityOptions) {
       }
       reminded.add(t.id);
       deliver(agentId, `[reminder] Ticket ${t.id} is still open and nothing is in flight for it. Report on it now with the report tool (done or failed, with what happened), or delegate it with send_ticket.`, t)
-        .catch((err: Error) => finish(t.id, "failed", `${agentId} could not finish: ${err.message}`, []));
+        .catch((err: Error) => { if (!(err instanceof CapReached)) finish(t.id, "failed", `${agentId} could not finish: ${err.message}`, []); });
     }
   }
 
@@ -647,7 +703,7 @@ export function createCity(opts: CityOptions) {
         ledger.answerQuestion(q.id, ticket.goal);
         emit({ type: "question.answered", id: q.id, answer: ticket.goal, answered_by: ticket.from, ticket_id: q.question.ticket_id });
         const t = ledger.getTicket(q.question.ticket_id);
-        if (t?.status === "waiting_on_owner") setStatus(t.id, "in_progress");
+        if (t?.status === "waiting_on_owner" && !t.cap_block) setStatus(t.id, "in_progress");
       }
     }
     const failedDep = (ticket.depends_on ?? []).map((d) => ledger.getTicket(d)!).find((d) => TERMINAL.has(d.status) && d.status !== "done");
@@ -668,6 +724,7 @@ export function createCity(opts: CityOptions) {
   // A retired agent comes back through the same department check, whether hire_agent or a ticket brings it back.
   function revive(a: AgentRow): AgentRow {
     checkDepartment(a.department ?? "other");
+    if (overCap(a.department)) throw new Error(`cap reached: ${a.department ?? "all departments"} has spent today's budget`);
     log(`${a.id}: revived from the registry`);
     const row = ledger.updateAgent(a.id, { state: "active", last_active_at: now(), awaiting_merge: null });
     emit({ type: "agent.hired", agent: row, revived: true });
@@ -695,7 +752,7 @@ export function createCity(opts: CityOptions) {
       if (idle) throw new Error(`${idle.id} has the same role and nothing to do; send it the ticket instead of hiring`);
     }
     if (spec.kind === "worker" && ledger.children(by).length >= policy.caps.max_workers_per_manager) throw new Error(`cap reached: ${policy.caps.max_workers_per_manager} workers per manager`);
-    if (ledger.spendToday(department) >= policy.caps.daily_spend_usd_per_department) throw new Error(`cap reached: ${department} has spent today's budget`);
+    if (overCap(department)) throw new Error(`cap reached: ${department} has spent today's budget`);
     // shortcut: tools are not checked against a per-department allowlist, policy.json has none yet; add one when departments get scopes.
     const model = spec.model ?? policy.models?.[spec.complexity ?? "standard"] ?? "claude-sonnet-5-5";
     if (spec.kind === "worker") spec.tools = [...new Set([...WORKER_TOOLS, ...spec.tools])];
@@ -983,7 +1040,8 @@ export function createCity(opts: CityOptions) {
     emit({ type: "question.answered", id: questionId, answer: text, answered_by: "owner", ticket_id: q.question.ticket_id });
     if (CANNOT_RESUME.test(q.question.questions[0]?.text ?? "")) return answerParked(q.question.ticket_id, text);
     const t = ledger.getTicket(q.question.ticket_id);
-    if (t?.status === "waiting_on_owner") setStatus(t.id, "in_progress");
+    if (t?.status === "waiting_on_owner" && !t.cap_block) setStatus(t.id, "in_progress");
+    resumeCapBlocked(); // a "raise" answer lifts today's cap; a "pause" leaves the tickets waiting
     const asker = agent(q.question.asked_by);
     const approval = ledger.approvalByQuestion(questionId);
     if (approval?.tool === "workflow:gate") {
@@ -1264,6 +1322,10 @@ export function createCity(opts: CityOptions) {
       dispatch(t, "[resumed after a restart; continue where you left off] ");
     }
     if (parked.length) { log(`${parked.length} stale tickets parked; the owner decides`); emit({ type: "tickets.parked", ids: parked }); }
+    resumeCapBlocked();
+    // "Pause until tomorrow": check now and then so held tickets restart when the UTC day rolls over.
+    capTimer ??= setInterval(resumeCapBlocked, 5 * 60_000);
+    capTimer.unref();
   }
 
   function resumeParked(ids?: string[]): { resumed: string[] } {
@@ -1337,7 +1399,8 @@ export function createCity(opts: CityOptions) {
     askAgent,
     findAgent,
     checkMerges,
-    close: () => { closed = true; clearInterval(mergeTimer); ledger.close(); },
+    resumeCapBlocked,
+    close: () => { closed = true; clearInterval(mergeTimer); if (capTimer) clearInterval(capTimer); ledger.close(); },
   };
 }
 
