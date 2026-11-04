@@ -398,3 +398,51 @@ test("Status on a phone: the board stacks under the core", { skip }, async () =>
   await page.screenshot({ path: join(SHOTS, "phaseC-status-mobile.png") });
   await page.close();
 });
+
+// ---- Old server (no Jarvis restart yet): the HUD degrades honestly ----
+test("old server: a 404 on the pending GET is silent, polling stops, and the chat path still shows a merge", { skip }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await jsonRoute(page);
+  let reads = 0;
+  await page.route("**/api/confirm/pending**", (r) => { reads++; return r.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "not found" }) }); });
+  await streamDone(page, CONFIRM);
+  await page.clock.install();
+  await page.goto(`http://localhost:${port}/`);
+  await page.waitForFunction(() => document.querySelector("#inboxcnt")?.textContent === "1");
+  assert.equal(reads, 1, "one read on load");
+  await page.clock.fastForward(60_000); // twelve 5 s ticks
+  await page.waitForTimeout(200);
+  assert.equal(reads, 1, "no polling after the 404");
+  assert.equal(await page.locator('#city [role=alert]:not([hidden]), #inbox .err:not([hidden]), #aierr:not([hidden])').count(), 0, "no error banner");
+  assert.ok(!(await page.textContent("body")).match(/not found/i), "the 404 is not shown anywhere");
+  // One attempt per focus, and it stays quiet when it fails again.
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await page.waitForTimeout(200);
+  assert.equal(reads, 2);
+  await page.clock.fastForward(30_000);
+  assert.equal(reads, 2);
+  // The chat-driven merge confirmation still works.
+  await page.click("#chatbtn");
+  await ask(page);
+  await page.waitForSelector("body.view-inbox #inboxmerge [role=alertdialog]");
+  assert.deepEqual(await page.locator("#inboxmerge button").allTextContents(), ["MERGE", "CANCEL"]);
+  await page.close();
+});
+
+test("old server: a snapshot without caps shows plain values and 'cap: unknown until Jarvis restarts', never a number", { skip }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const snap = citySnapshot(); delete snap.caps; snap.spend = { App: 456.73 };
+  await jsonRoute(page, snap);
+  await page.goto(`http://localhost:${port}/`);
+  await page.click("#statusbtn");
+  await page.waitForSelector("#ailimits .dept");
+  const text = await page.textContent("#ailimits");
+  assert.match(text, /AGENTS ACTIVE\s*9 active/);
+  assert.match(text, /\$456\.73 today/);
+  assert.match(text, /cap: unknown until Jarvis restarts/);
+  assert.doesNotMatch(text, /\d+ \/ \d+|OVER CAP/, "no invented cap, no over-cap");
+  assert.equal(await page.locator("#ailimits .dept .bar").count(), 0, "no bar without a cap");
+  assert.equal(await page.locator("#ailimits .dept.over").count(), 0);
+  await page.screenshot({ path: join(SHOTS, "phaseC-status-nocaps.png") });
+  await page.close();
+});

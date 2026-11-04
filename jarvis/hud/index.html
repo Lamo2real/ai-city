@@ -565,10 +565,13 @@ function syncConfirm(c){
 
 /* A merge asked for somewhere else (Telegram, another tab) shows up here too: read-only GET, on load, every 5 s while visible, and on focus.
    Confirming still goes only through POST /api/confirm. */
-async function pollPending(){ if(document.hidden) return; const seq=confirmSeq;
-  try{ const r=await fetch("./api/confirm/pending?sessionId="+encodeURIComponent(sessionId)); if(!r.ok) return; const j=await r.json();
-    if(seq!==confirmSeq) return; /* something newer happened while this was in flight */ syncConfirm(j.confirm||null); }catch(e){} }
-pollPending(); setInterval(pollPending,5000); window.addEventListener("focus",pollPending); document.addEventListener("visibilitychange",pollPending);
+/* An older server has no such route (404), or it fails: then stop quietly, with no banner, and let the chat path carry on as before.
+   It is tried again only when the window gets focus (one attempt), never in a loop. */
+let pendingOff=false;
+async function pollPending(force=false){ if(document.hidden||(pendingOff&&!force)) return; const seq=confirmSeq;
+  try{ const r=await fetch("./api/confirm/pending?sessionId="+encodeURIComponent(sessionId)); if(!r.ok){ pendingOff=true; return; } const j=await r.json(); pendingOff=false;
+    if(seq!==confirmSeq) return; /* something newer happened while this was in flight */ syncConfirm(j.confirm||null); }catch(e){ pendingOff=true; } }
+pollPending(); setInterval(pollPending,5000); window.addEventListener("focus",()=>pollPending(true)); document.addEventListener("visibilitychange",()=>pollPending());
 
 /* One turn at a time. A new message or talking over Jarvis cancels the one in progress. */
 let activeTurn=null, turnSeq=0;
@@ -929,17 +932,20 @@ const lim = (label, value, over = false) => { const d = mk("div", over ? "lim ov
 
 function renderLimits() {
   const L = limits(state), box = $("ailimits"), parts = [];
-  const of = (n, max) => (max === null ? `${n} / —` : `${n} / ${max}`);
+  // No cap from the server (it has not been restarted yet): show the plain value and say so. A cap is never guessed.
+  const UNKNOWN = "cap: unknown until Jarvis restarts";
+  const of = (n, max) => (max === null ? `${n} active` : `${n} / ${max}`);
+  const withNote = (el, max) => { if (max === null) el.append(mk("span", "", UNKNOWN)); return el; };
   const strip = mk("div", "strip");
-  strip.append(lim("AGENTS ACTIVE", of(L.agents.active, L.agents.max), L.agents.max !== null && L.agents.active >= L.agents.max), lim("WORKERS PER MANAGER (MOST)", of(L.workersPerManager.largest, L.workersPerManager.max), L.workersPerManager.max !== null && L.workersPerManager.largest >= L.workersPerManager.max));
+  strip.append(withNote(lim("AGENTS ACTIVE", of(L.agents.active, L.agents.max), L.agents.max !== null && L.agents.active >= L.agents.max), L.agents.max),
+    withNote(lim("WORKERS PER MANAGER (MOST)", L.workersPerManager.max === null ? String(L.workersPerManager.largest) : of(L.workersPerManager.largest, L.workersPerManager.max), L.workersPerManager.max !== null && L.workersPerManager.largest >= L.workersPerManager.max), L.workersPerManager.max));
   if (L.usage) { const u = lim("USAGE TODAY", `${L.usage.turns} turns · ${Number(L.usage.tokens).toLocaleString("en-US")} tokens`); u.append(mk("span", "", `${fmtUsd(L.usage.usd)} (SDK cost estimate)`)); strip.append(u); } else strip.append(lim("USAGE TODAY", "—"));
   parts.push(strip);
-  if (!L.known) parts.push(mk("div", "mute", "The server did not send its limits, so none are shown."));
-  const h = mk("h4", "", "SPEND TODAY PER DEPARTMENT" + (L.departments[0]?.cap != null ? ` (cap ${fmtUsd(L.departments[0].cap)} each)` : "")); h.style.cssText = "font-size:10px;letter-spacing:.2em;color:var(--o2);margin:4px 0";
+  const h = mk("h4", "", "SPEND TODAY PER DEPARTMENT" + (L.departments[0]?.cap != null ? ` (cap ${fmtUsd(L.departments[0].cap)} each)` : " · cap: unknown until Jarvis restarts")); h.style.cssText = "font-size:10px;letter-spacing:.2em;color:var(--o2);margin:4px 0";
   parts.push(h);
   if (!L.departments.length) parts.push(mk("div", "mute", "No spend recorded today."));
   for (const d of L.departments) {
-    const row = mk("div", d.over ? "dept over" : "dept"), top = mk("div", "top2"), amt = mk("span", "amt", fmtUsd(d.usd));
+    const row = mk("div", d.over ? "dept over" : "dept"), top = mk("div", "top2"), amt = mk("span", "amt", d.cap === null ? `${fmtUsd(d.usd)} today` : fmtUsd(d.usd));
     const name = mk("span", "", d.dept); if (d.over) name.append(mk("span", "overtag", "OVER CAP"));
     top.append(name, amt); row.append(top);
     if (d.pct !== null) { const bar = mk("div", "bar"); const i = mk("i", d.over ? "over" : ""); i.style.width = `${d.pct}%`; bar.append(i); row.append(bar); }
