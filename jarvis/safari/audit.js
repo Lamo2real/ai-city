@@ -18,10 +18,10 @@ export function safeUrl(url) {
 export function createAudit({ path = AUDIT_PATH, now = () => new Date() } = {}) {
   return {
     path,
-    append({ action, url, selector, result, spend_ticket }) {
+    append({ action, url, selector, result, spend_ticket, approval }) {
       mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
       chmodSync(dirname(path), 0o700);
-      const entry = { ts: now().toISOString(), tool: "safari", action, url: safeUrl(url), selector: selector ?? null, result, ...(spend_ticket && { spend_ticket }) };
+      const entry = { ts: now().toISOString(), tool: "safari", action, url: safeUrl(url), selector: selector ?? null, result, ...(spend_ticket && { spend_ticket }), ...(approval && { approval }) };
       appendFileSync(path, JSON.stringify(entry) + "\n", { mode: 0o600 });
       chmodSync(path, 0o600);
       return entry;

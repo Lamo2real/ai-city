@@ -19,3 +19,19 @@ export function readTicket(ticketId, path = LEDGER_PATH) {
     db.close();
   }
 }
+
+// → { answered_by, answered_at } of a question, or null.
+export function readQuestion(id, path = LEDGER_PATH) {
+  if (!id || !existsSync(path)) return null;
+  const db = new DatabaseSync(path, { readOnly: true });
+  try {
+    const row = db.prepare("SELECT json FROM questions WHERE id = ?").get(String(id));
+    if (!row) return null;
+    const q = JSON.parse(row.json);
+    return { answered_by: q.answered_by ?? null, answered_at: q.answered_at ?? null };
+  } catch {
+    return null;
+  } finally {
+    db.close();
+  }
+}

@@ -421,7 +421,15 @@ test("spend_approval: only the orchestrator can send one, to Jarvis, valid for a
   const { runner, calls } = fakeRunner({});
   const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy });
   const inMin = (m: number) => new Date(Date.now() + m * 60_000).toISOString();
-  const approval = (extra: Record<string, unknown> = {}) => ({ origin: "https://shop.test", max_amount: 49.9, currency: "EUR", expires_at: inMin(20), ...extra });
+  let n = 0;
+  // A question the orchestrator asked, answered by `by` `ago` minutes ago.
+  const asked = (answer: string, { by = "owner", ago = 1, asker = "orchestrator", text = "Buy at https://shop.test, up to 49.9 EUR?" } = {}) => {
+    const id = `q-spend-${++n}`;
+    city.ledger.putQuestion({ id, status: "open", created_at: inMin(-ago), question: { ticket_id: "t-x", asked_by: asker, path: asker, questions: [{ text, default: "no" }] } } as never);
+    city.ledger.answerQuestion(id, answer, by, inMin(-ago));
+    return id;
+  };
+  const approval = (extra: Record<string, unknown> = {}) => ({ origin: "https://shop.test", max_amount: 49.9, currency: "EUR", expires_at: inMin(20), question_id: asked("yes"), ...extra });
   const send = (agentId: string, ticket: Record<string, unknown>) => city.toolsFor(agentId).find((t) => t.name === "send_ticket")!.handler({ ticket }) as Promise<{ id: string; status: string; from: string }>;
   const base = { to: "jarvis", kind: "spend_approval", goal: "Owner approved the shoes" };
 
@@ -444,6 +452,18 @@ test("spend_approval: only the orchestrator can send one, to Jarvis, valid for a
   await assert.rejects(send("orchestrator", { ...base }), /needs an approval/);
   await assert.rejects(send("orchestrator", { ...base, to: "orchestrator", approval: approval() }), /goes to jarvis/);
   await assert.rejects(send("orchestrator", { ...base, approval: approval({ extra: 1 }) }), /unknown field/);
+  // the owner must have said yes
+  await assert.rejects(send("orchestrator", { ...base, approval: approval({ question_id: undefined }) }), /question_id/);
+  await assert.rejects(send("orchestrator", { ...base, approval: approval({ question_id: "q-nope" }) }), /must name a question/);
+  await assert.rejects(send("orchestrator", { ...base, approval: approval({ question_id: asked("yes", { by: "ios-manager" }) }) }), /not answered by the owner/);
+  await assert.rejects(send("orchestrator", { ...base, approval: approval({ question_id: asked("yes", { asker: "py-dev" }) }) }), /orchestrator asked/);
+  await assert.rejects(send("orchestrator", { ...base, approval: approval({ question_id: asked("yes", { ago: 31 }) }) }), /older than 30 minutes/);
+  await assert.rejects(send("orchestrator", { ...base, approval: approval({ question_id: asked("yes", { text: "Buy at https://other.test, up to 49.9 EUR?" }) }) }), /same origin and max_amount/);
+  await assert.rejects(send("orchestrator", { ...base, approval: approval({ question_id: asked("yes", { text: "Buy at https://shop.test, up to 500 EUR?" }) }) }), /same origin and max_amount/);
+  await assert.rejects(send("orchestrator", { ...base, approval: approval({ question_id: asked("no") }) }), /not a yes/);
+  await assert.rejects(send("orchestrator", { ...base, approval: approval({ question_id: asked("yes, but not now") }) }), /not a yes/);
+  const relayed = await send("orchestrator", { ...base, approval: approval({ question_id: asked("Yes, go ahead", { by: "jarvis" }) }) });
+  assert.equal(relayed.status, "done");
   city.close();
 });
 

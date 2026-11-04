@@ -12,22 +12,52 @@ const script = (name, body) =>
 // writing into password / one-time-code fields. The raw value setter lives only in this closure: the helper
 // on window checks sens() itself, and the object is frozen.
 const GUARD = `var G=window.__jarvisGuard;if(!G){
-var P=HTMLInputElement.prototype,V=Object.getOwnPropertyDescriptor(P,"value"),T=Object.getOwnPropertyDescriptor(P,"type");
+var no=function(){throw new Error("PASSWORD_FIELD")};
+var NAMEY=/passw|pwd|passcode/i;
 var sens=function(el){if(!el||!el.tagName)return false;var n=el.tagName;
 if(n==="INPUT"&&String(el.type).toLowerCase()==="password")return true;
 if((n==="INPUT"||n==="TEXTAREA")&&/(^|\\s)(current-password|new-password|one-time-code)(\\s|$)/i.test(el.getAttribute("autocomplete")||""))return true;
+if(n!=="INPUT"&&n!=="TEXTAREA")return false;
+if(NAMEY.test([el.name,el.id,el.getAttribute("autocomplete"),el.getAttribute("aria-label"),el.getAttribute("placeholder")].join(" ")))return true;
 if(n!=="INPUT")return false;
 if(/(^|[^a-z])(otp|totp|2fa|mfa)([^a-z]|$)/i.test((el.name||"")+" "+(el.id||"")))return true;
 var im=(el.getAttribute("inputmode")||"").toLowerCase(),ml=parseInt(el.getAttribute("maxlength")||"",10);
 return (im==="numeric"||im==="tel")&&ml>0&&ml<=8&&/code|verif|pin|otp/i.test([el.name,el.id,el.getAttribute("placeholder"),el.getAttribute("aria-label")].join(" "))};
-var no=function(){throw new Error("PASSWORD_FIELD")};
-Object.defineProperty(P,"value",{configurable:true,enumerable:V.enumerable,get:V.get,set:function(v){if(sens(this))no();V.set.call(this,v)}});
-Object.defineProperty(P,"defaultValue",{configurable:true,get:Object.getOwnPropertyDescriptor(P,"defaultValue").get,set:function(v){if(sens(this))no();Object.getOwnPropertyDescriptor(P,"defaultValue").set.call(this,v)}});
-Object.defineProperty(P,"type",{configurable:true,enumerable:T.enumerable,get:T.get,set:function(v){if(sens(this))no();T.set.call(this,v)}});
-var sa=Element.prototype.setAttribute;Element.prototype.setAttribute=function(k){if(/^(value|type|autocomplete)$/i.test(String(k))&&sens(this))no();return sa.apply(this,arguments)};
-var ec=Document.prototype.execCommand;Document.prototype.execCommand=function(c){if(/^(insertText|insertHTML|paste)$/i.test(c)&&sens(document.activeElement))no();return ec.apply(this,arguments)};
-G=Object.freeze({sens:sens,set:function(el,v){if(sens(el))no();V.set.call(el,v)}});
-Object.defineProperty(window,"__jarvisGuard",{value:G})}`;
+var holds=function(node){if(!node)return false;if(sens(node))return true;if(node.querySelectorAll){var l=node.querySelectorAll("input,textarea");for(var i=0;i<l.length;i++)if(sens(l[i]))return true}return false};
+var markup=function(s){return /<\\s*(input|textarea)/i.test(String(s))};
+var install=function(W){
+if(W.__jarvisGuard)return W.__jarvisGuard;
+var pr=function(n){return W[n]&&W[n].prototype};
+var P=pr("HTMLInputElement"),V=Object.getOwnPropertyDescriptor(P,"value"),T=Object.getOwnPropertyDescriptor(P,"type");
+var dp=function(o,k,d){Object.defineProperty(o,k,d)};
+dp(P,"value",{configurable:true,enumerable:V.enumerable,get:V.get,set:function(v){if(sens(this))no();V.set.call(this,v)}});
+var DV=Object.getOwnPropertyDescriptor(P,"defaultValue");
+if(DV)dp(P,"defaultValue",{configurable:true,get:DV.get,set:function(v){if(sens(this))no();DV.set.call(this,v)}});
+dp(P,"type",{configurable:true,enumerable:T.enumerable,get:T.get,set:function(v){if(sens(this))no();T.set.call(this,v)}});
+var hookSet=function(o,k,chk){var d=o&&Object.getOwnPropertyDescriptor(o,k);if(!d||!d.set)return;dp(o,k,{configurable:true,enumerable:d.enumerable,get:d.get,set:function(v){chk(this,[v]);d.set.call(this,v)}})};
+var hookFn=function(o,k,chk,after){var f=o&&o[k];if(typeof f!=="function")return;dp(o,k,{configurable:true,writable:true,value:function(){chk(this,arguments);var r=f.apply(this,arguments);if(after)after(this,arguments);return r}})};
+var html=function(t,a){if(holds(t))no();for(var i=0;i<a.length;i++)if(markup(a[i]))no()};
+hookSet(pr("HTMLTextAreaElement"),"value",function(t){if(sens(t))no()});
+hookSet(pr("Element"),"innerHTML",html);hookSet(pr("Element"),"outerHTML",html);hookSet(pr("ShadowRoot"),"innerHTML",html);
+hookFn(pr("Element"),"insertAdjacentHTML",html);
+hookFn(pr("Element"),"setAttribute",function(t,a){if(/^(value|type|autocomplete|name|id)$/i.test(String(a[0]))&&sens(t))no()});
+hookFn(pr("Document"),"execCommand",function(t,a){if(/^(insertText|insertHTML|paste)$/i.test(a[0])&&sens(t.activeElement))no()});
+var wr=function(t,a){if(markup(Array.prototype.join.call(a,""))||holds(t.documentElement))no()};
+hookFn(pr("Document"),"write",wr);hookFn(pr("Document"),"writeln",wr);
+hookFn(pr("Range"),"createContextualFragment",function(t,a){if(markup(a[0]))no()});
+var F=pr("HTMLIFrameElement"),cw=F&&Object.getOwnPropertyDescriptor(F,"contentWindow"),cd=F&&Object.getOwnPropertyDescriptor(F,"contentDocument");
+var gw=function(f){try{var w=cw.get.call(f);if(w)install(w)}catch(e){}try{if(f.addEventListener)f.addEventListener("load",function(){try{install(cw.get.call(f))}catch(e){}})}catch(e){}};
+if(cw)dp(F,"contentWindow",{configurable:true,enumerable:cw.enumerable,get:function(){var w=cw.get.call(this);if(w)try{install(w)}catch(e){}return w}});
+if(cd)dp(F,"contentDocument",{configurable:true,enumerable:cd.enumerable,get:function(){var d=cd.get.call(this);if(d&&d.defaultView)try{install(d.defaultView)}catch(e){}return d}});
+var frames=function(n){if(!n||typeof n!=="object"||n.nodeType===undefined)return;var l=[];if(n.tagName==="IFRAME"||n.tagName==="FRAME")l=[n];else if(n.querySelectorAll)l=Array.prototype.slice.call(n.querySelectorAll("iframe,frame"));for(var i=0;i<l.length;i++)if(cw)gw(l[i])};
+var ins=function(t,a){for(var i=0;i<a.length;i++)frames(a[i])};
+["Node","Element","Document","DocumentFragment"].forEach(function(c){["appendChild","insertBefore","replaceChild","append","prepend","replaceChildren","before","after","replaceWith","insertAdjacentElement"].forEach(function(m){var o=pr(c);if(o&&Object.prototype.hasOwnProperty.call(o,m))hookFn(o,m,function(){},ins)})});
+var Gd=Object.freeze({sens:sens,set:function(el,v){if(sens(el))no();V.set.call(el,v)}});
+dp(W,"__jarvisGuard",{value:Gd});
+try{if(W.document&&W.document.querySelectorAll){var fl=W.document.querySelectorAll("iframe,frame");for(var i=0;i<fl.length;i++)if(cw)gw(fl[i])}}catch(e){}
+try{for(var k=0;k<W.frames.length;k++)try{install(W.frames[k])}catch(e){}}catch(e){}
+return Gd};
+G=install(window)}`;
 
 const find = (selector) => `var el=document.querySelector(${J(selector)});if(!el)return JSON.stringify({error:"NO_SUCH_ELEMENT"});`;
 

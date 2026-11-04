@@ -5,7 +5,7 @@
 import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { readTicket, LEDGER_PATH } from "./ledger.js";
+import { readTicket, readQuestion, LEDGER_PATH } from "./ledger.js";
 
 export const USED_PATH = join(homedir(), "Library", "Application Support", "Jarvis", "spend-used.json");
 const MAX_WINDOW_MS = 30 * 60 * 1000;
@@ -67,6 +67,7 @@ export function createSpendCheck({ ledgerPath = LEDGER_PATH, usedPath = USED_PAT
     if (typeof n !== "number" || !Number.isFinite(n) || n <= 0) return { ok: false, reason: "I need the amount with --amount" };
     if (!Number.isFinite(a.max_amount) || n > a.max_amount) return { ok: false, reason: "that amount is more than the approval allows" };
     if (!consume(usedPath, String(ticketId), new Date(now()).toISOString())) return { ok: false, reason: "that approval was already used" };
-    return { ok: true, approval: a };
+    const answer = readQuestion(a.question_id, ledgerPath);
+    return { ok: true, approval: a, audit: { question_id: a.question_id ?? null, answered_by: answer?.answered_by ?? null, answered_at: answer?.answered_at ?? null } };
   };
 }

@@ -114,11 +114,13 @@ function spendRig() {
   const path = join(dir, "ledger.db");
   const db = new DatabaseSync(path);
   db.exec("CREATE TABLE tickets (id TEXT PRIMARY KEY, to_agent TEXT NOT NULL, from_agent TEXT NOT NULL, status TEXT NOT NULL, parent_id TEXT, json TEXT NOT NULL, updated_at TEXT NOT NULL)");
+  db.exec("CREATE TABLE questions (id TEXT PRIMARY KEY, ticket_id TEXT, asked_by TEXT, status TEXT, json TEXT)");
+  db.prepare("INSERT INTO questions VALUES ('q1', 't', 'orchestrator', 'answered', ?)").run(JSON.stringify({ id: "q1", status: "answered", answer: "yes", answered_by: "owner", answered_at: "2026-01-01T11:55:00.000Z" }));
   const NOW = Date.parse("2026-01-01T12:00:00Z");
   const at = (min) => new Date(NOW + min * 60_000).toISOString();
   const add = (id, { from = "orchestrator", to = "jarvis", status = "done", kind = "spend_approval", approval, created = at(0) } = {}) =>
     db.prepare("INSERT INTO tickets VALUES (?, ?, ?, ?, NULL, ?, 'now')").run(id, to, from, status, JSON.stringify({ id, from, to, status, kind, goal: "g", created_at: created, ...(approval && { approval }) }));
-  const ok = (extra = {}) => ({ origin: "https://shop.test", max_amount: 20, currency: "EUR", expires_at: at(20), ...extra });
+  const ok = (extra = {}) => ({ origin: "https://shop.test", max_amount: 20, currency: "EUR", expires_at: at(20), question_id: "q1", ...extra });
   const usedPath = join(dir, "Jarvis", "spend-used.json");
   return { add, ok, at, usedPath, authorize: createSpendCheck({ ledgerPath: path, usedPath, now: () => NOW }), close: () => db.close() };
 }
@@ -164,6 +166,7 @@ test("through the gate: a payment click or submit with a valid approval goes onc
   const r = rig({ page: { ...SHOP, submit: { url: "https://shop.test/checkout" } }, spend: r0.authorize });
   assert.equal((await r.safari.submit(TAB, "form", { spendTicket: "approved", amount: 12 })).ok, true);
   assert.equal(r.lines().at(-1).spend_ticket, "approved");
+  assert.deepEqual(r.lines().at(-1).approval, { question_id: "q1", answered_by: "owner", answered_at: "2026-01-01T11:55:00.000Z" });
   await assert.rejects(r.safari.submit(TAB, "form", { spendTicket: "approved", amount: 12 }), (e) => e.code === "SPEND_NEEDS_APPROVAL" && /already used/.test(e.message));
 });
 

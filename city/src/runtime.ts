@@ -220,7 +220,7 @@ export function createCity(opts: CityOptions) {
   function checkSpendApproval(t: Ticket): void {
     const a = t.approval;
     if (t.to !== "jarvis") throw new Error("a spend_approval ticket goes to jarvis");
-    if (!a) throw new Error("a spend_approval ticket needs an approval { origin, max_amount, currency, expires_at }");
+    if (!a) throw new Error("a spend_approval ticket needs an approval { origin, max_amount, currency, expires_at, question_id }");
     let u: URL;
     try { u = new URL(a.origin); } catch { throw new Error("approval.origin must be a URL origin like https://shop.example"); }
     if (!/^https?:$/.test(u.protocol) || u.origin !== a.origin) throw new Error("approval.origin must be exactly an http(s) origin: scheme and host, no path");
@@ -228,6 +228,19 @@ export function createCity(opts: CityOptions) {
     const ahead = expires - Date.parse(now());
     if (!Number.isFinite(expires) || ahead <= 0) throw new Error("approval.expires_at must be in the future");
     if (ahead > SPEND_APPROVAL_MAX_MS) throw new Error("approval.expires_at must be at most 30 minutes ahead");
+    // The owner must have said yes: a question the orchestrator asked, answered by the owner (or Jarvis relaying his words)
+    // in the last 30 minutes, naming this origin and amount. A manager's answer never counts.
+    const q = a.question_id ? ledger.getQuestion(a.question_id) : undefined;
+    if (!q) throw new Error("approval.question_id must name a question the orchestrator asked the owner");
+    if (q.question.asked_by !== "orchestrator") throw new Error("approval.question_id must be a question the orchestrator asked");
+    if (q.status !== "answered" || !q.answered_by || !OWNER_SIDE.has(q.answered_by)) throw new Error("that question was not answered by the owner");
+    const answeredAt = Date.parse(q.answered_at ?? "");
+    if (!Number.isFinite(answeredAt) || Date.parse(now()) - answeredAt > SPEND_APPROVAL_MAX_MS || answeredAt > Date.parse(now()) + 60_000) throw new Error("the owner's answer is older than 30 minutes; ask again");
+    const text = q.question.questions.map((x) => x.text).join(" ");
+    const amounts = (text.match(/\d+(?:[.,]\d+)?/g) ?? []).map((n) => Number(n.replace(",", ".")));
+    if (!text.includes(a.origin) || !amounts.includes(a.max_amount)) throw new Error("the question must name the same origin and max_amount as the approval");
+    const ans = (q.answer ?? "").trim();
+    if (!/^(yes|yep|yeah|y|ok|okay|sure|approve[d]?|go ahead|do it|confirm(ed)?)\b/i.test(ans) || /\b(no|not|don't|dont|cancel|never)\b/i.test(ans)) throw new Error("the owner's answer was not a yes");
   }
 
   function sendTicket(from: string, input: Record<string, unknown>): Ticket {
@@ -248,7 +261,7 @@ export function createCity(opts: CityOptions) {
     if (ticket.kind === "direct_instruction" && OWNER_SIDE.has(ticket.from)) {
       // The owner's reply, relayed by Jarvis, is the answer to what that agent asked.
       for (const q of ledger.openQuestions().filter((o) => o.question.asked_by === ticket.to)) {
-        ledger.answerQuestion(q.id, ticket.goal);
+        ledger.answerQuestion(q.id, ticket.goal, ticket.from, now());
         emit({ type: "question.answered", id: q.id, answer: ticket.goal, answered_by: ticket.from, ticket_id: q.question.ticket_id });
         const t = ledger.getTicket(q.question.ticket_id);
         if (t?.status === "waiting_on_owner") setStatus(t.id, "in_progress");
@@ -318,7 +331,7 @@ export function createCity(opts: CityOptions) {
       const answers = parseAnswers(r.text);
       if (answers) {
         const answer = answers.join(" | ");
-        ledger.answerQuestion(row.id, answer);
+        ledger.answerQuestion(row.id, answer, parent, now());
         emit({ type: "question.answered", id: row.id, answer, answered_by: parent, ticket_id: q.ticket_id });
         sendTicket(parent, { to: by, kind: "direct_instruction", goal: `Answer to your question (${row.id}): ${answer}`, parent_id: q.ticket_id });
         return { id: row.id, answered_by: parent, answer };
@@ -333,7 +346,7 @@ export function createCity(opts: CityOptions) {
     const q = ledger.getQuestion(questionId);
     if (!q) throw new Error(`no question ${questionId}`);
     if (q.status === "answered") throw new Error(`question ${questionId} is already answered`);
-    ledger.answerQuestion(questionId, text);
+    ledger.answerQuestion(questionId, text, "owner", now());
     emit({ type: "question.answered", id: questionId, answer: text, answered_by: "owner", ticket_id: q.question.ticket_id });
     const t = ledger.getTicket(q.question.ticket_id);
     if (t?.status === "waiting_on_owner") setStatus(t.id, "in_progress");
