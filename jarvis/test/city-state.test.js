@@ -1,7 +1,7 @@
 // Events in, scene state out: the City View's reducer and panel mappings, with no DOM and no three.js.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agentPanel, agentStatus, applySnapshot, departmentPanel, initialState, layout, propFor, reduce, topBar } from "../hud/city-state.js";
+import { inboxItems, agentPanel, agentStatus, applySnapshot, departmentPanel, initialState, layout, propFor, reduce, topBar } from "../hud/city-state.js";
 import { cityEvent, citySnapshot } from "./fixtures/city.js";
 
 const T0 = 1_000_000;
@@ -103,4 +103,20 @@ test("the city state carries no demo flag and the module exports no demo data", 
   assert.ok(!("demo" in initialState(T0)));
   assert.ok(!("demo" in applySnapshot(initialState(T0), { agents: [] }, T0)));
   assert.deepEqual(Object.keys(mod).filter((k) => /demo|sample|fake/i.test(k)), []);
+});
+
+test("inboxItems lists a live merge first, then open questions oldest first; expired merges and answered questions are gone", () => {
+  let s = applySnapshot(initialState(T0), citySnapshot(T0), T0);
+  s = reduce(s, cityEvent(8), T0 + 5000); // q-fx2 asked later than q-fx1
+  const merge = { id: "c1", repo: "o/r", number: 7, expiresAt: T0 + 10_000 };
+  const items = inboxItems(s, merge, T0 + 6000);
+  assert.deepEqual(items.map((i) => `${i.kind}:${i.id}`), ["merge:c1", "question:q-fx1", "question:q-fx2"]);
+  assert.equal(items[1].path, "Marketing Manager › Ads Writer");
+  assert.equal(items[1].questions[0].default, "20");
+  assert.deepEqual(inboxItems(s, merge, T0 + 10_000).map((i) => i.kind), ["question", "question"], "expired at expiresAt");
+  assert.deepEqual(inboxItems(s, null, T0).map((i) => i.id), ["q-fx1", "q-fx2"]);
+  s = reduce(s, cityEvent(3), T0 + 7000); // q-fx1 answered
+  assert.deepEqual(inboxItems(s, null, T0).map((i) => i.id), ["q-fx2"]);
+  assert.deepEqual(inboxItems(initialState(T0), null, T0), []);
+  assert.deepEqual(inboxItems(undefined, undefined, T0), []);
 });
