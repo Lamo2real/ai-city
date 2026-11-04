@@ -149,6 +149,19 @@ test("by the owner's decision a change to the rules or scoring merges under the 
   x.end();
 });
 
+test("a PR cannot rewrite its own judges: CI config and the Reviewer's prompt go to the owner before anything is spent", async () => {
+  for (const path of [".github/workflows/ci.yml", ".github/CODEOWNERS", ".GitHub/workflows/ci.yml", "agents/core/reviewer.md", "AGENTS/CORE/REVIEWER.MD"]) {
+    const x = await refused({ diff: `skills/python/SKILL.md\0${path}\0` }, /changes CI or the Reviewer's prompt/);
+    assert.deepEqual([x.reviewed, x.evals], [[], []], path);
+    assert.ok(!x.calls.some((c) => c.includes("check-runs")), path);
+  }
+  const x = world({ diff: "agents/core/orchestrator.md\0.githubish/x\0" });
+  x.event();
+  await x.settle();
+  assert.equal(x.merges.length, 1, "other prompts and lookalike paths stay open");
+  x.end();
+});
+
 test("the three conditions still hold for such a change: a Reviewer FAIL or worse evals do not merge it", async () => {
   const diff = "config/policy.json\0";
   await refused({ diff, reviewer: '{"verdict":"FAIL","findings":[],"summary":"weakens a rule"}' }, /Reviewer did not pass/);

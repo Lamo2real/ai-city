@@ -22,4 +22,4 @@ The runtime reads the PR itself. It merges with no person only if CI's `test` pa
 
 ## What this loop may change
 
-Anything, by the owner's decision, including the city's rules and how it is scored. A change to those is named to the owner in the run's report and marks scores from before and after it as not comparable, so never hide one inside another change. Never make a task easier to pass by teaching an agent the eval's answers.
+Anything except `.github/` and the Reviewer's prompt, which send the PR to the owner. By the owner's decision that includes the city's rules and how it is scored. A change to those is named to the owner in the run's report and marks scores from before and after it as not comparable, so never hide one inside another change. Never make a task easier to pass by teaching an agent the eval's answers.

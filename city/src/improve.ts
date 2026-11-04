@@ -1,6 +1,7 @@
 // The self-improvement gate. A weekly ticket may end with a PR; this merges it only when, checked here at one commit,
-// CI passed, the Reviewer passed and the evals did not get worse. Any path may change, by the owner's decision, the
-// city's rules and the scoring included: such a change is named in what the owner is told and in the report.
+// CI passed, the Reviewer passed and the evals did not get worse. By the owner's decision the city's rules and the
+// scoring may change this way, and such a change is named in what the owner is told and in the report. Only the two
+// things that decide CI's and the Reviewer's verdicts are barred: a PR must not be able to rewrite its own judges.
 // Nothing an agent says is taken for any of this: it only names the PR.
 // This is runtime code, not a tool. `gh pr merge` stays an "ask" for core agents and managers; by the owner's decision workers skip the rules.
 import { execFile } from "node:child_process";
@@ -17,6 +18,9 @@ const REPO_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const MAX_DIFF = 200_000; // the Reviewer must read all of it, so a bigger change goes to the owner rather than being cut
 const GIVE_UP_MS = 48 * 3_600_000;
 const MAX_ERRORS = 5;
+
+// Lowercase and both ends of a move: the owner's disk ignores case, and moving a file away changes it too.
+const barred = (path: string) => { const p = path.toLowerCase(); return p === ".github" || p.startsWith(".github/") || p === "agents/core/reviewer.md"; };
 
 // A verdict counts only if the whole reply is one: text in a diff that the Reviewer happens to quote is not a PASS.
 export function reviewerPassed(text: string): { passed: boolean; why: string } {
@@ -110,6 +114,8 @@ export function createImprover(o: ImproverOptions) {
     const base = (await git("rev-parse", "refs/city/main")).trim();
     const changed = (await git("diff", "--name-only", "--no-renames", "-z", `${base}...${sha}`)).split("\0").filter(Boolean);
     if (!changed.length) return toOwner(row, "it changes nothing");
+    const judges = changed.filter(barred);
+    if (judges.length) return toOwner(row, "it changes CI or the Reviewer's prompt", judges.join(", "));
     const ruleChanges = changed.filter(isRuleOrScoring);
 
     const runs = JSON.parse(await gh("api", `repos/${repo}/commits/${sha}/check-runs?per_page=100`)) as { check_runs: Array<{ name: string; status: string; conclusion: string | null; app?: { slug?: string } }> };

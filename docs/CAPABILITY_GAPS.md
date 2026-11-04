@@ -263,4 +263,4 @@ Gaps:
 - The eval set is small and known, so it catches a broken department and little else. One live task proves little about quality.
 - A failed gate does not try again: a PR that fails review goes to the owner, with no fix round.
 - A merge does not reach the running service until the checkout is pulled and it restarts.
-- By the owner's decision nothing stops this loop changing the city's rules, its CI or its scoring, and a worker can merge a PR itself. See "No limit on paths" in `docs/ARCHITECTURE.md`.
+- By the owner's decision this loop can change the city's rules and scoring, with only `.github/` and the Reviewer's prompt barred, and a worker can merge a PR itself. See "What may change" in `docs/ARCHITECTURE.md`.

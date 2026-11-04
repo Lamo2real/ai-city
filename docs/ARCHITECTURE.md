@@ -206,7 +206,7 @@ Four parts, each usable without the next.
 **The merge gate.** `createImprover` runs in the server, watches for that ticket and checks the PR itself, one commit at a time, from cheapest to dearest. Nothing an agent says counts: it only names the PR.
 
 1. The PR is open, not a draft, on an `improve/` branch of this repo (never a fork), aimed at `main`.
-2. The changed paths from `git diff` against `main`, to name any rules or scoring file later. Nothing is refused by path.
+2. The changed paths from `git diff` against `main`. A change to `.github/` or `agents/core/reviewer.md` goes to the owner here. Any rules or scoring file is noted, to be named later.
 3. GitHub Actions' `test` check run succeeded on that commit. It waits while CI runs, and gives up after 48 hours.
 4. The Reviewer reads the diff from git, whole (over 200 KB goes to the owner). Only a reply that is wholly a PASS with no blocker or major finding counts.
 5. `evalAtCommit` runs the evals in a separate process on a worktree of `main` and of the PR, both with `main`'s tasks. The PR must score at least `main`, and `main` must score above zero. A run stopped by a usage limit tries again later.
@@ -214,11 +214,11 @@ Four parts, each usable without the next.
 
 A merged change to the rules or scoring is named in the message to the owner, in `jarvis report`, and in the next weekly ticket. Any failed condition asks the owner a question and leaves the PR open. A PR seen once is never reconsidered. The state is the `improvements` table in the ledger, so it survives a restart. The merge lands on GitHub: the running service keeps its code until the checkout is pulled and it restarts.
 
-**No limit on paths, by the owner's decision (2026-11-04).** An earlier version refused to auto-merge changes to the city's protections. The owner removed that, so the loop may change `config/policy.json`, `.claude/hooks/`, `policy.ts`, `guardFor`, the approval code, `config/evals/`, the scoring code, CI and the Reviewer's prompt. `isRuleOrScoring` in `evals.ts` only decides what gets named.
+**What may change, by the owner's decision (2026-11-04).** An earlier version refused to auto-merge changes to the city's protections. The owner removed that, so the loop may change `config/policy.json`, `.claude/hooks/`, `policy.ts`, `guardFor`, the approval code, `config/evals/` and the scoring code. Only `.github/` and the Reviewer's prompt are barred (`barred` in `improve.ts`), so a PR cannot rewrite the workflow or the instructions that judge it. `isRuleOrScoring` in `evals.ts` only decides what gets named.
 
 What that means, plainly:
 - A planted instruction that gets past the Reviewer can weaken the city's rules for good. The Reviewer, which reads untrusted text, is the only judge of what a change means.
-- The conditions can be changed by what they check. A PR can edit the workflow behind `test`. A PR's own `evals.ts` scores its own run, so it can fake its score; only the tasks stay `main`'s. A merged change to the Reviewer's prompt or the gate applies to every later PR once the service runs it.
+- Some checks can still be changed by what they check. The bar covers the workflow file but not what it runs: a PR can change the `test` script in `package.json`, or edit or delete existing tests, and CI still passes. A PR's own `evals.ts` scores its own run, so it can fake its score; only the tasks stay `main`'s. A merged change to `improve.ts`, including removing this bar, applies to every later PR once the service runs it.
 - Allowed changes to tests and prompts can also teach an agent the public eval answers.
 - Naming a change tells the owner after the merge. It stops nothing.
 - Workers skip the policy rules, so a steered worker can run `gh pr merge` itself, and GitHub requires only the `test` check on `main`.
