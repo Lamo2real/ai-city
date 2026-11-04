@@ -279,7 +279,7 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
   };
   canvas.addEventListener("pointerup", endPointer); canvas.addEventListener("pointercancel", endPointer);
   canvas.addEventListener("dblclick", (ev) => { const hit = pick(ev); if (hit?.building) zoomInto(hit.building); });
-  root.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { if (view.zoomedInto) zoomOut(); else closePanel(); } });
+  root.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { if (view.zoomedInto) { zoomOut(); ev.preventDefault(); } else if (open) { closePanel(); ev.preventDefault(); } /* otherwise the page takes it: back Home */ } });
   const zoomInto = (b) => { view.zoomedInto = b.userData.name; view.wantTarget.copy(b.position); view.wantZoom = 3.2; };
   const zoomOut = () => { view.zoomedInto = null; view.wantTarget.set(0, 0, 0); view.wantZoom = 1.3; };
 
@@ -352,7 +352,7 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
       stat("STOCKHOLM", `${d.text} ${d.light > 0.5 ? "☀" : d.light > 0.2 ? "◐" : "☾"}`),
     );
     const list = $("#citydepts"); list.replaceChildren(el("h3", null, "Departments"));
-    for (const name of ["HQ", ...Object.keys(state.departments)]) { const b = el("button", "dept", name); b.style.borderLeftColor = deptColor(name); b.dataset.building = name; b.onclick = () => openDept(name); list.append(b); }
+    for (const name of ["HQ", ...Object.keys(state.departments)]) { const b = el("button", "dept", name); b.style.borderLeftColor = deptColor(name); b.dataset.building = name; b.title = name; b.onclick = () => openDept(name); list.append(b); }
     const a11y = $("#citylist"); a11y.replaceChildren();
     for (const name of ["HQ", ...Object.keys(state.departments)]) { const b = el("button", null, `Building: ${name}`); b.dataset.building = name; b.onclick = () => openDept(name); a11y.append(b); }
     for (const a of Object.values(state.agents)) { if (a.state === "retired") continue; const b = el("button", null, `Agent: ${a.id} (${a.role}, ${MODEL_NAME[a.model] ?? a.model})`); b.dataset.agent = a.id; b.onclick = () => { const p = people.get(a.id); if (p) clickAgent(p); else openAgent(a.id); }; a11y.append(b); }
