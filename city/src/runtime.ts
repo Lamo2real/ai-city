@@ -1349,7 +1349,13 @@ export function createCity(opts: CityOptions) {
     findAgent,
     checkMerges,
     // For the self-improvement gate: the Reviewer and the owner, reached the usual way.
-    review: (ticketId: string, prompt: string) => deliver("reviewer", prompt, ledger.getTicket(ticketId)).then((r) => r.text),
+    // Always a fresh session: an earlier request_review in this ticket's tree could have primed the one it would resume.
+    review: async (ticketId: string, prompt: string) => {
+      const a = agent("reviewer"), t = ledger.getTicket(ticketId);
+      const r = await request(a, t, { prompt, resume: null });
+      ledger.recordTurn(a.id, ticketId, r.sessionId, r.costUsd, r.usage ?? {}, r.tokens ?? 0, { model: capModel(a.model), durationMs: r.durationMs });
+      return r.text;
+    },
     askOwner: (ticketId: string, text: string, why: string) => ask("orchestrator", { ticket_id: ticketId, blocking: false, questions: [{ text, default: "ok", options: ["ok"], ...(why ? { why } : {}) }] }),
     tellOwner: (ticketId: string, summary: string, artifacts: string[]) => emit({ type: "result", ticket_id: ticketId, status: "done", summary, artifacts }),
     close: () => { closed = true; clearInterval(mergeTimer); ledger.close(); },

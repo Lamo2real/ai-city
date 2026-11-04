@@ -33,7 +33,7 @@ test("the hard limit: the other ways to the same place are closed too", () => {
     "package.json", "city/package.json", "package-lock.json", "jarvis/voice/pyproject.toml", "jarvis/voice/uv.lock", ".npmrc", // what CI and the runtime execute
     "city/src/memory.ts", "city/src/workflows.ts", "city/src/workspaces.ts", "config/workflows/software-delivery.json", "config/automations.json", "schemas/ticket.schema.json", // other protections
     "skills/self-improvement/SKILL.md", "jarvis/bin/jarvis.js", "jarvis/bin/jarvis-env", "jarvis/server/server.js", "CLAUDE.md", "docs/.gitattributes", "skills/x/.gitattributes", "some/new/place.txt",
-    "CITY/SRC/POLICY.TS", "Config/Policy.json", // the owner's disk ignores case
+    "docs/ai-city.drawio", "CITY/SRC/POLICY.TS", "Config/Policy.json", // the owner's disk ignores case
   ]) assert.ok(barred(p), p);
   assert.ok(barred("skills/x/SKILL.md", "M", "120000"), "a link can point anywhere");
   assert.ok(barred("city/src/sub", "A", "160000"), "a submodule can hold anything");
@@ -163,6 +163,21 @@ test("a change that holds on all three merges, at the commit that was checked, a
   x.end();
 });
 
+test("the Reviewer always starts fresh, so an earlier request in the same ticket's tree cannot prime it", async () => {
+  const seen: Array<string | null | undefined> = [];
+  const data = mkdtempSync(join(tmpdir(), "city-"));
+  const city = createCity({ dataDir: data, ledgerPath: join(data, "l.db"), policy, runner: async (req) => { if (req.agentId === "reviewer") seen.push(req.resume); return { text: "{}", sessionId: `s-${seen.length}`, costUsd: 0.5, tokens: 1 }; } });
+  const t = city.sendTicket({ to: "orchestrator", goal: "x" });
+  await city.idle();
+  city.ledger.updateAgent("reviewer", { session_id: "primed", session_key: t.id });
+  await city.review(t.id, "first");
+  await city.review(t.id, "second");
+  assert.deepEqual(seen, [null, null]);
+  const { usd } = city.ledger.db.prepare("SELECT SUM(usd) AS usd FROM costs WHERE agent_id = 'reviewer'").get() as { usd: number };
+  assert.ok(usd > 0, "its cost still counts");
+  city.close();
+});
+
 test("a protected path stops it before anything is spent, whatever else says yes", async () => {
   const x = await refused({ diff: `:100644 100644 ${"0".repeat(40)} ${"1".repeat(40)} M\0skills/python/SKILL.md\0:100644 100644 ${"0".repeat(40)} ${"1".repeat(40)} M\0config/policy.json\0` }, /may never change.*config\/policy\.json/);
   assert.deepEqual(x.reviewed, []);
@@ -226,8 +241,8 @@ test("a diff too big to read whole is not cut and passed: it goes to the owner",
 });
 
 test("worse evals, evals that measured nothing and evals that crashed go to the owner", async () => {
-  await refused({ after: run(3) }, /evals got worse.*evals 3\/5 against 4\/5/);
-  await refused({ before: run(0), after: run(0) }, /evals got worse.*measured nothing/);
+  await refused({ after: run(3) }, /evals did not hold.*evals 3\/5 against 4\/5/);
+  await refused({ before: run(0), after: run(0) }, /evals did not hold.*measured nothing/);
   await refused({ after: () => Promise.reject(new Error("child died")) }, /evals could not run.*child died/);
 });
 

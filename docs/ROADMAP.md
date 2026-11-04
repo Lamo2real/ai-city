@@ -19,7 +19,7 @@ This work, the game-style City view and Jarvis's direct line were merged to `mai
 | 5 | Dependencies, handoffs and per-ticket git worktrees | In code | `depends_on` with handoff text, failure propagation, `allocate_workspace` via `workspaces.ts` (limited to `repos_roots`, never main). Tests: `organization.test.ts` (dependencies, worktrees). | `releaseWorkspace` is never called by the runtime; worktrees pile up under `~/.jarvis/worktrees`. Nothing allocates a worktree unless the agent asks. |
 | 6 | Memory with retrieval | In code | `memory.ts`: FTS5, five scopes, recency, dedupe, secret refusal; automatic recall at dispatch. Test: `organization.test.ts`. | Keyword only. No expiry. Narrow secret filter. No measure of benefit. |
 | 7 | OpenClaw execution layer with capability enforcement at the hook | In code | `openclaw.ts` (pinned config, bridge, runner), `city/openclaw-plugin/` (tools and `before_tool_call` at priority 1000, fail closed). Tests: `openclaw.test.ts` (8). | No sandbox. The policy rules for shell commands now match `Bash`, `exec` and `bash` (fixed 2026-11-04, see priority 1); they are still regexes over command text. Browser path: see tests. |
-| 8 | Skills library, 18 skills covering the directive's 47 areas | In code | `skills/` has 18 folders; their `covers:` lines hold 47 distinct entries. Index in the prompt, body by `read_skill`. | The 47 was counted from `covers:`, not matched against the directive's own list. No third-party skills. Nothing measures whether a skill helps. |
+| 8 | Skills library, 19 skills covering the directive's 47 areas | In code | `skills/` has 19 folders; their `covers:` lines hold 47 distinct entries. Index in the prompt, body by `read_skill`. | The 47 was counted from `covers:`, not matched against the directive's own list. No third-party skills. Nothing measures whether a skill helps. |
 | 9 | Workflows with durable approvals, inbound event routing, schedules | In code, schedules off | Four workflows in `config/workflows/`; approval steps as `gate` tickets that survive a restart; `ingestEvent` and `POST /api/city/events`; `city-event`; `city-automations`. Tests: `automation.test.ts` (6). | Schedules are off and need the Gateway, which is not running. No inbound webhooks. The events endpoint has no authentication of its own. Approval is read from the first word of free text. |
 | 10 | Tool-layer approvals and autonomy, plus trace, workforce, health and honest integration probes | In code | `guardFor` (approvals bound to the exact call, single use, relay cannot approve, `read_only` and `supervised` departments); `createTrace`, `workforce()`, `health()`, `probeIntegrations` (a status of `operational` only when a probe answered). Tests: `organization.test.ts`, `automation.test.ts`, `events.test.ts`. | The daily spend cap is enforced only at hire time. See priorities 2 and 3. |
 
@@ -38,6 +38,8 @@ This work, the game-style City view and Jarvis's direct line were merged to `mai
 11. **Verify voice.** Run the audio checks in `jarvis/voice/README.md`, wire the offline fallback, pick the Cartesia voice id, and record the latency.
 12. **Memory quality.** The secret filter was widened on 2026-11-04. Still to add: a way to see what was recalled for a ticket, and embeddings only if a recall test shows keyword search is not enough.
 13. **Workflow shape.** Retry of a single step, and a failure that does not fail unrelated branches. Only if a real workflow needs it.
+
+14. **Done in code 2026-11-04: evals and the weekly self-improvement loop,** by the owner's decision that a change passing evals, CI and the Reviewer merges without the owner. See `docs/ARCHITECTURE.md`, "How the city improves itself". Still the owner's call: `jarvis/bin/city-automations enable weekly-improvement`. A wider eval set is the next thing worth adding once real reports show what fails.
 
 ## Acceptance tests
 
@@ -65,6 +67,7 @@ Run live on 2026-11-04 on scratch data (`JARVIS_HOME` in a temp folder, `JARVIS_
 - Non-Anthropic providers are not used.
 - Lobster is not used: it is single-agent tool pipelines, and workflows here span departments.
 - No third-party skills are installed.
+- Self-improvement can never auto-merge a change to the city's protections (`protectedChanges` in `city/src/improve.ts`); such a PR goes to the owner.
 - Schedules are off until the owner enables them, and they need the Gateway, which is not running.
 - Cost figures are estimates at API list prices, not charges.
 - `ANTHROPIC_API_KEY` is refused. Everything runs on the Claude subscription.

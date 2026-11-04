@@ -43,12 +43,22 @@ test("the organization can be read and run over the local routes", async () => {
   assert.equal(again.status, 400);
   assert.match(again.body.error, /"Research" already covers this/, "no second department for the same work");
   assert.ok((await api("GET", "/api/city/departments")).body.some((d) => d.name === "Research"));
-  for (const path of ["/api/city/costs", "/api/city/workforce", "/api/city/health", "/api/city/workflows", "/api/city/memory?q=x"]) assert.equal((await api("GET", path)).status, 200, path);
+  for (const path of ["/api/city/costs", "/api/city/workforce", "/api/city/health", "/api/city/report?days=7", "/api/city/workflows", "/api/city/memory?q=x"]) assert.equal((await api("GET", path)).status, 200, path);
   const skills = (await api("GET", "/api/city/skills")).body;
   assert.ok(skills.some((s) => s.name === "aws" && s.description && s.version));
   assert.equal((await api("GET", "/api/city/trace?ticket=../../etc")).status, 400);
   assert.equal((await api("POST", "/api/city/tickets/cancel", { ids: "t-1" })).status, 400);
   assert.equal((await api("POST", "/api/city/workflows/start", { name: "nope" })).status, 400, "a bad workflow is refused, not a crash");
+});
+
+test("the report covers the days asked for and refuses nonsense, and the eval and report commands answer", async () => {
+  assert.equal((await api("GET", "/api/city/report?days=0")).status, 400);
+  assert.equal((await api("GET", "/api/city/report?days=abc")).status, 400);
+  assert.equal((await api("GET", "/api/city/report?days=3")).body.days, 3);
+  const home = mkdtempSync(join(tmpdir(), "report-"));
+  const report = await run(process.execPath, [join(BIN, "jarvis.js"), "report", "--json"], { env: { ...process.env, JARVIS_HOME: home } });
+  assert.equal(JSON.parse(report.stdout).days, 7);
+  await assert.rejects(run(process.execPath, [join(BIN, "jarvis.js"), "eval", "--nope"], { env: { ...process.env, JARVIS_HOME: home } }), /usage: jarvis eval/);
 });
 
 test("an unrouted event starts nothing, and a routed one starts one ticket", async () => {
@@ -100,6 +110,7 @@ function recorder() {
     let d = ""; req.on("data", (c) => { d += c; }); req.on("end", () => {
       res.setHeader("Content-Type", "application/json");
       if (req.method === "POST") { seen.push(JSON.parse(d)); return res.end('{"routed":true,"ticket":"t-9"}'); }
+      if (req.url.startsWith("/api/city/report")) return res.end(JSON.stringify({ repeated: [{ problem: "p", count: 2 }], departments: [] }));
       if (req.url === "/api/city/health") return res.end(JSON.stringify({ failed_today: http.failed ?? 0 }));
       res.end(JSON.stringify({ today: 1.5 }));
     });
@@ -136,6 +147,10 @@ test("city-event: checks cost nothing unless something happened; failures become
   await event("briefing");
   assert.equal(rec.seen[0].type, "briefing.daily");
   assert.equal(rec.seen[0].data.costs.estimated, true);
+  await event("improve");
+  assert.equal(rec.seen.at(-1).type, "improve.weekly");
+  assert.equal(rec.seen.at(-1).data.repeated[0].count, 2);
+  assert.match(rec.seen.at(-1).idempotency_key, /^improve-\d{4}-\d{2}-\d{2}$/);
   await event("emit", "stripe", "stripe.paid", "paid", "p1");
   assert.equal(rec.seen.at(-1).idempotency_key, "p1");
   await assert.rejects(event("nonsense"), /unknown command/);

@@ -1,6 +1,6 @@
 // jarvis eval with a fake runner: scoring, recording and comparing.
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -55,6 +55,8 @@ test("a run scores real work in a throwaway city, with its cost and time", async
   assert.deepEqual([run.passed, run.total, run.score, run.label, run.limit], [1, 2, 0.5, "abc", false]);
   assert.deepEqual(run.tasks.map((t) => [t.id, t.passed]), [["t1", true], ["t2", false]]);
   assert.match(run.tasks[1].failures[0], /should not exist/);
+  assert.ok(existsSync(join(run.tasks[1].kept!, "events.jsonl")), "a failed task keeps its evidence");
+  assert.equal(run.tasks[0].kept, undefined);
   assert.ok(run.cost_usd > 0 && run.ms >= 0);
   assert.match(formatRun(run), /Score 1\/2 \(50%\)/);
 });

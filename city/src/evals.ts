@@ -19,7 +19,7 @@ export type PassCheck =
   | { type: "command"; argv: string[] };
 export interface EvalTask { id: string; goal: string; setup?: Record<string, string>; acceptance_criteria?: string[]; complexity?: "simple" | "standard" | "complex"; timeout_minutes?: number; pass: PassCheck[] }
 export interface EvalSuite { department: string; mission: string; tasks: EvalTask[] }
-export interface TaskResult { id: string; department: string; passed: boolean; status: string; failures: string[]; cost_usd: number; ms: number }
+export interface TaskResult { id: string; department: string; passed: boolean; status: string; failures: string[]; cost_usd: number; ms: number; kept?: string }
 export interface EvalRun { at: string; label: string; passed: number; total: number; score: number; cost_usd: number; ms: number; limit: boolean; tasks: TaskResult[] }
 
 const NO_OWNER = "No owner is available during this eval. Decide for yourself and carry on; anything that needs approval is denied.";
@@ -113,9 +113,12 @@ async function runTask(suite: EvalSuite, task: EvalTask, o: RunOptions): Promise
   const failures = scoreTask(task, ticket?.status ?? "not sent", ticket?.result?.summary ?? "", work);
   if (timedOut) failures.push(`timed out after ${task.timeout_minutes ?? 10} minutes`);
   if (limit) failures.push("the usage limit stopped this task");
-  const result: TaskResult = { id: task.id, department: suite.department, passed: !failures.length, status: ticket?.status ?? "not sent", failures, cost_usd: usd, ms: Date.now() - started };
+  const result: TaskResult = { id: task.id, department: suite.department, passed: !failures.length, status: ticket?.status ?? "not sent", failures, cost_usd: usd, ms: Date.now() - started, ...(failures.length ? { kept: home } : {}) };
   // A turn still paused on the limit would write to a closed ledger: this city is thrown away with its process.
-  if (quiet) { city.close(); rmSync(home, { recursive: true, force: true }); }
+  if (quiet) city.close();
+  // A failed task keeps its folder, with its events and audit log: a hang leaves no other evidence.
+  if (quiet && result.passed) rmSync(home, { recursive: true, force: true });
+  else o.log?.(`${task.id}: kept ${home}`);
   return { result, limit };
 }
 
@@ -134,7 +137,7 @@ const money = (n: number) => `$${n.toFixed(2)}`;
 const time = (ms: number) => `${(ms / 60_000).toFixed(1)}m`;
 const pct = (r: EvalRun) => `${r.passed}/${r.total} (${Math.round(r.score * 100)}%)`;
 export function formatRun(run: EvalRun, previous?: EvalRun): string {
-  const lines = run.tasks.map((t) => `${t.passed ? "PASS" : "FAIL"}  ${t.department} / ${t.id}  ${money(t.cost_usd)}  ${time(t.ms)}${t.failures.length ? `\n      ${t.failures.join("; ")}` : ""}`);
+  const lines = run.tasks.map((t) => `${t.passed ? "PASS" : "FAIL"}  ${t.department} / ${t.id}  ${money(t.cost_usd)}  ${time(t.ms)}${t.failures.length ? `\n      ${t.failures.join("; ")}${t.kept ? `\n      kept: ${t.kept}` : ""}` : ""}`);
   const verdict = !previous ? "" : run.score > previous.score ? ", better than" : run.score < previous.score ? ", worse than" : ", same as";
   lines.push(`Score ${pct(run)}, estimated ${money(run.cost_usd)} at API list prices (not a charge), ${time(run.ms)}${previous ? `${verdict} the last run: ${pct(previous)}, ${money(previous.cost_usd)}, ${time(previous.ms)} (${previous.label || previous.at})` : ""}.`);
   if (run.limit) lines.push("Stopped on a usage limit, so this score says nothing about the city.");

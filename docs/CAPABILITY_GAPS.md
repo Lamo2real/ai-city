@@ -25,6 +25,7 @@ Unit tests in `city/test/` use a fake runner. They show that the logic behaves a
 | 13 | Security | partial |
 | 14 | City visualization | partial |
 | 15 | Observability | done |
+| 16 | Evals and self-improvement | partial |
 
 ## 1. Dynamic departments: done
 
@@ -90,7 +91,7 @@ Gaps:
 ## 5. Skills: partial
 
 Evidence:
-- `skills/` holds 18 folders with a `SKILL.md`: advertising, aws, backend-api, customer-support, database-engineering, financial-reporting, git-code-review, incident-response, market-research, operations, python, sales-outreach, security-review, seo-content, software-architecture, terraform-cicd, testing-debugging, typescript-react.
+- `skills/` holds 19 folders with a `SKILL.md`: advertising, aws, backend-api, customer-support, database-engineering, financial-reporting, git-code-review, incident-response, market-research, operations, python, sales-outreach, security-review, seo-content, software-architecture, terraform-cicd, testing-debugging, typescript-react.
 - Their `covers:` lines hold 47 distinct entries (counted by splitting on commas and de-duplicating). I could not check that against the directive's list of 47 areas, because that text is not in the repo.
 - Mechanism (`city/src/agents.ts`): a spec's or a department's `skills` list puts one line per skill in the prompt; the body is read with `read_skill`. `create_department` refuses an unknown skill name. `list_skills` and `/api/city/skills` list them.
 - Test: `organization.test.ts` ("skills: a listed skill reaches the prompt as one line and is read on demand; an unknown one is refused at creation").
@@ -249,3 +250,17 @@ Gaps:
 - `forTicket` reads the whole trace file and has no rotation; a comment in the code says to rotate it past a few hundred MB.
 - `tickets_stale` is empty while any turn is running, by design.
 - The trace does not record the content of tool calls; the audit log records tool name, decision and reason only.
+
+## 16. Evals and self-improvement: partial
+
+Evidence:
+- `jarvis eval`, `config/evals/` (five tasks across Engineering, Research, Marketing and Support), recorded in `evals.jsonl`. Tests: `evals.test.ts`.
+- `jarvis report` and `/api/city/report`; lessons through `memory.remember`. Tests: `measure.test.ts`.
+- The weekly schedule and the merge gate, with its hard limit in `protectedChanges`. Tests: `improve.test.ts`.
+
+Gaps:
+- The merge gate has only run against fake `git`, `gh` and evals, apart from `evalAtCommit`. It has not merged a real PR, and the weekly schedule is off.
+- The eval set is small and known, so it catches a broken department and little else. One live task proves little about quality.
+- A failed gate does not try again: a PR that fails review goes to the owner, with no fix round.
+- A merge does not reach the running service until the checkout is pulled and it restarts.
+- See "What the limit does not do" in `docs/ARCHITECTURE.md`.

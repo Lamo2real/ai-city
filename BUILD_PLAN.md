@@ -60,3 +60,5 @@ Follow `README.md` → Setup. Done when `claude mcp list` shows all servers conn
 > Turn on hiring for new departments. Enforce every cap in config/policy.json. Add per-ticket tracing (cost, time, agent tree) visible in the HUD, and a small eval set of known tasks per department run by `jarvis eval`.
 
 **Done when:** the agent over `max_concurrent_agents` is refused cleanly, `jarvis eval` passes, and the HUD shows cost per department for today.
+
+`jarvis eval`, `jarvis report` and the weekly self-improvement loop are in code; see `docs/ARCHITECTURE.md`.

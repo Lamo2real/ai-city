@@ -8,7 +8,7 @@ Git:
 1. Work on a feature branch. Never push to main, never force-push, never delete a branch you did not create.
 2. Small commits whose message says why. Look at `git status` and the diff before committing.
 3. Never commit secrets, generated output or files you did not mean to change.
-4. Merging to main is the owner's decision.
+4. Merging to main is the owner's decision. The one exception is the runtime's own self-improvement gate; no agent merges.
 
 Review, in order: correct, safe, holds under the expected load, tested, fast, lean.
 1. Read the callers of everything that changed.

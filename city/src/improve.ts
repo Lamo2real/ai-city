@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync }
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { EVALS_DIR, recordRun, type EvalRun } from "./evals.ts";
+import { recordRun, type EvalRun } from "./evals.ts";
 import { now } from "./ledger.ts";
 import type { City } from "./runtime.ts";
 
@@ -21,7 +21,7 @@ const MAX_ERRORS = 5;
 // Whole files because guardFor and the approval code live in runtime.ts, their rows in ledger.ts, and the guard is
 // called from sdk.ts and openclaw.ts: a rule by line would miss the helpers around them.
 const MAY_CHANGE = /^(agents\/|skills\/|docs\/|city\/src\/|jarvis\/hud\/|jarvis\/voice\/)/;
-const NEVER = /^(agents\/core\/reviewer\.md|skills\/self-improvement\/|city\/src\/(policy|runtime|sdk|openclaw|ledger|evals|improve|agents|auth|memory|workflows|workspaces|schemas|checks|index)\.ts$)/;
+const NEVER = /^(agents\/core\/reviewer\.md|docs\/ai-city\.drawio|skills\/self-improvement\/|city\/src\/(policy|runtime|sdk|openclaw|ledger|evals|improve|agents|auth|memory|workflows|workspaces|schemas|checks|index)\.ts$)/;
 // An existing test is what CI means, so the loop may add tests but not change or remove them.
 const NEW_TESTS = /^(city|jarvis)\/test\//;
 const DOTFILE_OR_PACKAGE = /(^|\/)(\.[^/]*|package(-lock)?\.json|pyproject\.toml|uv\.lock|requirements[^/]*)(\/|$)/;
@@ -66,13 +66,17 @@ export function evalsHold(before: EvalRun, after: EvalRun): { ok: boolean; why: 
   return { ok: after.passed >= before.passed, why: score };
 }
 
-export type Exec = (cmd: string, args: string[], opts?: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv }) => Promise<string>;
-export const realExec: Exec = (cmd, args, o = {}) => new Promise((resolve, reject) => {
-  execFile(cmd, args, { cwd: o.cwd, env: o.env, timeout: o.timeoutMs ?? 120_000, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => (err ? reject(new Error(`${cmd} ${args[0]}: ${String(stderr).slice(-300) || err.message}`)) : resolve(stdout)));
+type Exec = (cmd: string, args: string[], opts?: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv }) => Promise<string>;
+const realExec: Exec = (cmd, args, o = {}) => new Promise((resolve, reject) => {
+  const child = execFile(cmd, args, { cwd: o.cwd, env: o.env, timeout: o.timeoutMs ?? 120_000, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => (err ? reject(new Error(`${cmd} ${args[0]}: ${String(stderr).slice(-300) || err.message}`)) : resolve(stdout)));
+  // An eval outliving a restart would keep spending, and the next run would remove its worktree.
+  const kill = () => { child.kill(); };
+  process.once("exit", kill);
+  child.once("exit", () => process.off("exit", kill));
 });
 
 // Runs one commit's own code in a process of its own, with the evals as main has them.
-export async function evalAtCommit(exec: Exec, repoDir: string, dataDir: string, sha: string, evalsDir: string): Promise<EvalRun> {
+async function evalAtCommit(exec: Exec, repoDir: string, dataDir: string, sha: string, evalsDir: string): Promise<EvalRun> {
   const root = join(dataDir, "improve"), wt = join(root, sha.slice(0, 12));
   mkdirSync(root, { recursive: true, mode: 0o700 });
   await exec("git", ["-C", repoDir, "worktree", "remove", "--force", wt]).catch(() => {}); // what a crash left behind
@@ -163,7 +167,7 @@ export function createImprover(o: ImproverOptions) {
       await git("worktree", "remove", "--force", wt).catch(() => {});
       mkdirSync(dirname(wt), { recursive: true, mode: 0o700 });
       await git("worktree", "add", "--detach", "-q", wt, base);
-      const evalsDir = existsSync(join(wt, "config", "evals")) ? join(wt, "config", "evals") : EVALS_DIR;
+      const evalsDir = join(wt, "config", "evals");
       const before = await evalAt(base, evalsDir);
       const after = before.limit ? before : await evalAt(sha, evalsDir);
       if (before.limit || after.limit) return log(`improvement PR #${row.pr}: evals stopped on a usage limit; trying again later`);
@@ -175,7 +179,7 @@ export function createImprover(o: ImproverOptions) {
     } finally {
       await git("worktree", "remove", "--force", wt).catch(() => {});
     }
-    if (!hold.ok) return toOwner(row, "the evals got worse", hold.why);
+    if (!hold.ok) return toOwner(row, "the evals did not hold", hold.why);
 
     // --match-head-commit: what merges is the commit that passed, or nothing does.
     try { await gh("pr", "merge", String(row.pr), "--repo", repo, "--merge", "--match-head-commit", sha, "--delete-branch"); }
