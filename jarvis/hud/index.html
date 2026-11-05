@@ -371,11 +371,11 @@
   /* The eyes: they rest and blink, widen and glow with your voice, pulse when AIC speaks, and glance aside while thinking. --lvl follows the live audio. */
   #wave{display:none}
   .core>svg,.core.listening>svg{filter:none}
-  .eyes{transition:opacity .5s;filter:drop-shadow(0 0 calc(6px + var(--lvl)*44px) rgba(150,70,255,calc(.45 + var(--lvl)*.55)))}
+  .eyes{transition:opacity .5s;filter:drop-shadow(0 0 calc(5px + var(--lvl)*44px) rgba(160,110,220,calc(.4 + var(--lvl)*.6)))}
   .jeye,.rings,.iris,.pup{transform-box:fill-box;transform-origin:center}
   .jeye{animation:eyeblink 6.5s ease-in-out infinite;transform-origin:50% 62%}
   @keyframes eyeblink{0%,94%,100%{scale:1 1}97%{scale:1 .06}}
-  .core.off .eyes{opacity:.85}
+  .core.off .eyes{opacity:1}
   .core.standby .eyes{opacity:1}
   .rings{transform:scale(calc(1 + var(--lvl)*.12));transition:transform .08s linear}
   .scl{filter:brightness(calc(1 + var(--lvl)*.32));transition:filter .08s linear}
@@ -388,7 +388,7 @@
   @keyframes eyepulse{0%{transform:scale(.92);opacity:1}100%{transform:scale(1.14);opacity:.45}}
   .core.thinking .iris{animation:eyethink 1.9s ease-in-out infinite}
   .core.thinking .iris.r{animation-direction:reverse}
-  @keyframes eyethink{0%,100%{transform:translateX(-16px)}50%{transform:translateX(16px)}}
+  @keyframes eyethink{0%,100%{transform:translateX(-9px)}50%{transform:translateX(9px)}}
   @media (prefers-reduced-motion:reduce){.jeye,.iris,.rings,.core.speaking .rings{animation:none!important}}
   .vstate{top:22px;font-size:13px;font-weight:500;padding:0;border:0;color:var(--mute)}
   .core.standby .vstate,.core.thinking .vstate{color:var(--mute);border:0}
@@ -474,33 +474,38 @@
   </div>
 
   <div class="panel core">
-    <svg viewBox="60 330 1800 520" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+    <svg viewBox="298 430 1320 230" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
       <defs>
-        <clipPath id="eyeclip"><path d="M190 478C300 478 420 490 505 540C580 585 640 650 680 716C600 716 520 714 450 708C370 700 310 680 275 640C235 590 210 530 190 478Z"/></clipPath>
-        <linearGradient id="sclera" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b5a8c9"/><stop offset="1" stop-color="#d6cce3"/></linearGradient>
+        <clipPath id="eyeclip"><path d="M526 502C560 506 600 511 633 516C660 520 680 521 699 523C720 526 740 533 764 548C775 556 785 565 791 573C793 578 788 583 781 584C760 586 735 586 696 584C670 583 645 581 624 579C610 578 597 577 587 574C580 571 576 566 572 560L546 531Z"/></clipPath>
+        <clipPath id="sclclip"><path d="M568 536C569 531 572 528 578 528C600 528 615 529 631 531C655 535 680 540 699 544C715 549 735 559 753 570L747 584C730 585 715 584 696 583C670 582 645 580 624 578.5C610 577 597 576 587 574C581 570 577 566 575 561Z"/></clipPath>
+        <linearGradient id="lid" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#4a3560"/><stop offset=".35" stop-color="#402e4c"/><stop offset=".5" stop-color="#28192c"/><stop offset=".62" stop-color="#2c1c30"/><stop offset=".78" stop-color="#462d4a"/><stop offset="1" stop-color="#3f2c4c"/></linearGradient>
       </defs>
       <g class="eyes">
         <g class="jeye">
-          <path d="M190 478C300 478 420 490 505 540C580 585 640 650 680 716C600 716 520 714 450 708C370 700 310 680 275 640C235 590 210 530 190 478Z" fill="#5b4a78"/>
           <g clip-path="url(#eyeclip)">
-            <path class="scl" d="M238 518C330 508 420 515 490 548C560 584 620 650 662 720L300 720L238 560Z" fill="url(#sclera)"/>
+            <path d="M526 502C560 506 600 511 633 516C660 520 680 521 699 523C720 526 740 533 764 548C775 556 785 565 791 573C793 578 788 583 781 584C760 586 735 586 696 584C670 583 645 581 624 579C610 578 597 577 587 574C580 571 576 566 572 560L546 531Z" fill="url(#lid)"/>
+            <g clip-path="url(#sclclip)">
+              <path class="scl" d="M568 536C569 531 572 528 578 528C600 528 615 529 631 531C655 535 680 540 699 544C715 549 735 559 753 570L747 584C730 585 715 584 696 583C670 582 645 580 624 578.5C610 577 597 576 587 574C581 570 577 566 575 561Z" fill="#9a85a4"/>
+              <g class="iris"><circle cx="664" cy="535" r="33" fill="#8a6892"/></g>
+            </g>
+            <path class="scl" d="M756 573L762 579C760 583 756 586 753 587L747 584Z" fill="#d9cfe0"/>
             <g class="iris">
-              <g class="rings" fill="none" stroke="#120c1c" stroke-width="5.5"><circle cx="470" cy="572" r="74"/><circle cx="470" cy="572" r="142"/><circle cx="470" cy="572" r="214"/><circle cx="470" cy="572" r="290"/></g>
-              <circle cx="470" cy="572" r="72" fill="#9379ab"/>
-              <circle cx="478" cy="562" r="24" fill="#5c4a7a"/>
-              <circle class="pup" cx="478" cy="562" r="16" fill="#08050d"/>
+              <g class="rings" fill="none" stroke="#1c1026" stroke-opacity=".45" stroke-width="2.4"><circle cx="664" cy="535" r="33"/><circle cx="664" cy="535" r="63"/><circle cx="664" cy="535" r="97"/><circle cx="664" cy="535" r="112"/><circle cx="664" cy="535" r="130"/></g>
+              <circle class="pup" cx="666" cy="529" r="10" fill="#241729"/>
             </g>
           </g>
         </g>
-        <g transform="translate(1920 0) scale(-1 1)"><g class="jeye">
-          <path d="M190 478C300 478 420 490 505 540C580 585 640 650 680 716C600 716 520 714 450 708C370 700 310 680 275 640C235 590 210 530 190 478Z" fill="#5b4a78"/>
+        <g transform="translate(1916 0) scale(-1 1)"><g class="jeye">
           <g clip-path="url(#eyeclip)">
-            <path class="scl" d="M238 518C330 508 420 515 490 548C560 584 620 650 662 720L300 720L238 560Z" fill="url(#sclera)"/>
+            <path d="M526 502C560 506 600 511 633 516C660 520 680 521 699 523C720 526 740 533 764 548C775 556 785 565 791 573C793 578 788 583 781 584C760 586 735 586 696 584C670 583 645 581 624 579C610 578 597 577 587 574C580 571 576 566 572 560L546 531Z" fill="url(#lid)"/>
+            <g clip-path="url(#sclclip)">
+              <path class="scl" d="M568 536C569 531 572 528 578 528C600 528 615 529 631 531C655 535 680 540 699 544C715 549 735 559 753 570L747 584C730 585 715 584 696 583C670 582 645 580 624 578.5C610 577 597 576 587 574C581 570 577 566 575 561Z" fill="#9a85a4"/>
+              <g class="iris r"><circle cx="664" cy="535" r="33" fill="#8a6892"/></g>
+            </g>
+            <path class="scl" d="M756 573L762 579C760 583 756 586 753 587L747 584Z" fill="#d9cfe0"/>
             <g class="iris r">
-              <g class="rings" fill="none" stroke="#120c1c" stroke-width="5.5"><circle cx="470" cy="572" r="74"/><circle cx="470" cy="572" r="142"/><circle cx="470" cy="572" r="214"/><circle cx="470" cy="572" r="290"/></g>
-              <circle cx="470" cy="572" r="72" fill="#9379ab"/>
-              <circle cx="478" cy="562" r="24" fill="#5c4a7a"/>
-              <circle class="pup" cx="478" cy="562" r="16" fill="#08050d"/>
+              <g class="rings" fill="none" stroke="#1c1026" stroke-opacity=".45" stroke-width="2.4"><circle cx="664" cy="535" r="33"/><circle cx="664" cy="535" r="63"/><circle cx="664" cy="535" r="97"/><circle cx="664" cy="535" r="112"/><circle cx="664" cy="535" r="130"/></g>
+              <circle class="pup" cx="666" cy="529" r="10" fill="#241729"/>
             </g>
           </g>
         </g></g>
