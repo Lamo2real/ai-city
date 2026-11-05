@@ -258,7 +258,6 @@ test("a deliberately buggy PR gets FAIL from the automated checks, a fix ticket 
   const repo = join(gateData, "worktrees", "buggy"); mkdirSync(repo, { recursive: true });
   mkdirSync(join(repo, ".git"), { recursive: true });
   writeFileSync(join(repo, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }));
-  mkdirSync(join(repo, ".git"));
   const { runner, calls } = fakeRunner({
     orchestrator: async (req) => {
       const brace = req.prompt.indexOf("{");
