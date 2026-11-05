@@ -407,6 +407,12 @@
   body:not(.view-city) .dock #mic.rec{background:var(--o);color:#000}
   body:not(.view-city) .dock .cnt{top:0;right:0;font:600 11px/20px var(--font);background:#fff;color:#000}
   /* Chat, status and inbox sheets */
+  .pics{display:flex;gap:8px;padding:10px 12px 0;overflow-x:auto}
+  .pics[hidden]{display:none}
+  .pic{flex:none;width:56px;height:56px;padding:0;border:0;border-radius:10px;overflow:hidden;background:#2c2c2e;cursor:pointer}
+  .pic img{width:100%;height:100%;object-fit:cover;display:block}
+  .picrow{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}
+  .picrow img{max-width:220px;max-height:220px;border-radius:14px;display:block}
   #status .tabs{gap:2px;padding:2px;border-radius:10px;background:#2c2c2e;align-self:flex-start}
   #status .tabs button{min-height:30px;padding:0 16px;border:0;border-radius:8px;background:none;font:500 13px var(--font)}
   #status .tabs button[aria-selected=true]{background:#636366;box-shadow:none}
@@ -545,9 +551,12 @@
     <div class="talk" id="talk">
       <header id="talkhead"><h3>Talk to Jarvis</h3><span class="hint2">Close</span></header>
       <div class="log" id="log"></div>
+      <div class="pics" id="pics" hidden></div>
       <div class="bar2">
         <button class="ibtn" id="mic" title="Microphone" aria-label="Microphone">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+        <button class="ibtn" id="attach" title="Attach an image" aria-label="Attach an image" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l9.2-9.2a3.7 3.7 0 0 1 5.2 5.2l-9.2 9.2a1.8 1.8 0 0 1-2.6-2.6l8.5-8.5"/></svg></button>
+        <input id="attachinput" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden aria-hidden="true">
         <input id="say" placeholder="Ask or instruct, e.g. status, or open the PR to main for gift cards" autocomplete="off">
         <button class="ibtn" id="send" title="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l16-8-6 16-2-7z"/></svg></button>
         <button class="ibtn" id="voice" title="Speak typed replies too (voice turns are always spoken)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg></button>
@@ -761,12 +770,33 @@ pollPending(); setInterval(pollPending,5000); window.addEventListener("focus",()
 /* One turn at a time. A new message or talking over Jarvis cancels the one in progress. */
 let activeTurn=null, turnSeq=0;
 function cancelTurn(){ activeTurn?.abort(); activeTurn=null; stopSpeech(); }
+/* ---------- images in chat: pick, paste or drop. The server keeps the file; Jarvis gets its path. ---------- */
+let pics=[];
+function drawPics(){ const box=$("pics"); box.hidden=!pics.length; box.replaceChildren(...pics.map(p=>{ const b=document.createElement("button"); b.type="button"; b.className="pic"; b.title="Remove this image"; b.setAttribute("aria-label","Remove this image"); const i=document.createElement("img"); i.src=p.url; i.alt=""; b.append(i); b.onclick=()=>{ pics=pics.filter(x=>x!==p); drawPics(); }; return b; })); }
+async function attach(file){
+  if(!/^image\//.test(file.type)) return add("sys","Only images can be attached.");
+  if(file.size>10*1024*1024) return add("sys",`${file.name||"That image"} is over 10 MB.`);
+  const data=await new Promise((ok,no)=>{ const r=new FileReader(); r.onload=()=>ok(String(r.result).split(",")[1]); r.onerror=()=>no(r.error); r.readAsDataURL(file); });
+  try{ const r=await fetch("./api/upload",{method:"POST",headers:{"Content-Type":"application/json"},credentials:"include",body:JSON.stringify({data})}); const j=await r.json(); if(!r.ok) throw new Error(j.error||`error ${r.status}`); pics.push({path:j.path,url:URL.createObjectURL(file)}); drawPics(); say.focus(); }
+  catch(e){ add("sys",`Could not attach that image: ${e.message}`); }
+}
+$("attach").onclick=()=>$("attachinput").click();
+$("attachinput").onchange=e=>{ for(const f of e.target.files) attach(f); e.target.value=""; };
+say.addEventListener("paste",e=>{ const files=[...e.clipboardData.files].filter(f=>f.type.startsWith("image/")); if(files.length){ e.preventDefault(); files.forEach(attach); } });
+talk.addEventListener("dragover",e=>e.preventDefault());
+talk.addEventListener("drop",e=>{ e.preventDefault(); for(const f of e.dataTransfer.files) attach(f); });
+// The notes go to Jarvis; the owner sees the pictures instead.
+function takePics(){ const taken=pics; pics=[]; drawPics(); return taken; }
+const picNotes=taken=>taken.map(p=>`\n[The owner attached an image: ${p.path}]`).join("");
+function showPics(taken){ if(!taken.length) return; const row=document.createElement("div"); row.className="msg me picrow"; for(const p of taken){ const i=document.createElement("img"); i.src=p.url; i.alt="Image you attached"; row.append(i); } log.appendChild(row); log.scrollTop=log.scrollHeight; }
+
 async function ask(q,spoken=false){
-  if(q&&live){ add("me",q); say.value=""; liveSay(`The owner typed: "${q}". Respond to it now, using the backend if it needs it.`); return; }
+  q=q||(pics.length?"Take a look at this.":"");
+  if(q&&live){ const taken=takePics(); showPics(taken); add("me",q); say.value=""; liveSay(`The owner typed: "${q}".${picNotes(taken)} Respond to it now, using the backend if it needs it.`); return; }
   if(!q) return; cancelTurn(); const turn=++turnSeq, ctrl=new AbortController(); activeTurn=ctrl; speakTurn=spoken||voiceOn;
-  add("me",q); say.value=""; setListenWindow(0); setState("thinking");
+  const taken=takePics(); showPics(taken); add("me",q); say.value=""; setListenWindow(0); setState("thinking");
   // Claude wrote more than the owner heard; it should answer from what was actually said.
-  const wording=cutOffAt&&!confirmData?`[You were interrupted. The owner stopped you while you were saying: "${cutOffAt}" They did not hear anything after that.]\n${q}`:q; cutOffAt=""; lastSpoken="";
+  const wording=cutOffAt&&!confirmData?`[You were interrupted. The owner stopped you while you were saying: "${cutOffAt}" They did not hear anything after that.]\n${q}${picNotes(taken)}`:q+picNotes(taken); cutOffAt=""; lastSpoken="";
   const dots=document.createElement("div"); dots.className="msg sys"; dots.textContent="…"; log.appendChild(dots);
   let bubble=null, shown="", failure=null, confirm=null, final=null;
   const showReply=text=>{ dots.remove(); if(!bubble){ add("j",""); bubble=log.lastChild; } bubble.innerHTML="<b>JARVIS</b>"+esc(text).replace(/\n/g,"<br>"); log.scrollTop=log.scrollHeight; };

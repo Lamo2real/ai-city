@@ -1,6 +1,6 @@
 // Jarvis on the city backend, with a scripted runner in place of the Agent SDK.
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, statSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -137,6 +137,18 @@ test("chat.idle waits for relayed turns, so a CLI does not exit before Jarvis ha
   await pending;
   await held.idle();
   assert.equal(settled, true);
+});
+
+test("an attached image is checked by its bytes and kept privately", async () => {
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from("rest")]).toString("base64");
+  const ok = await call({ method: "POST", path: "/api/upload", body: { data: png } });
+  assert.equal(ok.status, 200);
+  const { path } = JSON.parse(ok.text);
+  assert.ok(path.startsWith(join(dir, "uploads")) && path.endsWith(".png"));
+  assert.equal(statSync(path).mode & 0o777, 0o600);
+  const fake = await call({ method: "POST", path: "/api/upload", body: { data: Buffer.from("<script>alert(1)</script>").toString("base64"), name: "x.png" } });
+  assert.equal(fake.status, 415);
+  assert.equal((await call({ method: "POST", path: "/api/upload", body: {} })).status, 415);
 });
 
 test("one agent's status: a bad id is a 404, and a secret in its work is scrubbed", async () => {

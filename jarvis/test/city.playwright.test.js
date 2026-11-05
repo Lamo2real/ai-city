@@ -32,6 +32,24 @@ before(async () => {
 });
 after(async () => { await browser?.close(); server?.close(); city?.close(); });
 
+test("an image attached in chat shows as a picture and reaches Jarvis as a path", { skip }, async () => {
+  const page = await browser.newPage();
+  await page.route("**/api/upload", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ path: "/data/uploads/a.png" }) }));
+  let sent = null;
+  await page.route("**/api/chat/stream", (r) => { sent = r.request().postDataJSON(); return r.fulfill({ status: 500, contentType: "application/json", body: "{}" }); });
+  await page.goto(`http://localhost:${port}/`);
+  await page.click("#chatbtn");
+  const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+  await page.setInputFiles("#attachinput", { name: "a.png", mimeType: "image/png", buffer: pixel });
+  await page.waitForSelector("#pics .pic img");
+  await page.click("#send");
+  await page.waitForFunction(() => document.querySelector(".picrow img"));
+  await page.waitForFunction(() => document.querySelector("#pics").hidden);
+  assert.match(sent.message, /Take a look at this\.\n\[The owner attached an image: \/data\/uploads\/a\.png\]/);
+  assert.ok(!(await page.textContent("#log")).includes("/data/uploads"), "the owner sees the picture, not the path");
+  await page.close();
+});
+
 test("the City tab shows HQ and an agent's panel opens on click", { skip }, async () => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = [];
