@@ -666,3 +666,38 @@ test("answering 'cancel' closes the parked ticket", async () => {
   assert.equal(calls.filter((c) => c.agentId === "mgr-five").length, 0);
   city.close();
 });
+
+test("turn-time clamp: a worker on a complex ticket runs on Sonnet; the orchestrator stays on its own model", async () => {
+  const opusPolicy = { ...policy, models: { ...policy.models, complex: "claude-opus-5-5" } };
+  const { runner, calls } = fakeRunner({});
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: opusPolicy });
+  const hire = (by: string, s: ReturnType<typeof spec>) => city.toolsFor(by).find((t) => t.name === "hire_agent")!.handler({ spec: s });
+  await hire("orchestrator", spec("mgr-c", "manager", "orchestrator"));
+  await hire("mgr-c", spec("wrk-c", "worker", "mgr-c"));
+  city.sendTicket({ to: "wrk-c", goal: "x", complexity: "complex" });
+  await city.idle();
+  const w = calls.filter((c) => c.agentId === "wrk-c");
+  assert.ok(w.length > 0);
+  assert.ok(w.every((c) => c.model === "claude-sonnet-5-5"), "worker turn is Sonnet despite complex");
+  const o = calls.find((c) => c.agentId === "orchestrator");
+  if (o) assert.equal(o.model, city.agent("orchestrator").model, "core agent model unchanged");
+  city.close();
+});
+
+test("revive clamps a stored Opus model for a worker, and keeps it for an orchestrator-hired manager", async () => {
+  const { runner } = fakeRunner({});
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy });
+  const hire = (by: string, s: ReturnType<typeof spec>) => city.toolsFor(by).find((t) => t.name === "hire_agent")!.handler({ spec: s });
+  const retire = (id: string) => city.toolsFor("orchestrator").find((t) => t.name === "retire_agent")!.handler({ id });
+  await hire("orchestrator", spec("mgr-r", "manager", "orchestrator"));
+  await hire("mgr-r", spec("wrk-r", "worker", "mgr-r"));
+  await retire("wrk-r"); await retire("mgr-r");
+  city.ledger.updateAgent("wrk-r", { model: "claude-opus-5-5" });
+  city.ledger.updateAgent("mgr-r", { model: "claude-opus-5-5" });
+  city.sendTicket({ to: "wrk-r", goal: "x" });
+  city.sendTicket({ to: "mgr-r", goal: "x" });
+  await city.idle();
+  assert.equal(city.ledger.getAgent("wrk-r")?.model, "claude-sonnet-5-5");
+  assert.equal(city.ledger.getAgent("mgr-r")?.model, "claude-opus-5-5");
+  city.close();
+});
