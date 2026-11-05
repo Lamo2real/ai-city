@@ -303,7 +303,7 @@ test("Status opens on the AI City board: limits with a department over cap in re
   const over = page.locator("#ailimits .dept.over");
   assert.equal(await over.count(), 1);
   assert.match(await over.textContent(), /Marketing.*OVER CAP.*est\. \$7\.50/);
-  assert.equal(await over.locator(".amt").evaluate((e) => getComputedStyle(e).color), "rgb(255, 59, 46)", "red");
+  assert.equal(await over.locator(".amt").evaluate((e) => getComputedStyle(e).color), "rgb(255, 69, 58)", "red");
   assert.equal(await page.locator("#ailimits .dept:not(.over)").count(), 1);
   // Agents: retired hidden, core grouped, goal truncated with a title.
   const ios = page.locator("#aiagents [data-agent='ios-dev']");
