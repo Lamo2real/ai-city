@@ -8,7 +8,7 @@ const app = (name) => new URL(`../app/${name}`, import.meta.url).pathname;
 const skip = process.platform !== "darwin" || spawnSync("swiftc", ["--version"]).status !== 0 ? "needs a Mac with swiftc" : false;
 
 test("the Mac app compiles", { skip }, () => {
-  execFileSync("swiftc", ["-typecheck", "-swift-version", "5", "-parse-as-library", app("Jarvis.swift")], { stdio: "pipe" });
+  execFileSync("swiftc", ["-typecheck", "-swift-version", "5", "-parse-as-library", app("AIC.swift")], { stdio: "pipe" });
 });
 
 test("the bundle shows in the Dock, can ask for the microphone, and no longer needs Chrome", () => {
@@ -17,7 +17,7 @@ test("the bundle shows in the Dock, can ask for the microphone, and no longer ne
   assert.match(plist, /NSMicrophoneUsageDescription/);
   assert.ok(!existsSync(app("launcher.sh")));
   assert.ok(existsSync(app("icon.png")), "the app icon is committed, so a build needs no browser");
-  const source = readFileSync(app("Jarvis.swift"), "utf8");
+  const source = readFileSync(app("AIC.swift"), "utf8");
   assert.match(source, /localhost:7777\/\?view=city/, "opens on the City");
   assert.match(source, /type == \.microphone \? \.grant : \.deny/, "the microphone is granted to Jarvis's page only");
 });

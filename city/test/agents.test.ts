@@ -7,7 +7,7 @@ test("the four core prompts load with model, effort and tools", () => {
   assert.equal(jarvis.model, "claude-haiku-5-5");
   assert.equal(jarvis.effort, "low");
   assert.ok(jarvis.tools.includes("mcp__jarvis__send_ticket"));
-  assert.match(jarvis.body, /^You are Jarvis/);
+  assert.match(jarvis.body, /^You are AIC/);
   assert.equal(loadCorePrompt("orchestrator").model, "claude-opus-5-5");
   assert.equal(loadCorePrompt("secretary").model, "claude-sonnet-5-5");
   assert.equal(loadCorePrompt("reviewer").model, "claude-fable-5-1");

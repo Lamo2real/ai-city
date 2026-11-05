@@ -15,6 +15,8 @@ test("wake phrase, including how Whisper mishears it", () => {
   assert.deepEqual(parseWake("Yo Jarvis."), { wake: true, command: "" });
   for (const heard of ["Jarvis, status.", "Javis, status.", "Okay Jarvis, status."]) assert.deepEqual(parseWake(heard), { wake: true, command: "status." }, heard);
   assert.deepEqual(parseWake("Jarvis."), { wake: true, command: "" });
+  for (const heard of ["AIC, status.", "A.I.C. status.", "A I C, status.", "AI see, status.", "AI City, status.", "Yo AIC, status.", "Hey AIC, status."]) assert.deepEqual(parseWake(heard), { wake: true, command: "status." }, heard);
+  for (const heard of ["I saw AIC in a film", "basic things", "I see it", "a nice day"]) assert.equal(parseWake(heard).wake, false, heard);
   for (const hello of ["Hi Jarvis.", "Hello, Jarvis!", "Good morning Jarvis.", "Hej Jarvis"]) assert.deepEqual(parseWake(hello), { wake: true, command: hello }, hello);
   assert.deepEqual(parseWake("Hi Jarvis, status."), { wake: true, command: "status." });
   for (const heard of ["I saw Jarvis in a film", "yo what's up", ""]) assert.equal(parseWake(heard).wake, false, heard);

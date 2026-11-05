@@ -32,7 +32,7 @@ before(async () => {
 });
 after(async () => { await browser?.close(); server?.close(); city?.close(); });
 
-test("an image attached in chat shows as a picture and reaches Jarvis as a path", { skip }, async () => {
+test("an image attached in chat shows as a picture and reaches AIC as a path", { skip }, async () => {
   const page = await browser.newPage();
   await page.route("**/api/upload", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ path: "/data/uploads/a.png" }) }));
   let sent = null;
@@ -86,7 +86,7 @@ test("when the city backend can't be reached, the City view says so and shows no
   await page.goto(`http://localhost:${port}/`);
   await page.click("#citybtn");
   await page.waitForSelector("#cityerror:not([hidden])", { timeout: 15000 });
-  assert.match(await page.textContent("#cityerror"), /Can't reach Jarvis \(the city backend is not running\)/);
+  assert.match(await page.textContent("#cityerror"), /Can't reach AIC \(the city backend is not running\)/);
   assert.equal((await page.$$("#citylist button[data-agent]")).length, 0, "no made-up agents");
   await page.close();
 });
@@ -112,7 +112,7 @@ test("a dropped live stream is shown, and on reconnect the error clears and the 
   assert.equal(snapshots, base, "no reload without a drop");
   await page.evaluate(() => window.__streams.findLast((s) => s.onerror).onerror());
   await page.waitForSelector("#cityerror:not([hidden])");
-  assert.match(await page.textContent("#cityerror"), /Live updates from Jarvis stopped/);
+  assert.match(await page.textContent("#cityerror"), /Live updates from AIC stopped/);
   await page.evaluate(() => window.__streams.findLast((s) => s.onopen).onopen());
   await page.waitForFunction(() => document.querySelector("#cityerror").hidden);
   await page.waitForFunction(() => window.__streams.filter((s) => !s.closed && s.onopen).length === 1);
@@ -133,7 +133,7 @@ test("when /state.json fails, Status shows an offline state, never fake data", {
   await page.click("#tab-booqy"); // the Booqy dashboard is the second tab now
   await page.waitForSelector("#offline:not([hidden])");
   assert.equal(await page.textContent("#datatag"), "OFFLINE");
-  assert.match(await page.textContent("#offline"), /Can't reach Jarvis/);
+  assert.match(await page.textContent("#offline"), /Can't reach AIC/);
   assert.equal(await page.textContent("#features"), "unavailable");
   assert.doesNotMatch(await page.content(), /demo/i, "nothing demo on the page");
   await page.close();
@@ -283,7 +283,7 @@ test("Needs you: an expired merge says so honestly and leaves the list", { skip 
   await ask(page);
   await page.waitForSelector("#inboxmerge .confirm");
   await page.waitForFunction(() => document.querySelector("#inboxmerge").children.length === 0, null, { timeout: 8000 });
-  assert.equal(await page.textContent("#inboxnote"), "Expired. Nothing was merged. Ask Jarvis again if you still want it.");
+  assert.equal(await page.textContent("#inboxnote"), "Expired. Nothing was merged. Ask AIC again if you still want it.");
   await page.close();
 });
 
@@ -421,7 +421,7 @@ test("Status on a phone: the board stacks under the core", { skip }, async () =>
   await page.close();
 });
 
-// ---- Old server (no Jarvis restart yet): the HUD degrades honestly ----
+// ---- Old server (no AIC restart yet): the HUD degrades honestly ----
 test("old server: a 404 on the pending GET is silent, polling stops, and the chat path still shows a merge", { skip }, async () => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   await jsonRoute(page);
@@ -451,7 +451,7 @@ test("old server: a 404 on the pending GET is silent, polling stops, and the cha
   await page.close();
 });
 
-test("old server: a snapshot without caps shows plain values and 'cap: unknown until Jarvis restarts', never a number", { skip }, async () => {
+test("old server: a snapshot without caps shows plain values and 'cap: unknown until AIC restarts', never a number", { skip }, async () => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const snap = citySnapshot(); delete snap.caps; snap.spend = { App: 456.73 };
   await jsonRoute(page, snap);
@@ -461,7 +461,7 @@ test("old server: a snapshot without caps shows plain values and 'cap: unknown u
   const text = await page.textContent("#ailimits");
   assert.match(text, /AGENTS ACTIVE\s*9 active/);
   assert.match(text, /est\. \$456\.73 today/);
-  assert.match(text, /cap: unknown until Jarvis restarts/);
+  assert.match(text, /cap: unknown until AIC restarts/);
   assert.doesNotMatch(text, /\d+ \/ \d+|OVER CAP/, "no invented cap, no over-cap");
   assert.equal(await page.locator("#ailimits .dept .bar").count(), 0, "no bar without a cap");
   assert.equal(await page.locator("#ailimits .dept.over").count(), 0);
@@ -1056,7 +1056,7 @@ test("with reduced motion everyone moves instantly and nothing flies", { skip },
   await ctx.close();
 });
 
-test("Jarvis's visit: a dash, a word over its head and back; a repeat within a second is not another visit; an unknown agent is none", { skip }, async () => {
+test("AIC's visit: a dash, a word over its head and back; a repeat within a second is not another visit; an unknown agent is none", { skip }, async () => {
   const page = await openCity(cityBusy());
   await page.waitForFunction(() => window.__city?.people.size === 27);
   const home = await person(page, "jarvis");
@@ -1065,7 +1065,7 @@ test("Jarvis's visit: a dash, a word over its head and back; a repeat within a s
   assert.equal(await page.getAttribute("#city", "data-visits"), "1");
   const target = await person(page, "ios-dev");
   await page.waitForFunction((t) => { const j = window.__city.people.get("jarvis"); return !j.move && Math.abs(j.y - t.y) < 1; }, target, { timeout: 2000 });
-  assert.match(await page.textContent("#cityfeed"), /Jarvis checks in with ios-dev/);
+  assert.match(await page.textContent("#cityfeed"), /AIC checks in with ios-dev/);
   await page.waitForFunction((h) => { const j = window.__city.people.get("jarvis"); return !j.move && Math.abs(j.x - h.x) < 1 && Math.abs(j.y - h.y) < 1; }, home, { timeout: 4000 });
   await page.waitForTimeout(1050);
   await fire(page, { type: "jarvis.visit", to: "nobody-here", kind: "ask" });

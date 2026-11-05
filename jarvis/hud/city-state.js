@@ -147,7 +147,7 @@ export function reduce(state, event, now = Date.now()) {
       return { ...state, now, agents: { ...state.agents, [a.id]: { ...a, awaiting_merge: null } }, feed: feed(state, `${event.branch} is settled; ${a.id} can leave its desk`, "done", now) };
     }
     case "jarvis.visit":
-      return { ...state, now, feed: feed(state, `Jarvis ${event.kind === "ask" ? "asks" : "checks in with"} ${event.to}`, "worker", now) };
+      return { ...state, now, feed: feed(state, `AIC ${event.kind === "ask" ? "asks" : "checks in with"} ${event.to}`, "worker", now) };
     case "colleague.ask":
       return { ...state, now, feed: feed(state, event.refused ? `${event.from} and ${event.to} have asked each other too much; ${event.from} was told to stop` : `${event.from} asks ${event.to}: ${event.question.slice(0, 60)}`, event.refused ? "fail" : "worker", now) };
     case "colleague.answer":
@@ -398,7 +398,7 @@ export function cityMessage(state) {
   return null;
 }
 
-// Jarvis's status call can fire many times in a row; only the first of a burst is a visit.
+// AIC's status call can fire many times in a row; only the first of a burst is a visit.
 export const visitAllowed = (lastAt, now, to) => to !== "jarvis" && now - lastAt >= 1000;
 
 export const currentTicket = (state, id) => Object.values(state.tickets).filter((t) => t.to === id).sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""))[0] ?? null;

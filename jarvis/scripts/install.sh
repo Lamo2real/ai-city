@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Installs the LaunchAgent and the Jarvis app. Secrets stay in ~/.zshrc: the plist holds none.
+# Installs the LaunchAgent and the AIC app. Secrets stay in ~/.zshrc: the plist holds none.
 set -euo pipefail
 ROOT="${0:A:h:h}"
 PLIST="$HOME/Library/LaunchAgents/se.lamo.jarvis.plist"
@@ -11,4 +11,4 @@ plutil -lint "$PLIST" >/dev/null
 launchctl bootout "$DOMAIN/se.lamo.jarvis" 2>/dev/null || true
 launchctl bootstrap "$DOMAIN" "$PLIST"
 "$ROOT/scripts/build-app.sh" >/dev/null
-echo "Jarvis is running at http://localhost:7777 and starts at login. App: ~/Applications/Jarvis.app"
+echo "AIC is running at http://localhost:7777 and starts at login. App: ~/Applications/AIC.app"
