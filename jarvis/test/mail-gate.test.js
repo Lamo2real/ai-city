@@ -430,6 +430,15 @@ test("the announced flag is persisted with the pending store", () => {
   assert.ok(c.intercept("I confirm the email", "hud").forward, "announced by that reply, and that survived too");
 });
 
+// Wait for a condition instead of sleeping a fixed time: a slow runner delays the socket, not the assertion.
+async function until(cond, ms = 5000) {
+  const end = Date.now() + ms;
+  while (!cond()) {
+    if (Date.now() > end) throw new Error("timed out waiting for the event stream");
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
 test("an unprompted turn announces a held email to the owner (the event listener path)", async () => {
   let listener;
   let srv;
@@ -440,10 +449,10 @@ test("an unprompted turn announces a held email to the owner (the event listener
   const chunks = [];
   const req = request({ host: "127.0.0.1", port: p, path: "/api/events", headers: { Host: `127.0.0.1:${p}` } }, (r) => r.on("data", (d) => chunks.push(String(d))));
   req.end();
-  await new Promise((r) => setTimeout(r, 50));
+  await until(() => chunks.join("").includes(": connected")); // subscribed: the server adds the client in the same tick it writes this
   srv.mailGate.register({ confirm_id: "mail-listener0000000000000", draft_hash: "9".repeat(64), summary: { to: ["x@acme.se"], cc: [], bcc: [], subject: "Offer", first_lines: ["Hi"], why: ["x@acme.se → company domain (acme.se)"] } });
   await listener({ sessionId: "hud", text: "The result is in, sir." });
-  await new Promise((r) => setTimeout(r, 50));
+  await until(() => /^data: /m.test(chunks.join(""))); // the event reached the client
   const event = JSON.parse(chunks.join("").match(/^data: (.*)$/m)[1]);
   assert.match(event.text, /^The result is in, sir\.\n\nEmail to x@acme\.se, subject "Offer", starts: «Hi», held because/);
   // He was told, so his confirmation now counts.
@@ -461,13 +470,13 @@ test("a SILENT unprompted turn (no text) still announces a hold registered durin
   const chunks = [];
   const req = request({ host: "127.0.0.1", port: p, path: "/api/events", headers: { Host: `127.0.0.1:${p}` } }, (r) => r.on("data", (d) => chunks.push(String(d))));
   req.end();
-  await new Promise((r) => setTimeout(r, 50));
+  await until(() => chunks.join("").includes(": connected")); // subscribed: the server adds the client in the same tick it writes this
   await listener({ sessionId: "hud", text: "" }); // silent, nothing held: no event at all
   await new Promise((r) => setTimeout(r, 50));
   assert.ok(!chunks.join("").includes('"type":"jarvis"'), "a silent turn with nothing held says nothing");
   srv.mailGate.register({ confirm_id: "mail-silent00000000000000", draft_hash: "7".repeat(64), summary: { to: ["x@acme.se"], cc: [], bcc: [], subject: "Offer", first_lines: ["Hi"], why: ["x@acme.se → company domain (acme.se)"] } });
   await listener({ sessionId: "hud", text: "" });
-  await new Promise((r) => setTimeout(r, 50));
+  await until(() => /^data: /m.test(chunks.join(""))); // the event reached the client
   const event = JSON.parse(chunks.join("").match(/^data: (.*)$/m)[1]);
   assert.match(event.text, /^Email to x@acme\.se, subject "Offer", starts: «Hi», held because/);
   assert.ok(srv.mailGate.intercept("I confirm the email", "hud").forward, "he was told, so his confirmation counts");
