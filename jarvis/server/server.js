@@ -1,5 +1,6 @@
 // Jarvis OS local server. Listens on 127.0.0.1, on the LAN only if the iPhone option is on (phone.js), and takes tailnet traffic only if that is on (tailnet.js).
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -94,7 +95,7 @@ const CSP = [
   "style-src 'unsafe-inline' https://fonts.googleapis.com",
   "font-src https://fonts.gstatic.com",
   "media-src data:",
-  "img-src 'self'",
+  "img-src 'self' blob:",
   "connect-src 'self'",
   "frame-ancestors 'none'",
   "base-uri 'none'",
@@ -109,6 +110,22 @@ function send(res, status, type, body) {
   res.end(body);
 }
 const sendJson = (res, status, value) => send(res, status, "application/json", JSON.stringify(value));
+
+// Images the owner attaches in chat. Checked by their bytes, not by what the request claims.
+const MAX_UPLOAD = 20 * 1024 * 1024; // about 15 MB once decoded from base64
+const imageExt = (b) => (b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) ? "png" : b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff ? "jpg" : b.subarray(0, 4).toString("latin1") === "GIF8" ? "gif" : b.subarray(0, 4).toString("latin1") === "RIFF" && b.subarray(8, 12).toString("latin1") === "WEBP" ? "webp" : null);
+// shortcut: uploads are kept, because a ticket may need them days later; add a clean-up if the folder ever gets big.
+async function handleUpload(req, res, dataDir) {
+  const body = JSON.parse((await readBody(req, MAX_UPLOAD)) || "{}");
+  const data = Buffer.from(typeof body.data === "string" ? body.data : "", "base64");
+  const ext = imageExt(data);
+  if (!ext) return sendJson(res, 415, { error: "only PNG, JPEG, GIF or WebP images" });
+  const dir = join(dataDir, "uploads");
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const path = join(dir, `${randomUUID()}.${ext}`);
+  writeFileSync(path, data, { mode: 0o600 });
+  return sendJson(res, 200, { path });
+}
 
 function readBody(req, limit = MAX_BODY) {
   return new Promise((resolve, reject) => {
@@ -600,6 +617,7 @@ export function createServer({ booqyDir, dataDir, port, getState, chat, speak = 
     if (req.method === "POST" && path === "/api/chat/stream") return await handleChatStream(req, res, { chat: talk, speak, gate: mergeGate, phone, firstWaitMs, mail: mailGate });
     // The LAN route is plain HTTP without a microphone, so live voice is not offered there.
     if (req.method === "POST" && path === "/api/live/session") return phone ? sendJson(res, 403, { error: "forbidden" }) : await handleLiveSession(req, res, { startLive });
+    if (req.method === "POST" && path === "/api/upload") return await handleUpload(req, res, dataDir);
     if (req.method === "POST" && path === "/api/warm") {
       const body = JSON.parse((await readBody(req)) || "{}");
       if (typeof body.sessionId === "string" && SESSION_ID.test(body.sessionId)) talk.warmUp?.(body.sessionId);

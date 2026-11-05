@@ -113,6 +113,10 @@ The two executors share one runtime. A worker whose spec has `executor: "opencla
 
 OpenClaw has a second, separate role in this repo: `jarvis/openclaw/` is a Telegram-to-Jarvis relay that does need the Gateway. It is a messaging channel, not an executor, and is described in `jarvis/openclaw/README.md`.
 
+## Images in chat
+
+The owner can pick, paste or drop images in Jarvis's chat. `POST /api/upload` checks the bytes are an image and keeps it under `uploads/` in the data folder, mode 0600. The message then carries the file's path; Jarvis, the Orchestrator, managers and workers open it with `Read`, and the path travels in the ticket's goal.
+
 ## Jarvis's direct line
 
 Status checks do not go through the Orchestrator. Features and changes still do.
