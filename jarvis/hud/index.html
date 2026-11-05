@@ -10,8 +10,8 @@
   :root{
     --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",system-ui,sans-serif;
     --bg:#000; --bg2:#000;
-    --o:#ff9f0a; --o2:#ffb340; --r:#ff453a; --dim:#48484a; --dim2:#2c2c2e;
-    --txt:#f5f5f7; --mute:#a1a1a6; --ok:#30d158; --bad:#ff453a; --panel:#1c1c1e;
+    --o:#c4a5e8; --o2:#d9c8f0; --r:#c4a5e8; --dim:#48484a; --dim2:#2c2c2e;
+    --txt:#f5f5f7; --mute:#a1a1a6; --ok:#f5f5f7; --bad:#ff453a; --panel:#1c1c1e;
     --line:rgba(255,255,255,.12); --surface:rgba(44,44,46,.72);
   }
   *{box-sizing:border-box;margin:0;padding:0}
@@ -33,13 +33,13 @@
   .top .meta b{color:var(--txt)}
   .top .meta{min-width:0;align-items:center;white-space:nowrap}.top .meta #pstep{display:inline-block;max-width:34vw;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
   .tag{display:inline-block;padding:1px 6px;border:1px solid var(--line);font-size:10px;color:var(--o2)}
-  .tag.live{border-color:var(--ok);color:var(--ok);box-shadow:0 0 8px rgba(255,179,71,.5)}
+  .tag.live{border-color:var(--ok);color:var(--ok);box-shadow:0 0 8px rgba(255,255,255,.5)}
   .tag.offline{border-color:var(--bad);color:var(--bad)}
   .offline-note{font-size:12px;color:var(--bad);border:1px solid var(--bad);padding:6px 8px;margin-bottom:8px}
   .left{grid-area:left;overflow-y:auto}.right{grid-area:right;overflow-y:auto}.core{grid-area:core;position:relative}
   .bl{grid-area:bl;overflow-y:auto}.bc{grid-area:bc}.br{grid-area:br}
   ul{list-style:none}
-  .row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px dashed rgba(255,106,26,.15);font-size:12px;gap:8px}
+  .row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px dashed rgba(255,255,255,.15);font-size:12px;gap:8px}
   .row .n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.st{white-space:nowrap;flex:none}
   .st{font-size:10px;padding:1px 6px;border:1px solid;max-width:45%;overflow:hidden;text-overflow:ellipsis}
   .st.production{color:var(--ok);border-color:var(--ok)}
@@ -53,8 +53,6 @@
   a{color:var(--o2);text-decoration:none}a:hover{text-decoration:underline}
   /* core */
   .core>svg{width:100%;height:100%}
-  .ring{transform-origin:50% 50%}
-  .spin1{animation:spin 24s linear infinite}.spin2{animation:spin 16s linear infinite reverse}.spin3{animation:spin 9s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
   .pulse{animation:pulse 2.4s ease-in-out infinite}
   @keyframes pulse{50%{opacity:.45}}
@@ -85,31 +83,27 @@
 
     transform:translateY(calc(100% - 46px));transition:transform .35s ease}
   .talk.open{transform:none}
-  .talk header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer;border-bottom:1px solid rgba(255,106,26,.2)}
+  .talk header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.2)}
   .talk header h3{margin:0;font-weight:500;font-size:11px;color:var(--o2)}
   .talk header .hint2{font-size:10px;color:var(--mute);}
   .log{flex:1;overflow:auto;padding:10px 12px;font-size:13px;line-height:1.45;min-height:120px}
   .msg{margin:6px 0;max-width:88%}
   .msg.me{margin-left:auto;text-align:right;color:var(--txt)}
-  .msg.me span{display:inline-block;border:1px solid var(--line);padding:6px 9px;background:rgba(255,106,26,.08)}
-  .msg.j{color:#ffb36b;}
+  .msg.me span{display:inline-block;border:1px solid var(--line);padding:6px 9px;background:rgba(255,255,255,.08)}
+  .msg.j{color:#ffffff;}
   .msg.j b{font-style:normal;font-size:10px;color:var(--o);display:block;margin-bottom:2px}
   .msg.sys{color:var(--mute);font-size:11px;text-align:center;max-width:100%}
-  .bar2{display:flex;gap:8px;padding:10px 12px;border-top:1px solid rgba(255,106,26,.2)}
+  .bar2{display:flex;gap:8px;padding:10px 12px;border-top:1px solid rgba(255,255,255,.2)}
   .bar2 input{flex:1;background:rgba(0,0,0,.45);border:1px solid var(--line);color:var(--txt);font:inherit;font-size:14px;padding:9px 10px;outline:none}
   .bar2 input:focus{border-color:var(--o)}
   .ibtn{width:40px;height:40px;border:1px solid var(--line);background:rgba(0,0,0,.4);color:var(--o2);cursor:pointer;display:grid;place-items:center}
   .ibtn.on{background:var(--o);color:#1a0800;box-shadow:0 0 16px var(--o)}
   .ibtn.rec{background:var(--r);color:#fff;box-shadow:0 0 18px var(--r);animation:blink 1s infinite}
   .ibtn svg{width:18px;height:18px}
-  .core.speaking .spin3{animation-duration:2.5s}.core.speaking .spin2{animation-duration:6s}
-  .core.listening>svg circle[r="44"]{fill:#ff2e1a}
   /* voice states: --lvl (0 to 1) follows the live audio */
   .core{--lvl:0}
   .core>svg{transform:scale(calc(1 + var(--lvl)*.045));filter:brightness(calc(1 + var(--lvl)*.55));transition:filter .08s linear}
   .core.listening>svg{filter:brightness(calc(1 + var(--lvl)*.8)) saturate(1.35)}
-  .core.speaking>svg circle[r="44"]{fill:#ffd9b8}
-  .core.thinking .spin1{animation-duration:5s}.core.thinking .spin2{animation-duration:3s}.core.thinking .spin3{animation-duration:1.4s}
   #wave{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
   .vstate{position:absolute;left:50%;top:18px;transform:translateX(-50%);font-size:10px;white-space:nowrap;color:var(--mute);padding:2px 8px;border:1px solid transparent;pointer-events:none}
   .core.standby .vstate{color:var(--o2)}
@@ -139,8 +133,8 @@
   #inbox .free button{background:var(--o);color:#1a0800;border:0}
   #inbox button:disabled{opacity:.5;cursor:default}
   #inbox button:focus-visible,#inbox input:focus-visible,.dock .ibtn:focus-visible,#cityinbox button:focus-visible{outline:2px solid var(--o2);outline-offset:2px}
-  .ibtn.armed{border-color:var(--o);box-shadow:inset 0 0 8px rgba(255,106,26,.6)}
-  .confirm{margin:8px 0;padding:10px;border:1px solid var(--r);background:rgba(255,46,26,.1);font-size:12px}
+  .ibtn.armed{border-color:var(--o);box-shadow:inset 0 0 8px rgba(255,255,255,.6)}
+  .confirm{margin:8px 0;padding:10px;border:1px solid var(--r);background:rgba(255,255,255,.1);font-size:12px}
   .confirm b{display:block;font-size:10px;color:var(--bad);margin-bottom:4px}
   .confirm .facts{color:var(--mute);margin:4px 0 8px}
   .confirm .bad{color:var(--bad)}
@@ -323,7 +317,7 @@
   #status [hidden]{display:none!important}
   #status .tabs{display:flex;gap:8px;flex:none}
   #status .tabs button{min-height:40px;padding:0 16px;border:1px solid var(--line);background:rgba(0,0,0,.4);color:var(--txt);font-size:10px;cursor:pointer}
-  #status .tabs button[aria-selected=true]{border-color:var(--o);color:#fff;box-shadow:inset 0 0 8px rgba(255,106,26,.6)}
+  #status .tabs button[aria-selected=true]{border-color:var(--o);color:#fff;box-shadow:inset 0 0 8px rgba(255,255,255,.6)}
   #status .tabs button:focus-visible{outline:2px solid var(--o2);outline-offset:2px}
   #booqytab,#aicity{display:flex;flex-direction:column;gap:12px;flex:none}
   #aicity h3{font-weight:500;font-size:10px;color:var(--o2);margin-bottom:8px}
@@ -340,7 +334,7 @@
   #ailimits .dept .bar i.over{background:var(--bad);box-shadow:0 0 8px var(--bad)}
   #ailimits .overtag{color:#fff;background:var(--bad);font-size:10px;padding:0 5px;margin-left:6px}
   #aicity .grp{margin-bottom:8px}#aicity .grp h4{font-size:10px;color:var(--o2);margin:6px 0 2px}
-  #aicity .item{padding:5px 0;border-bottom:1px dashed rgba(255,106,26,.15);font-size:12px;display:flex;flex-wrap:wrap;gap:2px 10px}
+  #aicity .item{padding:5px 0;border-bottom:1px dashed rgba(255,255,255,.15);font-size:12px;display:flex;flex-wrap:wrap;gap:2px 10px}
   #aicity .item .goal{flex-basis:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--txt)}
   #aicity .item .meta{color:var(--mute)}
   #aicity .tag{font-size:10px;padding:0 6px;border:1px solid var(--dim);color:var(--mute)}
@@ -374,11 +368,26 @@
   .bar{height:4px;border-radius:2px;overflow:hidden}.bar i{background:var(--o);box-shadow:none;border-radius:2px}
   .dot{box-shadow:none}.dot.bad{box-shadow:none}
   a{color:var(--o2)}
-  /* The orb: one calm shape that shows what Jarvis is doing. */
-  .orb{transform-origin:300px 300px;animation:breathe 5s ease-in-out infinite}
-  @keyframes breathe{50%{transform:scale(1.035)}}
-  .core.off .orb{opacity:.82}
-    .core.listening>svg{filter:brightness(calc(1.08 + var(--lvl)*.5))}
+  /* The eyes: they rest and blink, widen and glow with your voice, pulse when Jarvis speaks, and glance aside while thinking. --lvl follows the live audio. */
+  #wave{display:none}
+  .eyes{transition:opacity .5s;filter:drop-shadow(0 0 calc(10px + var(--lvl)*38px) rgba(166,120,220,calc(.55 + var(--lvl)*.45)))}
+  .jeye,.rings,.iris,.pup{transform-box:fill-box;transform-origin:center}
+  .jeye{animation:eyeblink 6.5s ease-in-out infinite;transform-origin:50% 62%}
+  @keyframes eyeblink{0%,94%,100%{scale:1 1}97%{scale:1 .06}}
+  .core.off .eyes{opacity:.85}
+  .core.standby .eyes{opacity:1}
+  .rings{transform:scale(calc(1 + var(--lvl)*.3));transition:transform .08s linear}
+  .pup{transform:scale(calc(1 + var(--lvl)*.9));transition:transform .08s linear}
+  /* Listening: the lids lift with your voice. */
+  .core.listening .jeye{transform:scaleY(calc(1.12 + var(--lvl)*.3));transition:transform .1s ease-out}
+  /* Speaking: rings pulse outward and the glow keeps time. */
+  .core.speaking .rings{animation:eyepulse 1.3s ease-out infinite}
+  .core.speaking .jeye{transform:scaleY(calc(1.04 + var(--lvl)*.16));transition:transform .1s ease-out}
+  @keyframes eyepulse{0%{transform:scale(.82);opacity:1}100%{transform:scale(1.22);opacity:.35}}
+  .core.thinking .iris{animation:eyethink 1.9s ease-in-out infinite}
+  .core.thinking .iris.r{animation-direction:reverse}
+  @keyframes eyethink{0%,100%{transform:translateX(-16px)}50%{transform:translateX(16px)}}
+  @media (prefers-reduced-motion:reduce){.jeye,.iris,.rings,.core.speaking .rings{animation:none!important}}
   .vstate{top:22px;font-size:13px;font-weight:500;padding:0;border:0;color:var(--mute)}
   .core.standby .vstate,.core.thinking .vstate{color:var(--mute);border:0}
   .core.listening .vstate,.core.speaking .vstate{color:var(--txt);background:none;border:0;box-shadow:none}
@@ -391,12 +400,12 @@
   body:not(.view-city) .ibtn:hover{background:rgba(255,255,255,.1)}
   body:not(.view-city) .ibtn.active{background:rgba(255,255,255,.18);color:#fff}
   body:not(.view-city) .ibtn.on{background:var(--o);color:#000;box-shadow:none}
-  body:not(.view-city) .ibtn.rec{background:var(--r);box-shadow:none;animation:none}
+  body:not(.view-city) .ibtn.rec{background:var(--o);color:#000;box-shadow:none;animation:none}
   body:not(.view-city) .ibtn.armed{box-shadow:inset 0 0 0 2px var(--o)}
   body:not(.view-city) .ibtn svg{stroke-width:1.6}
   body:not(.view-city) .dock #mic{background:rgba(255,255,255,.1)}
-  body:not(.view-city) .dock #mic.rec{background:var(--r)}
-  body:not(.view-city) .dock .cnt{top:0;right:0;font:600 11px/20px var(--font);background:var(--r)}
+  body:not(.view-city) .dock #mic.rec{background:var(--o);color:#000}
+  body:not(.view-city) .dock .cnt{top:0;right:0;font:600 11px/20px var(--font);background:#fff;color:#000}
   /* Chat, status and inbox sheets */
   #status .tabs{gap:2px;padding:2px;border-radius:10px;background:#2c2c2e;align-self:flex-start}
   #status .tabs button{min-height:30px;padding:0 16px;border:0;border-radius:8px;background:none;font:500 13px var(--font)}
@@ -417,19 +426,21 @@
   .msg.j{color:var(--txt)}
   .msg.j b{display:none}
   .bar2 input,.cmd input,#inbox .free input{border:0;border-radius:10px;background:#2c2c2e;font-size:14px;padding:10px 12px}
-  .bar2 input:focus,.cmd input:focus{box-shadow:0 0 0 3px rgba(255,159,10,.35)}
+  .bar2 input:focus,.cmd input:focus{box-shadow:0 0 0 3px rgba(196,165,232,.4)}
   .cmd button,#inbox .free button{border-radius:10px;font:600 13px var(--font);padding:0 14px}
   #inbox .q{border:0;border-radius:14px;background:#2c2c2e;padding:14px;font-size:13px}
   #inbox .opts button,#inbox .x,.confirm button{border:0;border-radius:10px;background:rgba(255,255,255,.1);font:500 13px var(--font)}
   #inbox .x{border-radius:50%;font-size:16px}
   #inbox .opts button.dflt{background:var(--o);color:#000}
-  .confirm button.go{background:var(--r)}
+  .confirm button.go{background:var(--bad);color:#fff}
   #inbox button:focus-visible,#inbox input:focus-visible,.dock .ibtn:focus-visible{outline:2px solid var(--o);outline-offset:2px}
   /* Phones: inputs at 16px so iOS doesn't zoom, and every control a 40px target. */
   @media (max-width:800px){
     .bar2 input,.cmd input,#inbox .free input{font-size:16px}
     #status .tabs button{min-height:40px}
   }
+  .msg.j{color:var(--txt)}
+  .ibtn.on,.cmd button,#inbox .free button{color:#000}
 </style>
 </head>
 <body>
@@ -455,14 +466,34 @@
   </div>
 
   <div class="panel core">
-    <svg viewBox="0 0 600 600" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+    <svg viewBox="240 300 1434 480" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
       <defs>
-        <radialGradient id="orbfill" cx="50%" cy="42%" r="62%"><stop offset="0" stop-color="#fff6e6"/><stop offset=".42" stop-color="#ffc266"/><stop offset=".8" stop-color="#ff8a00"/><stop offset="1" stop-color="#e65c00"/></radialGradient>
-        <radialGradient id="orbhalo"><stop offset=".3" stop-color="#ff9f0a" stop-opacity=".42"/><stop offset=".6" stop-color="#ff8a00" stop-opacity=".12"/><stop offset="1" stop-color="#ff8a00" stop-opacity="0"/></radialGradient>
-              </defs>
-      <g class="orb">
-        <circle cx="300" cy="300" r="170" fill="url(#orbhalo)"/>
-        <circle cx="300" cy="300" r="58" fill="url(#orbfill)"/>
+        <clipPath id="eyeclip"><path d="M525 503C600 508 690 515 735 530C762 540 780 556 791 574C775 584 762 588 745 588C690 590 620 590 575 585C560 565 540 530 525 503Z"/></clipPath>
+        <linearGradient id="sclera" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c9aee0"/><stop offset="1" stop-color="#ecdff5"/></linearGradient>
+      </defs>
+      <g class="eyes">
+        <g class="jeye">
+          <path d="M525 503C600 508 690 515 735 530C762 540 780 556 791 574C775 584 762 588 745 588C690 590 620 590 575 585C560 565 540 530 525 503Z" fill="#46345f"/>
+          <g clip-path="url(#eyeclip)">
+            <path d="M565 535C620 522 690 526 735 545C752 555 765 568 772 582C720 590 640 590 585 584C578 565 570 550 565 535Z" fill="url(#sclera)"/>
+            <g class="iris">
+              <g class="rings" fill="none" stroke="#6e5a8e" stroke-width="1.8"><circle cx="655" cy="540" r="44"/><circle cx="655" cy="540" r="62"/><circle cx="655" cy="540" r="84" stroke-opacity=".7"/><circle cx="655" cy="540" r="110" stroke-opacity=".45"/></g>
+              <circle cx="655" cy="540" r="29" fill="#a67fc6"/>
+              <circle class="pup" cx="662" cy="532" r="10" fill="#33244a"/>
+            </g>
+          </g>
+        </g>
+        <g transform="translate(1914 0) scale(-1 1)"><g class="jeye">
+          <path d="M525 503C600 508 690 515 735 530C762 540 780 556 791 574C775 584 762 588 745 588C690 590 620 590 575 585C560 565 540 530 525 503Z" fill="#46345f"/>
+          <g clip-path="url(#eyeclip)">
+            <path d="M565 535C620 522 690 526 735 545C752 555 765 568 772 582C720 590 640 590 585 584C578 565 570 550 565 535Z" fill="url(#sclera)"/>
+            <g class="iris r">
+              <g class="rings" fill="none" stroke="#6e5a8e" stroke-width="1.8"><circle cx="655" cy="540" r="44"/><circle cx="655" cy="540" r="62"/><circle cx="655" cy="540" r="84" stroke-opacity=".7"/><circle cx="655" cy="540" r="110" stroke-opacity=".45"/></g>
+              <circle cx="655" cy="540" r="29" fill="#a67fc6"/>
+              <circle class="pup" cx="662" cy="532" r="10" fill="#33244a"/>
+            </g>
+          </g>
+        </g></g>
       </g>
     </svg>
     <canvas id="wave" aria-hidden="true"></canvas>
@@ -538,9 +569,9 @@
 
   <div class="panel bc">
     <div class="gauges">
-      <div class="gauge"><svg viewBox="0 0 96 96"><circle cx="48" cy="48" r="40" stroke="#3a1a0a" stroke-width="7" fill="none"/><circle id="gu" cx="48" cy="48" r="40" stroke="#ff9a3c" stroke-width="7" fill="none" stroke-dasharray="251" stroke-dashoffset="251" style="filter:drop-shadow(0 0 6px #ff6a1a)"/></svg><div class="v">UPTIME<b id="gut">-</b></div></div>
-      <div class="gauge"><svg viewBox="0 0 96 96"><circle cx="48" cy="48" r="40" stroke="#3a1a0a" stroke-width="7" fill="none"/><circle id="gc" cx="48" cy="48" r="40" stroke="#ff6a1a" stroke-width="7" fill="none" stroke-dasharray="251" stroke-dashoffset="251" style="filter:drop-shadow(0 0 6px #ff6a1a)"/></svg><div class="v">CI PASS<b id="gct">-</b></div></div>
-      <div class="gauge"><svg viewBox="0 0 96 96"><circle cx="48" cy="48" r="40" stroke="#3a1a0a" stroke-width="7" fill="none"/><circle id="ga" cx="48" cy="48" r="40" stroke="#ff2e1a" stroke-width="7" fill="none" stroke-dasharray="251" stroke-dashoffset="251" style="filter:drop-shadow(0 0 6px #ff2e1a)"/></svg><div class="v">ALARMS<b id="gat">-</b></div></div>
+      <div class="gauge"><svg viewBox="0 0 96 96"><circle cx="48" cy="48" r="40" stroke="#2c2c2e" stroke-width="7" fill="none"/><circle id="gu" cx="48" cy="48" r="40" stroke="#ffffff" stroke-width="7" fill="none" stroke-dasharray="251" stroke-dashoffset="251" style="filter:drop-shadow(0 0 6px #ffffff)"/></svg><div class="v">UPTIME<b id="gut">-</b></div></div>
+      <div class="gauge"><svg viewBox="0 0 96 96"><circle cx="48" cy="48" r="40" stroke="#2c2c2e" stroke-width="7" fill="none"/><circle id="gc" cx="48" cy="48" r="40" stroke="#ffffff" stroke-width="7" fill="none" stroke-dasharray="251" stroke-dashoffset="251" style="filter:drop-shadow(0 0 6px #ffffff)"/></svg><div class="v">CI PASS<b id="gct">-</b></div></div>
+      <div class="gauge"><svg viewBox="0 0 96 96"><circle cx="48" cy="48" r="40" stroke="#2c2c2e" stroke-width="7" fill="none"/><circle id="ga" cx="48" cy="48" r="40" stroke="#ffffff" stroke-width="7" fill="none" stroke-dasharray="251" stroke-dashoffset="251" style="filter:drop-shadow(0 0 6px #ffffff)"/></svg><div class="v">ALARMS<b id="gat">-</b></div></div>
     </div>
     <div class="ticker"><span id="ticker">…</span></div>
   </div>
@@ -954,8 +985,8 @@ function drawWave(now){
   if(src){ src.an.getByteFrequencyData(src.data); bins=src.data; let s=0; const n=Math.floor(bins.length*.6); for(let i=0;i<n;i++) s+=bins[i]; lvl=Math.min(1,s/n/110); }
   smooth+=(lvl-smooth)*.3; core.style.setProperty("--lvl",(vstate==="standby"?smooth*.25:smooth).toFixed(3));
   const cx=W/2, cy=H/2, R=Math.min(W,H)*.235, N=72;
-  const color=vstate==="speaking"?"#ffe7c8":vstate==="listening"?"#ffffff":"#ffb340";
-  if(vstate==="thinking"&&!still.matches){ wctx.strokeStyle="#ffd9a0"; wctx.lineWidth=2; wctx.lineCap="round";
+  const color=vstate==="speaking"?"#ffffff":vstate==="listening"?"#ffffff":"#ffffff";
+  if(vstate==="thinking"&&!still.matches){ wctx.strokeStyle="#ffffff"; wctx.lineWidth=2; wctx.lineCap="round";
     for(let k=0;k<3;k++){ const a=now/420+k*2.094; wctx.beginPath(); wctx.arc(cx,cy,R,a,a+.7); wctx.stroke(); } }
   else if(bins&&vstate!=="off"){ const gain=vstate==="standby"?.18:1, reach=Math.min(W,H)*.2; wctx.strokeStyle=color; wctx.lineWidth=Math.max(2,R*.022); wctx.lineCap="round"; wctx.shadowColor=color; wctx.shadowBlur=vstate==="standby"?0:12;
     wctx.globalAlpha=vstate==="standby"?.45:.95; const usable=Math.floor(bins.length*.55);

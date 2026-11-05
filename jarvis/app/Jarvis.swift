@@ -6,7 +6,7 @@ import WebKit
 private let home = URL(string: "http://localhost:7777/?view=city")!
 private func isJarvis(_ url: URL?) -> Bool { url?.host == "localhost" && url?.port == 7777 }
 private let offline = """
-<!doctype html><meta charset=utf-8><body style="margin:0;height:100vh;display:grid;place-content:center;text-align:center;background:#1d1c36;color:#f6e8cb;font:16px -apple-system">
+<!doctype html><meta charset=utf-8><body style="margin:0;height:100vh;display:grid;place-content:center;text-align:center;background:#000;color:#f5f5f7;font:16px -apple-system">
 <h2 style="margin:0 0 8px">Jarvis isn't answering yet</h2><p style="margin:0">Trying again every few seconds. Its server may still be starting.</p>
 """
 
