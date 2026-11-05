@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -25,7 +25,7 @@ test("a failing check carries its output; the summary names each result", async 
   const dir = repo({ "package.json": JSON.stringify({ scripts: { test: "t", typecheck: "c" } }) });
   const ran: string[] = [];
   const checks = await runChecks(dir, async (cmd, args, cwd) => { ran.push(`${cmd} ${args.join(" ")} @${cwd === dir}`); return args[1] === "test" ? { ok: false, output: "1 failing" } : { ok: true, output: "" }; });
-  assert.deepEqual(ran, ["npm install --no-audit --no-fund @true", "npm run test --silent @true", "npm run typecheck --silent @true"]);
+  assert.deepEqual(ran, ["npm install --no-audit --no-fund --ignore-scripts @true", "npm run test --silent @true", "npm run typecheck --silent @true"]);
   assert.deepEqual(checks, [{ name: "test", passed: false, output: "1 failing" }, { name: "typecheck", passed: true, output: "" }]);
   assert.equal(checksText(checks), "- test: FAIL\n1 failing\n- typecheck: PASS");
   assert.match(checksText([]), /none: the repo defines no/);
@@ -54,8 +54,34 @@ test("npm ci runs before the checks; a failed install fails the gate without run
   const ran: string[] = [];
   await runChecks(dir, async (c, a) => { ran.push(`${c} ${a[0]}`); return { ok: true, output: "" }; });
   assert.deepEqual(ran, ["npm ci", "npm run"]);
+  const full: string[][] = [];
+  await runChecks(dir, async (_c, a) => { full.push(a); return { ok: true, output: "" }; });
+  assert.deepEqual(full[0], ["ci", "--no-audit", "--no-fund", "--ignore-scripts"]);
+  const { realExec } = await import("../src/checks.ts");
+  assert.ok(realExec.length === 3); // 10-minute timeout is set inside realExec
+  assert.match(readFileSync(new URL("../src/checks.ts", import.meta.url), "utf8"), /timeout: 10 \* 60_000/);
   const bad = await runChecks(dir, async () => ({ ok: false, output: "boom" }));
   assert.deepEqual(bad.map((c) => c.name), ["install"]);
+});
+
+test("no checks defined fails the automated stage", async () => {
+  const r = await runChecks(repo({ "package.json": "{}" }), async () => ({ ok: true, output: "" }));
+  assert.deepEqual(r.map((c) => [c.name, c.passed]), [["checks", false]]);
+  assert.match(r[0].output, /no checks defined/);
+});
+
+test("no PR: a named directory outside the workspace/review roots is refused; inside is accepted; non-work-tree refused", async () => {
+  const { resolveCheckout } = await import("../src/checks.ts");
+  const exists = (p: string) => p === "/etc/evil/.git" || p === "/w/ws/t-9/.git";
+  const base = { scope: [], reviewRoot: "/w/rev", allowedRoots: ["/w/ws"], ticketId: "t-1", exists };
+  const ok = (out: string): import("../src/checks.ts").Exec => async () => ({ ok: true, output: out });
+  const bad = await resolveCheckout({ ...base, artifact: "done, see /etc/evil", exec: ok("true") });
+  assert.equal(bad.ok, false);
+  if (!bad.ok) assert.match(bad.error, /refusing/);
+  const ins = await resolveCheckout({ ...base, artifact: "done, see /w/ws/t-9", exec: ok("true") });
+  assert.deepEqual(ins, { ok: true, dir: "/w/ws/t-9" });
+  const nt = await resolveCheckout({ ...base, artifact: "done, see /w/ws/t-9", exec: ok("false") });
+  assert.equal(nt.ok, false);
 });
 
 test("resolveCheckout: PR + worktree verifies HEAD; PR alone gets a dedicated worktree; nothing resolvable fails; cwd never used", async () => {
@@ -65,6 +91,7 @@ test("resolveCheckout: PR + worktree verifies HEAD; PR alone gets a dedicated wo
   const exists = (p: string) => live.has(p);
   const mk = (sha: string): import("../src/checks.ts").Exec => async (cmd, args) => {
     if (cmd === "gh") return { ok: true, output: head };
+    if (args.includes("--is-inside-work-tree")) return { ok: true, output: "true" };
     if (args[0] === "rev-parse") return { ok: true, output: sha };
     return { ok: true, output: "" };
   };

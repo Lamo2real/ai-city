@@ -35,7 +35,7 @@ test("a hire, a ticket, a question, a review and a report each show up as typed 
     }
     return { text: req.agentId === "reviewer" ? '{"verdict":"PASS","findings":[],"summary":"clean"}' : req.agentId === "secretary" ? "**Done:** built." : "", sessionId: `s-${req.agentId}`, costUsd: cum(req.agentId), tokens: 100 };
   };
-  const city = createCity({ runner, dataDir: mkdtempSync(join(tmpdir(), "city-")), ledgerPath: ":memory:", policy });
+  const city = createCity({ runner, dataDir: gateData, exec: gateExec, ledgerPath: ":memory:", policy });
   const events: CityEvent[] = [];
   city.on((e) => events.push(e));
   const ticket = city.sendTicket({ to: "orchestrator", goal: "feature" });
@@ -89,9 +89,12 @@ test("audit lines carry the agent that acted", () => {
   assert.equal(lines[1].agent, undefined);
 });
 
-// A real-looking checkout for the gate to test; the gate never falls back to a cwd.
+const gateData = mkdtempSync(join(tmpdir(), "city-gate-"));
+const gateExec = async (_c: string, a: string[]) => ({ ok: true, output: a.includes("--is-inside-work-tree") ? "true" : "" });
+// A real-looking checkout for the gate to test, under the city's workspace root; the gate never falls back to a cwd.
 function checkout(): string {
-  const d = mkdtempSync(join(tmpdir(), "gate-co-"));
-  mkdirSync(join(d, ".git"));
-  return d;
+  const d = mkdtempSync(join(gateData, "co-"));
+  const w = join(gateData, "worktrees", d.slice(-8)); mkdirSync(join(w, ".git"), { recursive: true });
+  writeFileSync(join(w, "package.json"), JSON.stringify({ scripts: { test: "true" } }));
+  return w;
 }

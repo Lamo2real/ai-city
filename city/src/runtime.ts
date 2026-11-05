@@ -1129,7 +1129,7 @@ export function createCity(opts: CityOptions) {
     setStatus(ticketId, "in_review", { review_rounds: round });
     emit({ type: "review.started", ticket_id: ticketId, round, by });
     // The repo under review: a checkout named in the artifact, else the ticket's own scope. Never another ticket's scope (stale worktrees).
-    const co = await resolveCheckout({ scope: t.scope, artifact, reviewRoot: join(dataDir, "review"), ticketId, exec: opts.exec });
+    const co = await resolveCheckout({ scope: t.scope, artifact, reviewRoot: join(dataDir, "review"), allowedRoots: [join(dataDir, "worktrees")], ticketId, exec: opts.exec });
     const checks: Check[] = co.ok ? await runChecks(co.dir, opts.exec) : [{ name: "checkout", passed: false, output: co.error }];
     if (co.ok && co.temp) await dropCheckout(co, opts.exec).catch(() => {});
     let verdict: Verdict;
