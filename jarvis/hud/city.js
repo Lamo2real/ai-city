@@ -451,7 +451,7 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
       let p = people.get(id);
       const fresh = !p;
       if (fresh) { const start = !still && to.key.startsWith("desk") ? homeSpot(world, homes.get(id) ?? 0) ?? to : to; p = { id, x: start.x, y: start.y, key: fresh && start === to ? to.key : "home", phase: hashOf(id) % 4, flip: false, hop: 0 }; people.set(id, p); }
-      if (p.visiting) continue; // Jarvis is out; it comes back by itself
+      if (p.visiting) continue; // AIC is out; it comes back by itself
       p.seated = to.seated;
       if (p.key === to.key) { if (!p.move && !p.route) { p.x = to.x; p.y = to.y; } else if (p.route) p.route[p.route.length - 1] = to; else if (p.move) p.move.to = to; continue; } // a new layout only shifts them
       p.key = to.key;
@@ -502,7 +502,7 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
     root.dataset.couriers = String(Number(root.dataset.couriers ?? 0) + 1);
     if (visible()) parcels.push({ from: { x: a.x, y: a.y - 14 }, target: b, t: 0, kind });
   }
-  // Jarvis dashes over, says what it is doing, and comes back. Its status call can repeat fast: those are not new visits.
+  // AIC dashes over, says what it is doing, and comes back. Its status call can repeat fast: those are not new visits.
   function jarvisVisit({ to, kind }) {
     const now = Date.now(), allowed = visitAllowed(lastVisit, now, to);
     lastVisit = now;
@@ -736,9 +736,9 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
     // The one being looked at gets an arrow and its name; so does whoever the mouse is on, and the core keep name plates.
     for (const p of order) if (p.id === selected || p.id === hover || CORE.has(p.id)) {
       const a = state.agents[p.id];
-      if (a) label(p.id === hover && p.visual && p.visual !== "idle" ? `${p.id}: ${VISUALS[p.visual].label}` : p.id, p.x, p.y + 4, p.id === selected ? INK : "#fff6e0", p.id === selected ? "#ffd84a" : INK);
+      if (a) label(p.id === hover && p.visual && p.visual !== "idle" ? `${p.id === "jarvis" ? "AIC" : p.id}: ${VISUALS[p.visual].label}` : p.id === "jarvis" ? "AIC" : p.id, p.x, p.y + 4, p.id === selected ? INK : "#fff6e0", p.id === selected ? "#ffd84a" : INK);
     }
-    for (const p of order) if (p.say && p.say.until > performance.now()) label(p.say.text, p.x, p.y - 46, INK, "#8fdcff"); // Jarvis's word stays on top of every mark
+    for (const p of order) if (p.say && p.say.until > performance.now()) label(p.say.text, p.x, p.y - 46, INK, "#8fdcff"); // AIC's word stays on top of every mark
     const s = selected && people.get(selected);
     if (s) { const bob = reduced() ? 0 : [0, 1, 2, 1][f]; const x = Math.round(s.x - cam.x), y = Math.round(s.y - cam.y) - (s.visual && s.visual !== "idle" ? 46 : 32) + bob; R(ctx, x - 4, y, 8, 2, INK); R(ctx, x - 3, y, 6, 2, "#ffd84a"); R(ctx, x - 3, y + 2, 6, 2, INK); R(ctx, x - 2, y + 2, 4, 1, "#ffd84a"); R(ctx, x - 1, y + 4, 2, 2, INK); }
   }
@@ -990,7 +990,7 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
       return r.ok ? { data: j } : { error: j.error || `server error ${r.status}` };
     } catch { return { error: "no connection" }; }
   }
-  const unavailable = (res, what) => el("p", "mute", res.restricted ? `${what} is not available from the phone. Open Jarvis on the Mac to see it.` : `Could not load ${what} (${res.error}). Nothing is shown until it answers.`);
+  const unavailable = (res, what) => el("p", "mute", res.restricted ? `${what} is not available from the phone. Open AIC on the Mac to see it.` : `Could not load ${what} (${res.error}). Nothing is shown until it answers.`);
   const atTime = (t) => new Date(t).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
   // A view is { kind, title, what, sections: [{ url, render(box, data), loading? }], back? }. First open shows each
@@ -1115,7 +1115,7 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
         try {
           const r = await fetchImpl(`./api/city/tickets/${action}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) });
           const j = await r.json().catch(() => ({}));
-          if (r.status === 403) { parkedBlocked = true; return "Resuming and cancelling are not available from the phone. Open Jarvis on the Mac to decide."; }
+          if (r.status === 403) { parkedBlocked = true; return "Resuming and cancelling are not available from the phone. Open AIC on the Mac to decide."; }
           if (!r.ok) return `Nothing changed: ${j.error || `server error ${r.status}`}`;
           const n = (action === "resume" ? j.resumed : j.cancelled)?.length ?? 0;
           return `${action === "resume" ? "Resumed" : "Cancelled"} ${n} of ${ids.length}.`;
@@ -1239,7 +1239,7 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
       problem(null);
     } catch (err) {
       state = applySnapshot(state, { agents: [], tickets: [], questions: [], usage: null, spend: {} });
-      problem(`Can't reach Jarvis (${err.message === "Failed to fetch" ? "no connection" : err.message}). Nothing is shown until it answers.`);
+      problem(`Can't reach AIC (${err.message === "Failed to fetch" ? "no connection" : err.message}). Nothing is shown until it answers.`);
     }
     // A load places everyone directly: no replayed journeys.
     people.clear(); parcels = []; effects = [];
@@ -1250,7 +1250,7 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
   }
   // The one shared stream. A drop is shown; on reconnect events may have been missed, so start again from a fresh snapshot.
   events.addEventListener("jarvis-sse", (ev) => { const j = ev.detail; if (j?.type === "city") onEvent(j.event); else if (j?.type === "jarvis") onEvent({ type: "result", ticket_id: "", status: "done", summary: j.text }); });
-  events.addEventListener("jarvis-sse-error", () => { streamLost = true; problem("Live updates from Jarvis stopped. Reconnecting…"); });
+  events.addEventListener("jarvis-sse-error", () => { streamLost = true; problem("Live updates from AIC stopped. Reconnecting…"); });
   events.addEventListener("jarvis-sse-open", () => { if (streamLost) { streamLost = false; problem(null); load(); } });
 
   $("#cityparkedbtn").onclick = () => openParked();

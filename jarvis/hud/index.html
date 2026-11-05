@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>JARVIS · Booqy command</title>
+<title>AIC</title>
 <link rel="icon" href="./icon-192.png"><link rel="apple-touch-icon" href="./apple-touch-icon.png"><link rel="manifest" href="./manifest.webmanifest">
-<meta name="theme-color" content="#000000"><meta name="apple-mobile-web-app-title" content="Jarvis"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000000"><meta name="apple-mobile-web-app-title" content="AIC"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>
   :root{
     --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",system-ui,sans-serif;
@@ -368,22 +368,24 @@
   .bar{height:4px;border-radius:2px;overflow:hidden}.bar i{background:var(--o);box-shadow:none;border-radius:2px}
   .dot{box-shadow:none}.dot.bad{box-shadow:none}
   a{color:var(--o2)}
-  /* The eyes: they rest and blink, widen and glow with your voice, pulse when Jarvis speaks, and glance aside while thinking. --lvl follows the live audio. */
+  /* The eyes: they rest and blink, widen and glow with your voice, pulse when AIC speaks, and glance aside while thinking. --lvl follows the live audio. */
   #wave{display:none}
-  .eyes{transition:opacity .5s;filter:drop-shadow(0 0 calc(10px + var(--lvl)*38px) rgba(166,120,220,calc(.55 + var(--lvl)*.45)))}
+  .core>svg,.core.listening>svg{filter:none}
+  .eyes{transition:opacity .5s;filter:drop-shadow(0 0 calc(6px + var(--lvl)*44px) rgba(150,70,255,calc(.45 + var(--lvl)*.55)))}
   .jeye,.rings,.iris,.pup{transform-box:fill-box;transform-origin:center}
   .jeye{animation:eyeblink 6.5s ease-in-out infinite;transform-origin:50% 62%}
   @keyframes eyeblink{0%,94%,100%{scale:1 1}97%{scale:1 .06}}
   .core.off .eyes{opacity:.85}
   .core.standby .eyes{opacity:1}
-  .rings{transform:scale(calc(1 + var(--lvl)*.3));transition:transform .08s linear}
-  .pup{transform:scale(calc(1 + var(--lvl)*.9));transition:transform .08s linear}
+  .rings{transform:scale(calc(1 + var(--lvl)*.12));transition:transform .08s linear}
+  .scl{filter:brightness(calc(1 + var(--lvl)*.32));transition:filter .08s linear}
+  .pup{transform:scale(calc(1 + var(--lvl)*.35));transition:transform .08s linear}
   /* Listening: the lids lift with your voice. */
-  .core.listening .jeye{transform:scaleY(calc(1.12 + var(--lvl)*.3));transition:transform .1s ease-out}
+  .core.listening .jeye{transform:scaleY(calc(1.06 + var(--lvl)*.2));transition:transform .1s ease-out}
   /* Speaking: rings pulse outward and the glow keeps time. */
   .core.speaking .rings{animation:eyepulse 1.3s ease-out infinite}
   .core.speaking .jeye{transform:scaleY(calc(1.04 + var(--lvl)*.16));transition:transform .1s ease-out}
-  @keyframes eyepulse{0%{transform:scale(.82);opacity:1}100%{transform:scale(1.22);opacity:.35}}
+  @keyframes eyepulse{0%{transform:scale(.92);opacity:1}100%{transform:scale(1.14);opacity:.45}}
   .core.thinking .iris{animation:eyethink 1.9s ease-in-out infinite}
   .core.thinking .iris.r{animation-direction:reverse}
   @keyframes eyethink{0%,100%{transform:translateX(-16px)}50%{transform:translateX(16px)}}
@@ -453,7 +455,7 @@
 <div class="scan"></div><div class="vignette"></div>
 <div id="grid">
   <div class="panel top">
-    <div class="brand">JARVIS</div>
+    <div class="brand">AIC</div>
     <div class="meta">
       <span>ENV <b id="env">dev + production</b></span>
       <span>PIPELINE <b id="pstep">…</b></span>
@@ -472,31 +474,33 @@
   </div>
 
   <div class="panel core">
-    <svg viewBox="240 300 1434 480" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+    <svg viewBox="60 330 1800 520" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
       <defs>
-        <clipPath id="eyeclip"><path d="M525 503C600 508 690 515 735 530C762 540 780 556 791 574C775 584 762 588 745 588C690 590 620 590 575 585C560 565 540 530 525 503Z"/></clipPath>
-        <linearGradient id="sclera" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c9aee0"/><stop offset="1" stop-color="#ecdff5"/></linearGradient>
+        <clipPath id="eyeclip"><path d="M190 478C300 478 420 490 505 540C580 585 640 650 680 716C600 716 520 714 450 708C370 700 310 680 275 640C235 590 210 530 190 478Z"/></clipPath>
+        <linearGradient id="sclera" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b5a8c9"/><stop offset="1" stop-color="#d6cce3"/></linearGradient>
       </defs>
       <g class="eyes">
         <g class="jeye">
-          <path d="M525 503C600 508 690 515 735 530C762 540 780 556 791 574C775 584 762 588 745 588C690 590 620 590 575 585C560 565 540 530 525 503Z" fill="#46345f"/>
+          <path d="M190 478C300 478 420 490 505 540C580 585 640 650 680 716C600 716 520 714 450 708C370 700 310 680 275 640C235 590 210 530 190 478Z" fill="#5b4a78"/>
           <g clip-path="url(#eyeclip)">
-            <path d="M565 535C620 522 690 526 735 545C752 555 765 568 772 582C720 590 640 590 585 584C578 565 570 550 565 535Z" fill="url(#sclera)"/>
+            <path class="scl" d="M238 518C330 508 420 515 490 548C560 584 620 650 662 720L300 720L238 560Z" fill="url(#sclera)"/>
             <g class="iris">
-              <g class="rings" fill="none" stroke="#6e5a8e" stroke-width="1.8"><circle cx="655" cy="540" r="44"/><circle cx="655" cy="540" r="62"/><circle cx="655" cy="540" r="84" stroke-opacity=".7"/><circle cx="655" cy="540" r="110" stroke-opacity=".45"/></g>
-              <circle cx="655" cy="540" r="29" fill="#a67fc6"/>
-              <circle class="pup" cx="662" cy="532" r="10" fill="#33244a"/>
+              <g class="rings" fill="none" stroke="#120c1c" stroke-width="5.5"><circle cx="470" cy="572" r="74"/><circle cx="470" cy="572" r="142"/><circle cx="470" cy="572" r="214"/><circle cx="470" cy="572" r="290"/></g>
+              <circle cx="470" cy="572" r="72" fill="#9379ab"/>
+              <circle cx="478" cy="562" r="24" fill="#5c4a7a"/>
+              <circle class="pup" cx="478" cy="562" r="16" fill="#08050d"/>
             </g>
           </g>
         </g>
-        <g transform="translate(1914 0) scale(-1 1)"><g class="jeye">
-          <path d="M525 503C600 508 690 515 735 530C762 540 780 556 791 574C775 584 762 588 745 588C690 590 620 590 575 585C560 565 540 530 525 503Z" fill="#46345f"/>
+        <g transform="translate(1920 0) scale(-1 1)"><g class="jeye">
+          <path d="M190 478C300 478 420 490 505 540C580 585 640 650 680 716C600 716 520 714 450 708C370 700 310 680 275 640C235 590 210 530 190 478Z" fill="#5b4a78"/>
           <g clip-path="url(#eyeclip)">
-            <path d="M565 535C620 522 690 526 735 545C752 555 765 568 772 582C720 590 640 590 585 584C578 565 570 550 565 535Z" fill="url(#sclera)"/>
+            <path class="scl" d="M238 518C330 508 420 515 490 548C560 584 620 650 662 720L300 720L238 560Z" fill="url(#sclera)"/>
             <g class="iris r">
-              <g class="rings" fill="none" stroke="#6e5a8e" stroke-width="1.8"><circle cx="655" cy="540" r="44"/><circle cx="655" cy="540" r="62"/><circle cx="655" cy="540" r="84" stroke-opacity=".7"/><circle cx="655" cy="540" r="110" stroke-opacity=".45"/></g>
-              <circle cx="655" cy="540" r="29" fill="#a67fc6"/>
-              <circle class="pup" cx="662" cy="532" r="10" fill="#33244a"/>
+              <g class="rings" fill="none" stroke="#120c1c" stroke-width="5.5"><circle cx="470" cy="572" r="74"/><circle cx="470" cy="572" r="142"/><circle cx="470" cy="572" r="214"/><circle cx="470" cy="572" r="290"/></g>
+              <circle cx="470" cy="572" r="72" fill="#9379ab"/>
+              <circle cx="478" cy="562" r="24" fill="#5c4a7a"/>
+              <circle class="pup" cx="478" cy="562" r="16" fill="#08050d"/>
             </g>
           </g>
         </g></g>
@@ -549,7 +553,7 @@
       <div class="mute" id="inboxempty">Nothing is waiting for you.</div>
     </aside>
     <div class="talk" id="talk">
-      <header id="talkhead"><h3>Talk to Jarvis</h3><span class="hint2">Close</span></header>
+      <header id="talkhead"><h3>Talk to AIC</h3><span class="hint2">Close</span></header>
       <div class="log" id="log"></div>
       <div class="pics" id="pics" hidden></div>
       <div class="bar2">
@@ -627,21 +631,21 @@ async function load(){
 /* No data is never shown as data: the panels say so and keep nothing made up. */
 function showOffline(){
   $("datatag").textContent = "OFFLINE"; $("datatag").className = "tag offline";
-  $("offline").textContent = "Can't reach Jarvis, so there is no status to show. Check that the Jarvis server is running on the Mac." + (window.__lastState ? " The figures below are from " + new Date(window.__lastState.generatedAt).toLocaleString("sv-SE") + "." : "");
+  $("offline").textContent = "Can't reach AIC, so there is no status to show. Check that the AIC server is running on the Mac." + (window.__lastState ? " The figures below are from " + new Date(window.__lastState.generatedAt).toLocaleString("sv-SE") + "." : "");
   $("offline").hidden = false;
   if(!window.__lastState){ for(const id of ["features","prs","ci","actions"]) $(id).innerHTML = `<li class="row"><span class="n">unavailable</span></li>`; $("ticker").textContent = "unavailable"; $("pstep").textContent = "unavailable"; $("lock").textContent = "unavailable"; }
 }
 load(); setInterval(load,60000);
 setInterval(()=>{ $("clock").textContent=new Date().toLocaleTimeString("sv-SE"); },1000);
 
-/* ---------- Jarvis talk ---------- */
+/* ---------- AIC talk ---------- */
 const CHAT_URL = (window.JARVIS_CHAT_URL || "./api/chat");
 const talk=$("talk"), log=$("log"), say=$("say"), core=document.querySelector(".core");
 const store = { get(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }, set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} } };
 const sessionId = "owner"; // one conversation: typed here, spoken here or through jarvis/voice, or from the CLI
 let voiceOn = store.get("jarvis-voice")==="on", online = null, speakTurn = false;
 function add(cls, text){ const d=document.createElement("div"); d.className="msg "+cls; if(cls==="sys"&&view!=="chat"&&text!=="…") showHint(text);
-  if(cls==="j"){ d.innerHTML="<b>JARVIS</b>"+esc(text).replace(/\n/g,"<br>"); } else if(cls==="me"){ d.innerHTML="<span>"+esc(text)+"</span>"; } else d.textContent=text;
+  if(cls==="j"){ d.innerHTML="<b>AIC</b>"+esc(text).replace(/\n/g,"<br>"); } else if(cls==="me"){ d.innerHTML="<span>"+esc(text)+"</span>"; } else d.textContent=text;
   log.appendChild(d); log.scrollTop=log.scrollHeight; }
 /* Everything but the core lives in a view you open yourself. */
 const grid=$("grid"), statusSide=document.createElement("aside"); statusSide.id="status"; grid.append(statusSide);
@@ -674,13 +678,13 @@ let hintTimer=null;
 function showHint(text){ $("vhint").textContent=text; $("vhint").classList.add("show"); clearTimeout(hintTimer); hintTimer=setTimeout(()=>$("vhint").classList.remove("show"),6000); }
 
 /* one visible state: off | standby | listening | thinking | speaking */
-const STATE_TEXT={off:"Microphone off",standby:"Say Jarvis",listening:"Listening",thinking:"Thinking",speaking:"Speaking"};
+const STATE_TEXT={off:"Microphone off",standby:"Say AIC",listening:"Listening",thinking:"Thinking",speaking:"Speaking"};
 let vstate="off";
 function setState(s){ vstate=s; for(const k of Object.keys(STATE_TEXT)) core.classList.toggle(k,k===s); $("vstate").textContent=STATE_TEXT[s];
   $("mic").classList.toggle("rec",s==="listening"); $("mic").classList.toggle("armed",!!mic.stream&&s!=="listening"); $("mic").title=s==="off"?"Turn the microphone on":s==="listening"?"Turn the microphone off":"Talk now"; startWave(); }
 const idleState=()=>mic.stream? (mic.mode==="listening"?"listening":"standby") : "off";
 
-/* ---------- output: Jarvis's voice, through an analyser so the core follows it ---------- */
+/* ---------- output: AIC's voice, through an analyser so the core follows it ---------- */
 let out=null, outSource=null;
 function outCtx(){ if(!out){ const c=new (window.AudioContext||window.webkitAudioContext)(); const an=c.createAnalyser(); an.fftSize=256; an.smoothingTimeConstant=.72; an.connect(c.destination); out={c,an,data:new Uint8Array(an.frequencyBinCount)}; } return out; }
 const fallbackAudio=new Audio();
@@ -752,7 +756,7 @@ function syncConfirm(c){
     setState(live?"listening":idleState()); };
   confirmAct=act; go.onclick=()=>act("merge"); no.onclick=()=>act("cancel"); btns.append(go,no);
   const hint=document.createElement("div"); hint.className="facts"; hint.style.margin="8px 0 0";
-  const end=c.expiresAt; const tick=()=>{ const s=Math.ceil((end-Date.now())/1000); if(s<=0){ clearConfirm(); add("sys","The merge confirmation expired. Nothing was merged."); inboxNote("Expired. Nothing was merged. Ask Jarvis again if you still want it."); return; } hint.textContent=`Or say exactly "I confirm". Expires in ${s} s.`; };
+  const end=c.expiresAt; const tick=()=>{ const s=Math.ceil((end-Date.now())/1000); if(s<=0){ clearConfirm(); add("sys","The merge confirmation expired. Nothing was merged."); inboxNote("Expired. Nothing was merged. Ask AIC again if you still want it."); return; } hint.textContent=`Or say exactly "I confirm". Expires in ${s} s.`; };
   card.append(head,name,facts,btns,hint); $("inboxmerge").appendChild(card); confirmCard=card; setTimeout(()=>{ if(confirmCard===card&&!no.disabled) go.disabled=false; },MERGE_ARM_MS); tick(); confirmTimer=setInterval(tick,1000);
   document.dispatchEvent(new CustomEvent("jarvis-confirm",{detail:c}));
 }
@@ -767,10 +771,10 @@ async function pollPending(force=false){ if(document.hidden||(pendingOff&&!force
     if(seq!==confirmSeq) return; /* something newer happened while this was in flight */ if(!j.confirm&&confirmData){ syncConfirm(null); inboxNote("Resolved elsewhere or expired. Nothing was merged here."); } else syncConfirm(j.confirm||null); }catch(e){ pendingOff=true; } }
 pollPending(); setInterval(pollPending,5000); window.addEventListener("focus",()=>pollPending(true)); document.addEventListener("visibilitychange",()=>pollPending());
 
-/* One turn at a time. A new message or talking over Jarvis cancels the one in progress. */
+/* One turn at a time. A new message or talking over AIC cancels the one in progress. */
 let activeTurn=null, turnSeq=0;
 function cancelTurn(){ activeTurn?.abort(); activeTurn=null; stopSpeech(); }
-/* ---------- images in chat: pick, paste or drop. The server keeps the file; Jarvis gets its path. ---------- */
+/* ---------- images in chat: pick, paste or drop. The server keeps the file; AIC gets its path. ---------- */
 let pics=[];
 function drawPics(){ const box=$("pics"); box.hidden=!pics.length; box.replaceChildren(...pics.map(p=>{ const b=document.createElement("button"); b.type="button"; b.className="pic"; b.title="Remove this image"; b.setAttribute("aria-label","Remove this image"); const i=document.createElement("img"); i.src=p.url; i.alt=""; b.append(i); b.onclick=()=>{ pics=pics.filter(x=>x!==p); drawPics(); }; return b; })); }
 async function attach(file){
@@ -785,7 +789,7 @@ $("attachinput").onchange=e=>{ for(const f of e.target.files) attach(f); e.targe
 say.addEventListener("paste",e=>{ const files=[...e.clipboardData.files].filter(f=>f.type.startsWith("image/")); if(files.length){ e.preventDefault(); files.forEach(attach); } });
 talk.addEventListener("dragover",e=>e.preventDefault());
 talk.addEventListener("drop",e=>{ e.preventDefault(); for(const f of e.dataTransfer.files) attach(f); });
-// The notes go to Jarvis; the owner sees the pictures instead.
+// The notes go to AIC; the owner sees the pictures instead.
 function takePics(){ const taken=pics; pics=[]; drawPics(); return taken; }
 const picNotes=taken=>taken.map(p=>`\n[The owner attached an image: ${p.path}]`).join("");
 function showPics(taken){ if(!taken.length) return; const row=document.createElement("div"); row.className="msg me picrow"; for(const p of taken){ const i=document.createElement("img"); i.src=p.url; i.alt="Image you attached"; row.append(i); } log.appendChild(row); log.scrollTop=log.scrollHeight; }
@@ -799,7 +803,7 @@ async function ask(q,spoken=false){
   const wording=cutOffAt&&!confirmData?`[You were interrupted. The owner stopped you while you were saying: "${cutOffAt}" They did not hear anything after that.]\n${q}${picNotes(taken)}`:q+picNotes(taken); cutOffAt=""; lastSpoken="";
   const dots=document.createElement("div"); dots.className="msg sys"; dots.textContent="…"; log.appendChild(dots);
   let bubble=null, shown="", failure=null, confirm=null, final=null;
-  const showReply=text=>{ dots.remove(); if(!bubble){ add("j",""); bubble=log.lastChild; } bubble.innerHTML="<b>JARVIS</b>"+esc(text).replace(/\n/g,"<br>"); log.scrollTop=log.scrollHeight; };
+  const showReply=text=>{ dots.remove(); if(!bubble){ add("j",""); bubble=log.lastChild; } bubble.innerHTML="<b>AIC</b>"+esc(text).replace(/\n/g,"<br>"); log.scrollTop=log.scrollHeight; };
   const onEvent=e=>{ if(turn!==turnSeq) return;
     if(e.type==="filler") enqueueSpeech(e.text,e.audio,e.audioType,true);
     else if(e.type==="sentence"){ shown=(shown+" "+e.text).trim(); showReply(shown); enqueueSpeech(e.text,e.audio,e.audioType); }
@@ -812,7 +816,7 @@ async function ask(q,spoken=false){
     else{ const reader=r.body.getReader(), dec=new TextDecoder(); let held="";
       for(;;){ const {value,done}=await reader.read(); if(done) break; held+=dec.decode(value,{stream:true});
         const lines=held.split("\n"); held=lines.pop(); for(const l of lines) if(l.trim()) onEvent(JSON.parse(l)); } }
-  }catch(e){ if(turn!==turnSeq||e.name==="AbortError") return; online=false; failure="Can't reach the Jarvis server, so nothing was sent. Check that it is running on the Mac."; }
+  }catch(e){ if(turn!==turnSeq||e.name==="AbortError") return; online=false; failure="Can't reach the AIC server, so nothing was sent. Check that it is running on the Mac."; }
   if(turn!==turnSeq) return;
   activeTurn=null; dots.remove();
   if(failure){ add("sys",failure); stopSpeech(); setState(idleState()); return; }
@@ -823,22 +827,22 @@ async function ask(q,spoken=false){
   if(!utt){ setState(mic.stream?"standby":"off"); if(mic.stream) setListenWindow(CONVERSATION_MS); }
 }
 /* ---------- GPT-Live: the conversation itself, once woken. It hears and speaks directly and can
-   listen while talking. "Jarvis" is still detected on this Mac, so nothing reaches OpenAI until then. ---------- */
+   listen while talking. "AIC" is still detected on this Mac, so nothing reaches OpenAI until then. ---------- */
 let live=null, liveOk=false;
 const LIVE_MAX_APPEND=1500;
 function liveSend(event){ if(live?.events?.readyState==="open") live.events.send(JSON.stringify({event_id:"ev_"+Math.random().toString(36).slice(2),...event})); }
 function liveSay(text,delegation_id=null){ liveSend({type:"session.commentary.append",delegation_id,content:String(text).slice(0,LIVE_MAX_APPEND)}); }
-function liveTouch(){ if(!live) return; clearTimeout(live.idle); live.idle=setTimeout(()=>endLive("Conversation closed after a quiet spell. Say Jarvis to start again."),CONVERSATION_MS); }
+function liveTouch(){ if(!live) return; clearTimeout(live.idle); live.idle=setTimeout(()=>endLive("Conversation closed after a quiet spell. Say AIC to start again."),CONVERSATION_MS); }
 function liveCleanup(){ const l=live; if(!l) return; live=null; clearTimeout(l.idle); clearTimeout(l.me.timer); clearTimeout(l.jarvis.timer); try{ l.events?.close(); }catch(e){} try{ l.peer?.close(); }catch(e){} l.audio.srcObject=null; l.source?.disconnect(); core.style.setProperty("--lvl","0"); setState(mic.stream?"standby":"off"); }
 function endLive(hint){ const l=live; if(!l) return; chime(740,440); if(hint) showHint(hint); liveSend({type:"session.close"}); l.closing=true; setTimeout(()=>{ if(live===l) liveCleanup(); },1500); }
 /* Transcripts come as fragments with no end marker, so a short gap ends a turn. */
 function liveTranscript(side,delta){ const t=live[side]; t.text+=delta; clearTimeout(t.timer); liveTouch(); const l=live; t.timer=setTimeout(()=>{ if(live===l) liveTurnEnded(side); },900); }
 function liveTurnEnded(side){ const t=live[side], text=t.text.trim(); t.text=""; if(!text) return;
-  live.history.push((side==="me"?"Owner: ":"Jarvis: ")+text); if(live.history.length>40) live.history.shift();
+  live.history.push((side==="me"?"Owner: ":"AIC: ")+text); if(live.history.length>40) live.history.shift();
   add(side==="me"?"me":"j",text); if(side!=="me") return;
   // The owner's own words, from the transcript, never from the model.
   if(confirmData&&/^\W*i confirm\W*$/i.test(text)) return confirmAct?.("merge");
-  if(GOODBYE.test(text)) endLive("Conversation closed. Say Jarvis to start again."); }
+  if(GOODBYE.test(text)) endLive("Conversation closed. Say AIC to start again."); }
 async function liveDelegate(id){ const l=live; l.pending++;
   // The event carries no task text, and its transcript can arrive just after it.
   await new Promise(r=>setTimeout(r,700)); if(live!==l) return;
@@ -862,7 +866,7 @@ async function startLive(firstLine){
   try{ const peer=l.peer=new RTCPeerConnection();
     peer.addEventListener("track",ev=>{ const stream=new MediaStream([ev.track]); audio.srcObject=stream; audio.play().catch(()=>showHint("Sound is blocked. Click anywhere in the window to allow it."));
       try{ const c=outCtx().c, an=c.createAnalyser(); an.fftSize=256; an.smoothingTimeConstant=.72; l.source=c.createMediaStreamSource(stream); l.source.connect(an); l.tap={an,data:new Uint8Array(an.frequencyBinCount)}; }catch(e){} });
-    peer.addEventListener("connectionstatechange",()=>{ if(["failed","closed"].includes(peer.connectionState)&&live===l){ const asked=l.closing; liveCleanup(); if(!asked) showHint("The voice connection dropped. Say Jarvis to reconnect."); } });
+    peer.addEventListener("connectionstatechange",()=>{ if(["failed","closed"].includes(peer.connectionState)&&live===l){ const asked=l.closing; liveCleanup(); if(!asked) showHint("The voice connection dropped. Say AIC to reconnect."); } });
     for(const track of mic.stream.getAudioTracks()) peer.addTrack(track,mic.stream);
     const events=l.events=peer.createDataChannel("oai-events");
     events.addEventListener("message",({data})=>{ try{ liveEvent(JSON.parse(data)); }catch(e){} });
@@ -915,7 +919,7 @@ function hearChunk(chunk){
   if(!vad.on){
     vad.pre.push(copy); if(vad.pre.length>PRE_CHUNKS) vad.pre.shift();
     if(busy||performance.now()<mic.cooldownUntil){
-      // Talking over Jarvis: well above the room and above what the speakers leak into the mic.
+      // Talking over AIC: well above the room and above what the speakers leak into the mic.
       const thr=Math.max(.025,vad.floor*4,outputLevel()*.6); vad.loud=rms>thr?vad.loud+1:0;
       if(vad.loud>=BARGE_CHUNKS&&busy){ speechHold=true; pauseSpeech(); const said=lastSpoken; setState("listening"); beginUtterance(true,vad.pre.slice(-PRE_BARGE)); utt.barge={voiced:BARGE_CHUNKS*CHUNK_S,said}; }
       return;
@@ -944,7 +948,7 @@ function sendPiece(){ const u=utt, clip=vad.clip; vad.clip=[]; if(!clip.length) 
 async function recognise(clip){
   try{ const r=await fetch("./api/listen",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({audio:toWav(clip)})}); const j=await r.json().catch(()=>({}));
     if(!r.ok){ add("sys",j.error||"Speech recognition failed."); return null; } return j; }
-  catch(e){ add("sys","Could not reach the Jarvis server."); return null; }
+  catch(e){ add("sys","Could not reach the AIC server."); return null; }
 }
 function hearPiece(u,{text,wake,command}){
   const t=(text||"").trim(); if(!t) return;
@@ -975,7 +979,7 @@ function endUtterance(){
 function chime(from,to){ if(!voiceOn&&!mic.stream) return; try{ const c=outCtx().c, o=c.createOscillator(), g=c.createGain(), t=c.currentTime; o.frequency.setValueAtTime(from,t); o.frequency.exponentialRampToValueAtTime(to,t+.14); g.gain.setValueAtTime(.0001,t); g.gain.exponentialRampToValueAtTime(.12,t+.02); g.gain.exponentialRampToValueAtTime(.0001,t+.22); o.connect(g).connect(c.destination); o.start(t); o.stop(t+.24); }catch(e){} }
 function wakeFlash(){ chime(660,990); const f=document.createElement("div"); f.className="wakering"; core.appendChild(f); setTimeout(()=>f.remove(),800); }
 const GOODBYE=/^\W*(?:(?:thanks|thank you)\W+)?(?:that'?s all|that is all|good ?bye|bye(?: bye)?|good ?night|stop listening|det var allt|hej då)(?: for now)?(?:\W+jarvis)?(?:\W+(?:thanks|thank you|tack))?\W*$/i;
-function closeConversation(){ if(live) return endLive("Conversation closed. Say Jarvis to start again."); cancelTurn(); setListenWindow(0); setState(mic.stream?"standby":"off"); chime(740,440); showHint("Conversation closed. Say Jarvis to start again."); }
+function closeConversation(){ if(live) return endLive("Conversation closed. Say AIC to start again."); cancelTurn(); setListenWindow(0); setState(mic.stream?"standby":"off"); chime(740,440); showHint("Conversation closed. Say AIC to start again."); }
 const step0=rate=>rate===RATE?512:1024; // Small buffers: interrupting must be felt at once.
 async function micOn(){
   const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}});
@@ -1027,7 +1031,7 @@ function drawWave(now){
   requestAnimationFrame(drawWave);
 }
 
-/* The city speaks through Jarvis without being asked: questions from agents, results when work is done. */
+/* The city speaks through AIC without being asked: questions from agents, results when work is done. */
 document.addEventListener("jarvis-sse",e=>{ const j=e.detail; if(j?.type!=="jarvis"||j.sessionId!==sessionId) return;
   add("j",j.text); if(j.audio||speakTurn||voiceOn){ speakTurn=true; enqueueSpeech(j.text,j.audio,j.audioType); } });
 /* The ONE event stream of the page. Everything else listens to these document events:
@@ -1038,10 +1042,10 @@ document.addEventListener("DOMContentLoaded",()=>{ try{ const es=new EventSource
 /* One /api/city request is shared by whoever asks in the same moment (the board, the inbox, the city after a reconnect). */
 window.jarvisSnapshot=(()=>{ let p=null; return ()=>{ p??=fetch("./api/city").finally(()=>setTimeout(()=>{ p=null; },0)); return p.then(r=>r.clone()); }; })();
 fetch("./api/warm",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId})}).catch(()=>{});
-(async()=>{ try{ liveOk=(await (await fetch("./api/live/status")).json()).available===true; }catch(e){} setState("off"); add("sys","Jarvis online. Say Jarvis, press the microphone, or open the chat to type.");
+(async()=>{ try{ liveOk=(await (await fetch("./api/live/status")).json()).available===true; }catch(e){} setState("off"); add("sys","AIC online. Say AIC, press the microphone, or open the chat to type.");
   try{ const p=await navigator.permissions.query({name:"microphone"});
     if(p.state==="granted"&&store.get("jarvis-mic")!=="off"){ await micOn(); setState("standby"); }
-    else if(p.state!=="denied"&&store.get("jarvis-mic")!=="off") add("sys","Press the microphone once to allow it. After that, saying Jarvis works whenever this window is open."); }catch(e){} })();
+    else if(p.state!=="denied"&&store.get("jarvis-mic")!=="off") add("sys","Press the microphone once to allow it. After that, saying AIC works whenever this window is open."); }catch(e){} })();
 
 $("cmdbtn").onclick=async()=>{ const t=$("cmdin").value.trim(); if(!t) return; const line="/jarvis "+t;
   try{ await navigator.clipboard.writeText(line); $("cmdhint").textContent="Copied: "+line; }catch(e){ $("cmdhint").textContent="Paste this in the booqy chat: "+line; } };
@@ -1122,13 +1126,13 @@ async function load() {
     state = applySnapshot(state, snap); error(null);
   } catch (err) {
     state = applySnapshot(state, { agents: [], tickets: [], questions: [], usage: null, spend: {} });
-    error(`Can't reach Jarvis (${err.message === "Failed to fetch" ? "no connection" : err.message}). Questions may be missing.`);
+    error(`Can't reach AIC (${err.message === "Failed to fetch" ? "no connection" : err.message}). Questions may be missing.`);
   }
   render();
 }
 // The one shared stream; a reconnect after a drop starts again from a fresh snapshot.
 document.addEventListener("jarvis-sse", (ev) => { const j = ev.detail; if (j?.type === "city" && /^question\./.test(j.event?.type ?? "")) { state = reduce(state, j.event, Date.now()); render(); } });
-document.addEventListener("jarvis-sse-error", () => { streamLost = true; error("Live updates from Jarvis stopped. Reconnecting…"); });
+document.addEventListener("jarvis-sse-error", () => { streamLost = true; error("Live updates from AIC stopped. Reconnecting…"); });
 document.addEventListener("jarvis-sse-open", () => { if (streamLost) { streamLost = false; error(null); load(); } });
 document.addEventListener("jarvis-confirm", (ev) => { confirm = ev.detail; render(); });
 confirm = window.jarvisConfirm?.() ?? null;
@@ -1148,7 +1152,7 @@ const lim = (label, value, over = false) => { const d = mk("div", over ? "lim ov
 function renderLimits() {
   const L = limits(state), box = $("ailimits"), parts = [];
   // No cap from the server (it has not been restarted yet): show the plain value and say so. A cap is never guessed.
-  const UNKNOWN = "cap: unknown until Jarvis restarts";
+  const UNKNOWN = "cap: unknown until AIC restarts";
   const of = (n, max) => (max === null ? `${n} active` : `${n} / ${max}`);
   const withNote = (el, max) => { if (max === null) el.append(mk("span", "", UNKNOWN)); return el; };
   const strip = mk("div", "strip");
@@ -1159,7 +1163,7 @@ function renderLimits() {
   if (L.usage) { const u = lim("USAGE TODAY", `${L.usage.turns} turns · ${Number(L.usage.tokens).toLocaleString("en-US")} tokens`); u.append(mk("span", "", `${estUsd(L.usage.usd)} (API list price, not a charge)`)); strip.append(u); } else strip.append(lim("USAGE TODAY", "—"));
   parts.push(strip);
   if (L.agentsByDepartment.length) {
-    const ha = mk("h4", "", "AGENTS PER DEPARTMENT" + (L.agentCapPerDepartment === null ? " · cap: unknown until Jarvis restarts" : "")); ha.style.cssText = "font-size:10px;letter-spacing:.2em;color:var(--o2);margin:4px 0";
+    const ha = mk("h4", "", "AGENTS PER DEPARTMENT" + (L.agentCapPerDepartment === null ? " · cap: unknown until AIC restarts" : "")); ha.style.cssText = "font-size:10px;letter-spacing:.2em;color:var(--o2);margin:4px 0";
     parts.push(ha);
     for (const d of L.agentsByDepartment) {
       const row = mk("div", d.full ? "agdept full" : "agdept"), top = mk("div", "top2");
@@ -1167,7 +1171,7 @@ function renderLimits() {
       top.append(name, mk("span", "amt", of(d.active, d.cap))); row.append(top); parts.push(row);
     }
   }
-  const h = mk("h4", "", "ESTIMATED SPEND TODAY PER DEPARTMENT" + (L.departments[0]?.cap != null ? ` (cap ${fmtUsd(L.departments[0].cap)} each)` : " · cap: unknown until Jarvis restarts")); h.style.cssText = "font-size:10px;letter-spacing:.2em;color:var(--o2);margin:4px 0";
+  const h = mk("h4", "", "ESTIMATED SPEND TODAY PER DEPARTMENT" + (L.departments[0]?.cap != null ? ` (cap ${fmtUsd(L.departments[0].cap)} each)` : " · cap: unknown until AIC restarts")); h.style.cssText = "font-size:10px;letter-spacing:.2em;color:var(--o2);margin:4px 0";
   parts.push(h, mk("div", "mute costnote", COST_NOTE));
   if (!L.departments.length) parts.push(mk("div", "mute", "No spend recorded today."));
   for (const d of L.departments) {
@@ -1221,7 +1225,7 @@ async function load() {
     state = applySnapshot(state, snap); error(null);
   } catch (err) {
     state = applySnapshot(state, { agents: [], tickets: [], questions: [], usage: null, spend: {} });
-    error(`Can't reach Jarvis (${err.message === "Failed to fetch" ? "no connection" : err.message}). Nothing is shown until it answers.`);
+    error(`Can't reach AIC (${err.message === "Failed to fetch" ? "no connection" : err.message}). Nothing is shown until it answers.`);
   }
   render();
 }
@@ -1232,7 +1236,7 @@ document.addEventListener("jarvis-sse", (ev) => {
   // Spend per department only comes with a snapshot: refresh it a few seconds after money moves.
   if (j.event?.type === "cost.update") { clearTimeout(costTimer); costTimer = setTimeout(load, 5000); }
 });
-document.addEventListener("jarvis-sse-error", () => { streamLost = true; error("Live updates from Jarvis stopped. Reconnecting…"); });
+document.addEventListener("jarvis-sse-error", () => { streamLost = true; error("Live updates from AIC stopped. Reconnecting…"); });
 document.addEventListener("jarvis-sse-open", () => { if (streamLost) { streamLost = false; error(null); load(); } });
 setInterval(render, 30000); // ages and "last active" move on
 load();

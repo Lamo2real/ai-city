@@ -8,8 +8,9 @@ import { promisify } from "node:util";
 const run = promisify(execFile);
 // Biases Whisper towards the words it would otherwise mishear ("Javas", "domain"). It must not
 // end in the name: Whisper then takes a spoken "Jarvis" for a repeat of the prompt and drops it.
-const PROMPT = "The owner is talking to his assistant, whose name is Jarvis, about pull requests and merges to main.";
-const NAME = "(?:jarvis|javis|jarvas|javas|jarves|jervis|görvis)";
+const PROMPT = "The owner is talking to his assistant, whose name is AIC, about pull requests and merges to main.";
+// AIC is said as letters, so the transcript varies. The old name still works.
+const NAME = "(?:a\\W?i\\W?c|ai\\W?see|ai\\W?city|jarvis|javis|jarvas|javas|jarves|jervis|görvis)";
 const GREETING = "(?:hi|hiya|hello|hey|hej|hallå|good (?:morning|afternoon|evening)|god (?:morgon|kväll))";
 // "Jarvis" opening what you say, or "yo Jarvis" or a greeting anywhere. A mention mid-sentence is not a call.
 const WAKE = new RegExp(`^\\W*(?:ok(?:ay)?\\W+)?${NAME}\\b[\\s,.!?-]*|(?:^|[\\s,.!?])(?:yo|yoh|jo|${GREETING})[\\s,.!-]*${NAME}\\b[\\s,.!?-]*`, "i");

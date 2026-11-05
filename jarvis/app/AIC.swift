@@ -1,13 +1,13 @@
-// The Jarvis Mac app: one native window on the HUD the local server already serves. The server and the agents
+// The AIC Mac app: one native window on the HUD the local server already serves. The server and the agents
 // run in their own LaunchAgent, so quitting this closes a window and stops nothing.
 import AppKit
 import WebKit
 
 private let home = URL(string: "http://localhost:7777/?view=city")!
-private func isJarvis(_ url: URL?) -> Bool { url?.host == "localhost" && url?.port == 7777 }
+private func isHome(_ url: URL?) -> Bool { url?.host == "localhost" && url?.port == 7777 }
 private let offline = """
 <!doctype html><meta charset=utf-8><body style="margin:0;height:100vh;display:grid;place-content:center;text-align:center;background:#000;color:#f5f5f7;font:16px -apple-system">
-<h2 style="margin:0 0 8px">Jarvis isn't answering yet</h2><p style="margin:0">Trying again every few seconds. Its server may still be starting.</p>
+<h2 style="margin:0 0 8px">AIC isn't answering yet</h2><p style="margin:0">Trying again every few seconds. Its server may still be starting.</p>
 """
 
 @main
@@ -28,7 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     func applicationDidFinishLaunching(_ note: Notification) {
         NSApp.mainMenu = menu()
         let config = WKWebViewConfiguration()
-        config.mediaTypesRequiringUserActionForPlayback = [] // Jarvis answers aloud without a click first
+        config.mediaTypesRequiringUserActionForPlayback = [] // AIC answers aloud without a click first
         if #available(macOS 14.0, *) { config.preferences.inactiveSchedulingPolicy = .none } // keeps listening behind other windows
         web = WKWebView(frame: .zero, configuration: config)
         web.navigationDelegate = self
@@ -37,20 +37,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         web.isInspectable = true
 
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        window.title = "Jarvis"
+        window.title = "AIC"
         window.contentView = web
         window.collectionBehavior = [.fullScreenPrimary]
         window.center()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         window.toggleFullScreen(nil)
-        awake = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep], reason: "Listening for Jarvis")
+        awake = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep], reason: "Listening for AIC")
         goHome()
     }
 
     private func goHome() { retry?.invalidate(); retry = nil; web.load(URLRequest(url: home)) }
 
-    // Clicking the Dock icon brings the one window back; closing it quits the app, not Jarvis.
+    // Clicking the Dock icon brings the one window back; closing it quits the app, not AIC.
     func applicationShouldHandleReopen(_ app: NSApplication, hasVisibleWindows: Bool) -> Bool { window.makeKeyAndOrderFront(nil); return true }
     func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool { true }
 
@@ -61,10 +61,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         retry = Timer.scheduledTimer(withTimeInterval: 3, repeats: false) { [weak self] _ in self?.goHome() }
     }
 
-    // Only Jarvis stays in this window. Anything else goes to the default browser.
+    // Only AIC stays in this window. Anything else goes to the default browser.
     func webView(_ view: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         let url = action.request.url
-        if isJarvis(url) || url?.scheme == "about" { decisionHandler(.allow); return }
+        if isHome(url) || url?.scheme == "about" { decisionHandler(.allow); return }
         if let url, ["http", "https"].contains(url.scheme ?? "") { NSWorkspace.shared.open(url) }
         decisionHandler(.cancel)
     }
@@ -73,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         return nil
     }
 
-    // The microphone is for Jarvis's own page only. macOS still asks the owner once.
+    // The microphone is for AIC's own page only. macOS still asks the owner once.
     func webView(_ view: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
         decisionHandler(origin.host == "localhost" && origin.port == 7777 && type == .microphone ? .grant : .deny)
     }
@@ -102,7 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         func item(_ title: String, _ action: Selector?, _ key: String, _ mods: NSEvent.ModifierFlags = .command) -> NSMenuItem {
             let i = NSMenuItem(title: title, action: action, keyEquivalent: key); i.keyEquivalentModifierMask = mods; return i
         }
-        add("Jarvis", [item("Hide Jarvis", #selector(NSApplication.hide(_:)), "h"), .separator(), item("Quit Jarvis", #selector(NSApplication.terminate(_:)), "q")])
+        add("AIC", [item("Hide AIC", #selector(NSApplication.hide(_:)), "h"), .separator(), item("Quit AIC", #selector(NSApplication.terminate(_:)), "q")])
         // Without these, copy and paste do nothing in a text field.
         add("Edit", [item("Undo", Selector(("undo:")), "z"), item("Redo", Selector(("redo:")), "z", [.command, .shift]), .separator(),
                      item("Cut", #selector(NSText.cut(_:)), "x"), item("Copy", #selector(NSText.copy(_:)), "c"), item("Paste", #selector(NSText.paste(_:)), "v"), item("Select All", #selector(NSText.selectAll(_:)), "a")])
