@@ -44,10 +44,10 @@ function plist(s) {
 <dict>
   <key>Label</key>${str(labelOf(s))}
   <key>ProgramArguments</key>
-  <array>${[process.execPath, join(repo, bin), ...rest].map(str).join("")}</array>
+  <array>${[join(repo, bin), ...rest].map(str).join("")}</array>
   <key>WorkingDirectory</key>${str(repo)}
   <key>EnvironmentVariables</key>
-  <dict><key>PATH</key>${str(`/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${dirname(process.execPath)}`)}</dict>
+  <dict><key>PATH</key>${str("/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin")}</dict>
   <key>StartCalendarInterval</key>
   <array>
     ${times}
