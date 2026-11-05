@@ -181,7 +181,7 @@ test("city-automations: every schedule starts off; enable and disable manage onl
   assert.match(await auto("enable", "daily"), /daily is on/);
   const daily = readFileSync(plist("daily"), "utf8");
   assert.match(daily, /<key>Hour<\/key><integer>7<\/integer><key>Minute<\/key><integer>0<\/integer>/);
-  assert.match(daily, /jarvis\/bin\/city-event<\/string><string>briefing<\/string>/);
+  assert.match(daily, /<array><string>[^<]*jarvis\/bin\/city-event<\/string><string>briefing<\/string><\/array>/, "its own #!, so a Node upgrade can't break it");
   assert.match(readFileSync(log, "utf8"), /^bootstrap gui\/\d+ .*se\.lamo\.jarvis-schedule\.daily\.plist/m);
   assert.match(await auto("list"), /^on\s+daily/);
   assert.match(await auto("enable", "daily"), /already on/);
