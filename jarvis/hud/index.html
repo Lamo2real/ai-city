@@ -44,7 +44,7 @@
   ul{list-style:none}
   .row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px dashed rgba(255,106,26,.15);font-size:12px;gap:8px}
   .row .n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.st{white-space:nowrap;flex:none}
-  .st{font-size:10px;letter-spacing:.12em;padding:1px 6px;border:1px solid}
+  .st{font-size:10px;letter-spacing:.12em;padding:1px 6px;border:1px solid;max-width:45%;overflow:hidden;text-overflow:ellipsis}
   .st.production{color:var(--ok);border-color:var(--ok)}
   .st.dev{color:var(--o2);border-color:var(--o2)}
   .st.building{color:var(--o);border-color:var(--o);animation:blink 1.6s infinite}
@@ -304,7 +304,7 @@
   .hud-stat,.corelabel{display:none}
   .core>svg,#wave{position:absolute;left:0;top:36px;width:100%;height:calc(100% - 104px)}
   .wakering{top:calc(36px + (100% - 104px)/2)}
-  .dock{position:absolute;left:50%;bottom:6px;transform:translateX(-50%);display:flex;align-items:center;gap:12px}
+  .dock{position:absolute;left:50%;bottom:calc(6px + env(safe-area-inset-bottom));transform:translateX(-50%);display:flex;align-items:center;gap:12px}
   .dock .ibtn{width:46px;height:46px}
   .dock #mic{width:58px;height:58px;border-radius:50%}
   .dock #mic svg{width:24px;height:24px}
@@ -351,6 +351,7 @@
   @media (max-width:800px){
     body.view-chat #grid,body.view-status #grid,body.view-inbox #grid{grid-template-columns:minmax(0,1fr);grid-template-rows:34dvh minmax(0,1fr)}
     .cmd input,.bar2 input{font-size:16px}
+    .cmd input,.cmd button,.bar2 button{min-height:40px}
     .dock .ibtn{width:44px;height:44px}.dock #mic{width:52px;height:52px}
     body.view-chat .core>svg,body.view-status .core>svg,body.view-inbox .core>svg,body.view-chat #wave,body.view-status #wave,body.view-inbox #wave{top:28px;height:calc(100% - 88px)}
     body.view-chat .vstate,body.view-status .vstate,body.view-inbox .vstate{top:4px}
@@ -528,11 +529,11 @@ function render(d){ window.__lastState=d;
   $("prodn").textContent=cnt("production"); $("devn").textContent=cnt("dev"); $("buildn").textContent=cnt("building"); $("blockn").textContent=cnt("blocked");
   const pct = f.length? Math.round(100*(cnt("production")+cnt("dev")*0.7+cnt("building")*0.3)/f.length):0;
   $("progpct").textContent=pct+"%"; $("progbar").style.width=pct+"%";
-  $("features").innerHTML = f.map(x=>`<li class="row"><span class="n">${esc(x.id)} · ${esc(x.name)}</span><span class="st ${stClass(x.status)}" title="${esc(x.status)}">${esc(stLabel(x.status))}</span></li>`).join("");
+  $("features").innerHTML = f.map(x=>`<li class="row"><span class="n" title="${esc(x.id)} · ${esc(x.name)}">${esc(x.id)} · ${esc(x.name)}</span><span class="st ${stClass(x.status)}" title="${esc(x.status)}">${esc(stLabel(x.status))}</span></li>`).join("");
   const prs=(d.prs||[]); const mine=prs.filter(p=>/awaiting|review/.test(p.state));
   $("coreval").textContent = mine.length; $("coresub").textContent = mine.length? "PR"+(mine.length>1?"S":"")+" AWAITING YOUR APPROVAL" : "NOTHING AWAITS YOU";
   $("prs").innerHTML = prs.length? prs.map(p=>`<li class="row"><span class="n"><a href="${esc(safeUrl(p.url))}" target="_blank" rel="noopener">${esc(p.repo)}#${esc(p.number)}</a> <span title="${esc(p.title)}">${esc(p.title)}</span></span><span class="st ${/awaiting|review/.test(p.state)?"dev":"building"}">${esc(String(p.state).replace(/_/g," "))}</span></li>`).join("") : `<li class="row"><span class="n">no open PRs</span></li>`;
-  $("ci").innerHTML=(d.ci||[]).map(c=>`<li class="row"><span class="n"><span class="dot ${c.status==="fail"?"bad":""}"></span>${esc(c.repo)}</span><span class="st ${ciClass(c.status)}">${esc(c.status)}</span></li>`).join("");
+  $("ci").innerHTML=(d.ci||[]).map(c=>`<li class="row"><span class="n" title="${esc(c.repo)}"><span class="dot ${c.status==="fail"?"bad":""}"></span>${esc(c.repo)}</span><span class="st ${ciClass(c.status)}">${esc(c.status)}</span></li>`).join("");
   $("actions").innerHTML=(d.actions||[]).map(a=>`<li class="row"><span class="n" title="${esc(a)}">${esc(a)}</span><span class="st todo">OPEN</span></li>`).join("")||`<li class="row">none</li>`;
   const g=(id,t,v,max)=>{ const none=v===null||v===undefined; $(id).style.strokeDashoffset = none?251:251-251*Math.min(1,v/max); $(t).textContent = none?"N/A":v; };
   g("gu","gut",d.uptime,100); g("gc","gct",d.ciPass,100); g("ga","gat",d.alarms,10);
@@ -585,6 +586,9 @@ $("statusbtn").onclick=()=>setView(view==="status"?"":"status");
 $("inboxbtn").onclick=()=>setView(view==="inbox"?"":"inbox");
 $("inboxclose").onclick=()=>setView("");
 $("talkhead").onclick=()=>setView("");
+/* Esc closes what is open on top (a city detail panel handles it first), then the view, so a second Esc is Home. */
+document.addEventListener("keydown",e=>{ if(e.key!=="Escape"||e.defaultPrevented||e.isComposing) return;
+  if(view){ setView(""); e.preventDefault(); } });
 let hintTimer=null;
 function showHint(text){ $("vhint").textContent=text; $("vhint").classList.add("show"); clearTimeout(hintTimer); hintTimer=setTimeout(()=>$("vhint").classList.remove("show"),6000); }
 
