@@ -1,19 +1,63 @@
 #!/usr/bin/env node
-// Turns the schedules in config/automations.json on and off in OpenClaw's scheduler. The Gateway must be running.
-// Everything starts off: a schedule runs only after the owner enables it here.
+// Turns the schedules in config/automations.json on and off as macOS LaunchAgents, one per schedule.
+// Everything starts off: a schedule runs only after the owner enables it here. launchd runs a time missed
+// while the Mac slept once on wake, and an enabled schedule survives restarts. It needs a login, like Jarvis.
 //   city-automations list | enable <id> | disable <id>
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, "..", "..");
 const { schedules = [] } = JSON.parse(readFileSync(process.env.CITY_AUTOMATIONS ?? join(repo, "config", "automations.json"), "utf8"));
-const cli = process.env.JARVIS_OPENCLAW_CLI ?? join(repo, "jarvis", "openclaw", "bin", "gateway");
-const openclaw = (...args) => execFileSync(cli, args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], timeout: 60_000 });
-const prefix = "city-";
-const installed = () => { const out = JSON.parse(openclaw("cron", "list", "--json")); return out.jobs ?? out; };
+const agentsDir = process.env.CITY_LAUNCH_AGENTS ?? join(homedir(), "Library", "LaunchAgents");
+const launchctl = (...args) => execFileSync(process.env.CITY_LAUNCHCTL ?? "/bin/launchctl", args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], timeout: 30_000 });
+const domain = `gui/${process.getuid()}`;
+const labelOf = (s) => `se.lamo.jarvis-schedule.${s.id}`;
+const plistOf = (s) => join(agentsDir, `${labelOf(s)}.plist`);
+
+// The cron forms config/automations.json uses. Anything else is refused rather than run at the wrong time.
+function calendarOf(cron) {
+  const [minute, hour, day, month, weekday, ...rest] = cron.trim().split(/\s+/);
+  if (rest.length || day !== "*" || month !== "*" || !/^(\d+|\*)$/.test(hour) || !/^(\d+|\*)$/.test(weekday)) throw new Error(`unsupported cron: ${cron}`);
+  const every = /^\*\/(\d+)$/.exec(minute);
+  if (!every && !/^\d+$/.test(minute)) throw new Error(`unsupported cron: ${cron}`);
+  if (every && (hour !== "*" || weekday !== "*" || Number(every[1]) < 1)) throw new Error(`unsupported cron: ${cron}`);
+  const base = { ...(hour === "*" ? {} : { Hour: Number(hour) }), ...(weekday === "*" ? {} : { Weekday: Number(weekday) }) };
+  if (!every) return [{ ...base, Minute: Number(minute) }];
+  const out = [];
+  for (let m = 0; m < 60; m += Number(every[1])) out.push({ Minute: m });
+  return out;
+}
+
+const xml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const str = (s) => `<string>${xml(s)}</string>`;
+function plist(s) {
+  const [bin, ...rest] = s.command;
+  const log = join(homedir(), "Library", "Logs", "jarvis-schedules.log");
+  const times = calendarOf(s.cron).map((t) => `<dict>${Object.entries(t).map(([k, v]) => `<key>${k}</key><integer>${v}</integer>`).join("")}</dict>`).join("\n    ");
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>${str(labelOf(s))}
+  <key>ProgramArguments</key>
+  <array>${[process.execPath, join(repo, bin), ...rest].map(str).join("")}</array>
+  <key>WorkingDirectory</key>${str(repo)}
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key>${str(`/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${dirname(process.execPath)}`)}</dict>
+  <key>StartCalendarInterval</key>
+  <array>
+    ${times}
+  </array>
+  <key>StandardOutPath</key>${str(log)}
+  <key>StandardErrorPath</key>${str(log)}
+</dict>
+</plist>
+`;
+}
 
 const [command, id] = process.argv.slice(2);
 const find = () => {
@@ -22,19 +66,20 @@ const find = () => {
   return s;
 };
 if (command === "list") {
-  const jobs = installed();
-  for (const s of schedules) console.log(`${jobs.some((j) => j.name === prefix + s.id) ? "on " : "off"}  ${s.id}  ${s.cron}  ${s.note ?? ""}`);
+  for (const s of schedules) console.log(`${existsSync(plistOf(s)) ? "on " : "off"}  ${s.id}  ${s.cron}  ${s.note ?? ""}`);
 } else if (command === "enable") {
   const s = find();
-  if (installed().some((j) => j.name === prefix + s.id)) { console.log(`${s.id} is already on`); process.exit(0); }
-  const [bin, ...rest] = s.command;
-  openclaw("cron", "add", "--name", prefix + s.id, "--cron", s.cron, "--command-argv", JSON.stringify([join(repo, bin), ...rest]), "--command-cwd", repo);
+  if (existsSync(plistOf(s))) { console.log(`${s.id} is already on`); process.exit(0); }
+  const text = plist(s); // before any write: a cron this can't express changes nothing
+  mkdirSync(agentsDir, { recursive: true });
+  writeFileSync(plistOf(s), text);
+  try { launchctl("bootstrap", domain, plistOf(s)); } catch (err) { rmSync(plistOf(s), { force: true }); throw err; }
   console.log(`${s.id} is on`);
 } else if (command === "disable") {
   const s = find();
-  const job = installed().find((j) => j.name === prefix + s.id);
-  if (!job) { console.log(`${s.id} is already off`); process.exit(0); }
-  openclaw("cron", "rm", job.id);
+  if (!existsSync(plistOf(s))) { console.log(`${s.id} is already off`); process.exit(0); }
+  try { launchctl("bootout", `${domain}/${labelOf(s)}`); } catch { /* not loaded: the file is all that is left */ }
+  rmSync(plistOf(s), { force: true });
   console.log(`${s.id} is off`);
 } else {
   console.error("usage: city-automations list | enable <id> | disable <id>");
