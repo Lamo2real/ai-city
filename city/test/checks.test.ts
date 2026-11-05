@@ -85,3 +85,47 @@ test("resolveCheckout: PR + worktree verifies HEAD; PR alone gets a dedicated wo
     assert.equal((await resolveCheckout({ scope: [], artifact: "PR #47", reviewRoot: "/w/rev", ticketId: "t-1", exec: mk(head), exists })).ok, false);
   } finally { process.chdir(here); }
 });
+
+// Real git checkouts, all under tmp. The caller's cwd is (a) many commits behind main, (b) dirty with uncommitted edits.
+// Neither may decide which checkout is tested, and the gate must never write to or run in them.
+test("stale caller cwd (behind main, or dirty) never picks, runs in, or alters the tested checkout", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { readFileSync, realpathSync } = await import("node:fs");
+  const { resolveCheckout } = await import("../src/checks.ts");
+  const git = (cwd: string, ...a: string[]) => execFileSync("git", ["-C", cwd, ...a], { encoding: "utf8", env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } }).trim();
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "stalecwd-")));
+  const main = join(root, "main"); mkdirSync(main);
+  git(main, "init", "-q", "-b", "main");
+  writeFileSync(join(main, "package.json"), '{"scripts":{"test":"true"}}');
+  git(main, "add", "-A"); git(main, "commit", "-qm", "base");
+  const behind = join(root, "behind"), dirty = join(root, "dirty"), target = join(root, "target");
+  git(root, "clone", "-q", main, behind); git(root, "clone", "-q", main, dirty);
+  for (let i = 0; i < 5; i++) { writeFileSync(join(main, `f${i}`), String(i)); git(main, "add", "-A"); git(main, "commit", "-qm", `c${i}`); }
+  git(root, "clone", "-q", main, target); // the checkout under review, current
+  git(dirty, "pull", "-q"); writeFileSync(join(dirty, "package.json"), '{"scripts":{"test":"false"}}'); writeFileSync(join(dirty, "untracked.txt"), "wip");
+  const snap = (d: string) => `${git(d, "rev-parse", "HEAD")}|${git(d, "status", "--porcelain")}|${readFileSync(join(d, "package.json"), "utf8")}`;
+  const before = { behind: snap(behind), dirty: snap(dirty) };
+  assert.notEqual(git(behind, "rev-parse", "HEAD"), git(main, "rev-parse", "HEAD")); // really behind
+  assert.notEqual(git(dirty, "status", "--porcelain"), ""); // really dirty
+  const head = git(target, "rev-parse", "HEAD");
+  const here = process.cwd();
+  try {
+    for (const caller of [behind, dirty]) {
+      process.chdir(caller);
+      const ran: string[] = [];
+      const exec: import("../src/checks.ts").Exec = async (cmd, args, cwd) => { ran.push(cwd); return cmd === "gh" ? { ok: true, output: head } : { ok: true, output: git(cwd, ...(args[0] === "rev-parse" ? args : ["status", "-s"])) }; };
+      // named worktree: tested as-is; scope pointing at the caller is ignored in favour of the artifact
+      const a = await resolveCheckout({ scope: [caller], artifact: `PR #47 worktree ${target}`, reviewRoot: join(root, "rev"), ticketId: "t-1", exec });
+      assert.deepEqual(a, { ok: true, dir: target, head });
+      // no PR, no path: falls to scope only; never to process.cwd()
+      const n = await resolveCheckout({ scope: [], artifact: "done", reviewRoot: join(root, "rev"), ticketId: "t-1", exec });
+      assert.equal(n.ok, false);
+      // checks run in the resolved dir only
+      const cwds: string[] = [];
+      await runChecks(target, async (_c, _a, cwd) => { cwds.push(cwd); return { ok: true, output: "" }; });
+      assert.ok(cwds.length > 0 && cwds.every((c) => c === target));
+      assert.ok(![...ran, ...cwds].some((c) => c === caller || c === realpathSync(process.cwd())), "ran in the caller's folder");
+    }
+  } finally { process.chdir(here); }
+  assert.deepEqual({ behind: snap(behind), dirty: snap(dirty) }, before); // callers untouched
+});
