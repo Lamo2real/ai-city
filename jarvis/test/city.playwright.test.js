@@ -1101,8 +1101,7 @@ test("the view stops drawing while hidden, and a phone selects by touch with the
 test("lit windows: one per agent at work in the department buildings, equal to N active, on desktop and phone", { skip }, async () => {
   const snap = cityBusy();
   const active = snap.agents.filter((a) => a.kind !== "core" && a.state === "active").length;
-  const docs = new URL("../../docs/city-windows.png", import.meta.url).pathname;
-  for (const [name, viewport, path] of [["desktop", { width: 1440, height: 900 }, docs], ["phone", { width: 390, height: 844 }, join(SHOTS, "city-windows-mobile.png")]]) {
+  for (const [name, viewport, path] of [["desktop", { width: 1440, height: 900 }, join(SHOTS, "city-windows.png")], ["phone", { width: 390, height: 844 }, join(SHOTS, "city-windows-mobile.png")]]) {
     const page = await openCity(snap, viewport);
     await page.waitForFunction(() => document.querySelectorAll("#citywindows [data-lit]").length > 0);
     const lit = await page.locator("#citywindows [data-lit]:not([data-dept='HQ'])").count();
