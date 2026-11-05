@@ -99,7 +99,7 @@ test("the reviewer does not need a slot of its own, so a review cannot freeze a 
     if (req.agentId === "reviewer") return { text: '{"verdict":"PASS","findings":[],"summary":"fine"}', sessionId: "r", costUsd: 0, tokens: 0 };
     if (req.prompt.includes('"goal":"check"')) {
       const t = JSON.parse(req.prompt.slice(req.prompt.indexOf('{"')));
-      const r = await req.tools.find((x) => x.name === "request_review")!.handler({ ticket_id: t.id, artifact: "diff" }) as { verdict: string };
+      const r = await req.tools.find((x) => x.name === "request_review")!.handler({ ticket_id: t.id, artifact: `diff in ${(() => { const d = mkdtempSync(join(tmpdir(), "gate-co-")); mkdirSync(join(d, ".git")); return d; })()}` }) as { verdict: string };
       verdict = r.verdict;
     }
     return { text: "", sessionId: `s-${req.agentId}`, costUsd: 0, tokens: 0 };

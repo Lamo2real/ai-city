@@ -322,15 +322,15 @@ test("a PR that fails max_review_rounds times reaches the owner as a question, w
   const t = city.ledger.getTicket(city.sendTicket({ to: "py-dev", goal: "feature" }).id)!;
   await city.idle();
   const review = city.toolsFor("orchestrator").find((x) => x.name === "request_review")!.handler;
-  const r1 = await review({ ticket_id: t.id, artifact: "diff" }) as Record<string, any>;
+  const r1 = await review({ ticket_id: t.id, artifact: `diff in ${checkout()}` }) as Record<string, any>;
   assert.equal(r1.verdict, "FAIL");
   assert.equal(city.ledger.getTicket(r1.fix_ticket)?.to, "it-manager", "the worker's manager owns the fix");
   assert.match(city.ledger.getTicket(r1.fix_ticket)!.goal, /\[major\] a\.py: p Fix: f/);
-  const r2 = await review({ ticket_id: t.id, artifact: "diff" }) as Record<string, any>;
+  const r2 = await review({ ticket_id: t.id, artifact: `diff in ${checkout()}` }) as Record<string, any>;
   assert.equal(r2.round, 2);
   assert.equal(events.filter((e) => e.type === "question").length, 0);
   city.ledger.updateTicket(t.id, { status: "in_progress" }); // the fake model did not report, so earlier turns had dropped it
-  const r3 = await review({ ticket_id: t.id, artifact: "diff" }) as Record<string, any>;
+  const r3 = await review({ ticket_id: t.id, artifact: `diff in ${checkout()}` }) as Record<string, any>;
   await city.idle();
   assert.equal(r3.escalated, true);
   assert.equal(r3.fix_ticket, undefined);
@@ -349,7 +349,7 @@ test("a reviewer reply without a verdict counts as FAIL", async () => {
   const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy });
   const t = city.ledger.getTicket(city.sendTicket({ to: "orchestrator", goal: "x" }).id)!;
   await city.idle();
-  const r = await city.toolsFor("orchestrator").find((x) => x.name === "request_review")!.handler({ ticket_id: t.id, artifact: "diff" }) as Record<string, any>;
+  const r = await city.toolsFor("orchestrator").find((x) => x.name === "request_review")!.handler({ ticket_id: t.id, artifact: `diff in ${checkout()}` }) as Record<string, any>;
   assert.equal(r.verdict, "FAIL");
   assert.match(r.findings[0].problem, /no verdict/);
   assert.equal(city.ledger.getTicket(r.fix_ticket)?.to, "orchestrator");
@@ -683,3 +683,10 @@ test("department spellings 'IT', 'it ' and ' IT' are one department in the snaps
   assert.equal(s.spend.IT, 3);
   city.close();
 });
+
+// A real-looking checkout for the gate to test; the gate never falls back to a cwd.
+function checkout(): string {
+  const d = mkdtempSync(join(tmpdir(), "gate-co-"));
+  mkdirSync(join(d, ".git"));
+  return d;
+}

@@ -57,3 +57,31 @@ test("npm ci runs before the checks; a failed install fails the gate without run
   const bad = await runChecks(dir, async () => ({ ok: false, output: "boom" }));
   assert.deepEqual(bad.map((c) => c.name), ["install"]);
 });
+
+test("resolveCheckout: PR + worktree verifies HEAD; PR alone gets a dedicated worktree; nothing resolvable fails; cwd never used", async () => {
+  const { resolveCheckout, prRef } = await import("../src/checks.ts");
+  const head = "a".repeat(40), other = "b".repeat(40);
+  const live = new Set(["/w/pr-wt/.git", "/w/own/.git", "/w/rev/t-1-aaaaaaaaaaaa/.git"]);
+  const exists = (p: string) => live.has(p);
+  const mk = (sha: string): import("../src/checks.ts").Exec => async (cmd, args) => {
+    if (cmd === "gh") return { ok: true, output: head };
+    if (args[0] === "rev-parse") return { ok: true, output: sha };
+    return { ok: true, output: "" };
+  };
+  assert.deepEqual(prRef("https://github.com/o/r/pull/47"), { repo: "o/r", num: "47" });
+  const here = process.cwd();
+  process.chdir(tmpdir()); // a stale caller cwd must change nothing
+  try {
+    const a = "PR #47 worktree /w/pr-wt";
+    assert.deepEqual(await resolveCheckout({ scope: ["/w/stale"], artifact: a, reviewRoot: "/w/rev", ticketId: "t-1", exec: mk(head), exists }), { ok: true, dir: "/w/pr-wt", head });
+    const bad = await resolveCheckout({ scope: [], artifact: a, reviewRoot: "/w/rev", ticketId: "t-1", exec: mk(other), exists });
+    assert.equal(bad.ok, false);
+    if (!bad.ok) assert.match(bad.error, /not PR #47 head/);
+    const r = await resolveCheckout({ scope: ["/w/own"], artifact: "https://github.com/o/r/pull/47", reviewRoot: "/w/rev", ticketId: "t-1", exec: mk(head), exists });
+    assert.deepEqual(r, { ok: true, dir: "/w/rev/t-1-aaaaaaaaaaaa", head });
+    const none = await resolveCheckout({ scope: ["/w/stale"], artifact: "done", reviewRoot: "/w/rev", ticketId: "t-1", exec: mk(head), exists });
+    assert.equal(none.ok, false);
+    if (!none.ok) assert.match(none.error, /no checkout to test/);
+    assert.equal((await resolveCheckout({ scope: [], artifact: "PR #47", reviewRoot: "/w/rev", ticketId: "t-1", exec: mk(head), exists })).ok, false);
+  } finally { process.chdir(here); }
+});
