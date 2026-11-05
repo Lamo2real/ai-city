@@ -140,6 +140,42 @@ test("the real policy gives the personal-assistant server to Jarvis alone", () =
   assert.deepEqual(servers["personal-assistant"]?.agents, ["jarvis"]);
 });
 
+test("a ticket scoped to a file runs in its folder, for the worker and for the manager that hears its report", async () => {
+  const work = dir();
+  writeFileSync(join(work, "range.cjs"), "");
+  const cwds: Array<[string, string | undefined]> = [];
+  const runner: Runner = async (req) => { cwds.push([req.agentId, req.cwd]); return { text: "", sessionId: `s-${req.agentId}`, costUsd: 0, tokens: 0 }; };
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: basePolicy() });
+  const { manager } = city.createDepartment({ name: "IT", mission: "keep the systems running" });
+  await hireWorker(city, manager, "eng-1");
+  const t = await tool(city, manager, "send_ticket")({ ticket: { to: "eng-1", goal: "fix it", scope: [join(work, "range.cjs")] } }) as { id: string };
+  await new Promise((r) => setTimeout(r, 20));
+  await tool(city, "eng-1", "report")({ ticket_id: t.id, status: "done", summary: "ok", artifacts: [] });
+  await city.idle();
+  assert.ok(cwds.some(([id, cwd]) => id === "eng-1" && cwd === work), "the worker");
+  assert.ok(cwds.some(([id, cwd]) => id === manager && cwd === work), "the manager hearing the report");
+  city.close();
+});
+
+test("a turn that crashes does not leave its ticket waiting: the manager's ticket ends as failed", async () => {
+  let crash = false;
+  const runner: Runner = async (req) => {
+    if (req.agentId !== "secretary" && crash) throw new Error("spawn ENOTDIR");
+    return { text: "", sessionId: `s-${req.agentId}`, costUsd: 0, tokens: 0 };
+  };
+  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy: basePolicy() });
+  const { manager } = city.createDepartment({ name: "IT", mission: "keep the systems running" });
+  await hireWorker(city, manager, "eng-1");
+  const top = city.sendTicket({ to: manager, goal: "lead" });
+  await new Promise((r) => setTimeout(r, 20));
+  crash = true;
+  const t = await tool(city, manager, "send_ticket")({ ticket: { to: "eng-1", goal: "code" } }) as { id: string };
+  await city.idle();
+  assert.equal(city.ledger.getTicket(t.id)!.status, "failed");
+  assert.equal(city.ledger.getTicket(top.id)!.status, "failed", "not left in progress forever");
+  city.close();
+});
+
 test("the SDK runner passes the fork through", async () => {
   let options: Record<string, unknown> = {};
   const queryFn = (({ options: o }: { options: Record<string, unknown> }) => { options = o; return (async function* () { yield { type: "result", subtype: "success", result: "x", session_id: "s", total_cost_usd: 0, usage: {} }; })(); }) as never;

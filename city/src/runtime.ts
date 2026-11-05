@@ -2,9 +2,9 @@
 // Instruction Bus, the review gate and the ledger, behind one interface for
 // Jarvis: send_ticket in, questions and results out.
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { z } from "zod";
 import { AGENTS_DIR, OPENCLAW_CAPABILITIES, SKILLS_DIR, WORKER_TOOLS, listSkills, loadCorePrompt, loadSkills, modelFor as hireModelFor, parsePrompt, readSkill, renderTemplate, skillsIndex, type AgentPrompt } from "./agents.ts";
 import { findOverlap, managerId, type Department } from "./departments.ts";
@@ -385,7 +385,8 @@ export function createCity(opts: CityOptions) {
     return roles.join(" › ") || agent(id).role;
   }
 
-  const scopeDir = (t?: Ticket) => t?.scope?.find((s) => isAbsolute(s) && existsSync(s));
+  // A scope can name a file; a process can only start in a folder.
+  const scopeDir = (t?: Ticket) => { const s = t?.scope?.find((p) => isAbsolute(p) && existsSync(p)); return s && !statSync(s).isDirectory() ? dirname(s) : s; };
   function cwdFor(ticket?: Ticket): string {
     const dir = scopeDir(ticket);
     if (dir) return dir;
@@ -447,7 +448,7 @@ export function createCity(opts: CityOptions) {
     pending.set(agentId, (pending.get(agentId) ?? 0) + 1);
     const run = prev.catch(() => {}).then(() => turn(agentId, text, ticket, onText));
     const rest = () => { if (!closed && !pending.get(agentId)) setActivity(agentId, restingActivity(agentId)); };
-    const done = run.then((r) => { pending.set(agentId, pending.get(agentId)! - 1); settle(agentId, r.text); rest(); }, () => { pending.set(agentId, pending.get(agentId)! - 1); rest(); });
+    const done = run.then((r) => { pending.set(agentId, pending.get(agentId)! - 1); settle(agentId, r.text); rest(); }, (err: Error) => { pending.set(agentId, pending.get(agentId)! - 1); if (!(err instanceof CapReached)) settle(agentId, err.message); rest(); }); // a crashed turn must not leave its ticket waiting silently
     queues.set(agentId, done);
     running.add(done);
     done.finally(() => running.delete(done));
