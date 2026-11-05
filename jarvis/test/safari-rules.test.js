@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import vm from "node:vm";
 import { createSafari, normalizeUrl } from "../safari/safari.js";
-import { pageJs, isPaymentPage, writesSensitiveField, readsCookies, guardBypass, wrapContent } from "../safari/page.js";
+import { pageJs, isPaymentPage, writesSensitiveField, readsCookies, readsStorage, guardBypass, wrapContent } from "../safari/page.js";
 import { createAudit } from "../safari/audit.js";
 import { createSpendCheck } from "../safari/spend.js";
 
@@ -75,6 +75,40 @@ test("js that reads document.cookie is refused before anything runs; ordinary sc
   // not reads, or not cookies
   for (const code of [`document.title`, `document.querySelector(".cookie-banner button").click()`, `document.cookie = "seen=1"`, `document.querySelectorAll("a").length`])
     assert.equal(readsCookies(code), false, code);
+});
+
+test("js that reads localStorage, sessionStorage or IndexedDB is refused before anything runs; ordinary scripts still run", async () => {
+  const r = rig();
+  for (const code of [
+    `localStorage.getItem("token")`,
+    `sessionStorage.getItem("token")`,
+    `JSON.stringify(localStorage)`,
+    `window.localStorage.token`,
+    `window . sessionStorage . length`,
+    `globalThis.localStorage`,
+    `self.sessionStorage`,
+    `globalThis["localStorage"]`,
+    `window['sessionStorage']`,
+    `window[\`localStorage\`]`,
+    `Object.keys(localStorage)`,
+    `const { localStorage: ls } = window; ls`,
+    `localStorage["token"]`,
+    `localStorage.setItem("a", 1)`,
+    `indexedDB.open("db")`,
+    `window.indexedDB.databases()`,
+    `self["indexedDB"].open("x")`,
+    `webkitIndexedDB.open("x")`,
+    `Storage.prototype.getItem.call(window.localStorage, "t")`,
+    `IDBFactory.prototype.open.call(x, "db")`,
+  ]) await assert.rejects(r.safari.js(TAB, code), { code: "STORAGE_READ", message: "I don't read page storage, sir: it can hold your logins." }, code);
+  assert.equal(r.runs.length, 0, "nothing reached the page");
+  assert.ok(r.lines().every((l) => l.result === "refused:STORAGE_READ"));
+  const ok = rig({ page: { js: { url: "https://a.test/", value: '"hello"' } } });
+  const out = await ok.safari.js(TAB, `document.querySelector(".storage-banner button").click(); document.title`);
+  assert.equal(ok.runs.filter((m) => m === "js").length, 1);
+  assert.match(out.content, /hello/);
+  for (const code of [`document.title`, `document.querySelector(".local-storage").click()`, `document.querySelectorAll("a").length`])
+    assert.equal(readsStorage(code), false, code);
 });
 
 function domRig(extra = {}) {
