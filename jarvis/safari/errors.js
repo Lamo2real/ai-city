@@ -10,6 +10,7 @@ export class SafariError extends Error {
 export const MESSAGES = {
   PASSWORD_FIELD: "You type passwords and codes yourself, sir.",
   COOKIE_READ: "I don't read cookies, sir: they can hold your logins.",
+  STORAGE_READ: "I don't read page storage, sir: it can hold your logins.",
   SPEND_NEEDS_APPROVAL: "Payments go through the approval gate: I'll ask the orchestrator.",
   AUTOMATION_DENIED: "macOS isn't letting me control Safari. Allow it in System Settings → Privacy & Security → Automation (tick Safari under the app that runs Jarvis), then try again.",
   JS_DISABLED: "Safari is blocking scripts from Apple Events. Turn on Develop → Developer Settings → Allow JavaScript from Apple Events (see docs/safari-setup.md), then try again.",

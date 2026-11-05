@@ -117,6 +117,17 @@ const COOKIE_READS = [
 ];
 export const readsCookies = (code) => COOKIE_READS.some((re) => re.test(code));
 
+// Same idea for web storage: localStorage, sessionStorage and IndexedDB hold tokens too. Any mention is refused (window.x,
+// globalThis.x, self.x, x["..."], destructuring and indexedDB.open all contain the name). Best-effort text check: names
+// assembled at run time are not seen.
+const STORAGE_READS = [
+  /(?:local|session)Storage\b/i,                         // localStorage, sessionStorage, window./globalThis./self. forms, ["localStorage"]
+  /indexedDB/i,                                          // indexedDB.open, webkitIndexedDB, window["indexedDB"]
+  /\bStorage\s*\.\s*prototype\b/,                        // Storage.prototype.getItem.call(...)
+  /\bIDB(?:Factory|Database|ObjectStore|Cursor|Index)\b/, // IDBFactory.prototype.open ...
+];
+export const readsStorage = (code) => STORAGE_READS.some((re) => re.test(code));
+
 // Ways round the in-page guard: reach it, get a fresh page realm (an iframe) with unpatched setters, read the original
 // property descriptors, or replace inputs by writing markup / editing attributes. Code using them is refused outright.
 const GUARD_BYPASSES = [

@@ -1,0 +1,8 @@
+{
+  "disabledMcpjsonServers": [
+    "github",
+    "terraform",
+    "meta-ads",
+    "playwright"
+  ]
+}
