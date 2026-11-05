@@ -78,7 +78,10 @@ test("resolveCheckout: PR + worktree verifies HEAD; PR alone gets a dedicated wo
     assert.equal(bad.ok, false);
     if (!bad.ok) assert.match(bad.error, /not PR #47 head/);
     const r = await resolveCheckout({ scope: ["/w/own"], artifact: "https://github.com/o/r/pull/47", reviewRoot: "/w/rev", ticketId: "t-1", exec: mk(head), exists });
-    assert.deepEqual(r, { ok: true, dir: "/w/rev/t-1-aaaaaaaaaaaa", head });
+    assert.deepEqual(r, { ok: true, dir: "/w/rev/t-1-aaaaaaaaaaaa", head, temp: "/w/own" });
+    const calls: string[][] = [];
+    await (await import("../src/checks.ts")).dropCheckout(r, async (c, a, d) => { calls.push([c, ...a, d]); return { ok: true, output: "" }; });
+    assert.deepEqual(calls, [["git", "worktree", "remove", "--force", "/w/rev/t-1-aaaaaaaaaaaa", "/w/own"]]);
     const none = await resolveCheckout({ scope: ["/w/stale"], artifact: "done", reviewRoot: "/w/rev", ticketId: "t-1", exec: mk(head), exists });
     assert.equal(none.ok, false);
     if (!none.ok) assert.match(none.error, /no checkout to test/);

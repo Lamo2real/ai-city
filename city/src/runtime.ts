@@ -16,7 +16,7 @@ import { lessonFor } from "./measure.ts";
 import { estimateUsd } from "./openclaw.ts";
 import { checkWorkflow, fill, loadWorkflows, WORKFLOWS_DIR, type Workflow } from "./workflows.ts";
 import { branchState, allocateWorkspace, releaseWorkspace } from "./workspaces.ts";
-import { checksText, resolveCheckout, runChecks, type Check, type Exec } from "./checks.ts";
+import { checksText, dropCheckout, resolveCheckout, runChecks, type Check, type Exec } from "./checks.ts";
 import { now, openLedger, type AgentRow, type Question, type QuestionRow, type Ticket } from "./ledger.ts";
 import { audit, auditPath, canonDepartment, contextWindow, decide, departmentCap, departmentKey, loadPolicy, sortedJson, type Policy } from "./policy.ts";
 import { validate } from "./schemas.ts";
@@ -1129,6 +1129,7 @@ export function createCity(opts: CityOptions) {
     // The repo under review: a checkout named in the artifact, else the ticket's own scope. Never another ticket's scope (stale worktrees).
     const co = await resolveCheckout({ scope: t.scope, artifact, reviewRoot: join(dataDir, "review"), ticketId, exec: opts.exec });
     const checks: Check[] = co.ok ? await runChecks(co.dir, opts.exec) : [{ name: "checkout", passed: false, output: co.error }];
+    if (co.ok && co.temp) await dropCheckout(co, opts.exec).catch(() => {});
     let verdict: Verdict;
     if (checks.some((c) => !c.passed)) {
       verdict = { verdict: "FAIL", findings: checks.filter((c) => !c.passed).map((c) => ({ severity: "blocker", where: c.name, problem: `automated check failed:\n${c.output}`, fix: "make it pass" })), summary: `automated checks failed: ${checks.filter((c) => !c.passed).map((c) => c.name).join(", ")}`, checks, round };
@@ -1151,7 +1152,7 @@ export function createCity(opts: CityOptions) {
       await ask("orchestrator", { ticket_id: ticketId, blocking: true, questions: [{ text: `The review of ticket ${ticketId} failed ${round} times (${verdict.summary}). How should we proceed?`.slice(0, 200), options: ["one more round", "ship as is", "drop it"], default: "one more round", why: findings.slice(0, 200) }] });
       return done({ ...verdict, escalated: true });
     }
-    const fix = sendTicket(by, { to: managerOf(t), kind: "fix", parent_id: ticketId, goal: `Review round ${round} of ticket ${ticketId} FAILED. ${verdict.summary}\nFix these, then have the review requested again:\n${findings}`, acceptance_criteria: ["every finding above is fixed", "automated checks pass"], scope: co.ok ? [co.dir] : t.scope });
+    const fix = sendTicket(by, { to: managerOf(t), kind: "fix", parent_id: ticketId, goal: `Review round ${round} of ticket ${ticketId} FAILED. ${verdict.summary}\nFix these, then have the review requested again:\n${findings}`, acceptance_criteria: ["every finding above is fixed", "automated checks pass"], scope: co.ok && !co.temp ? [co.dir] : t.scope });
     return done({ ...verdict, fix_ticket: fix.id });
   }
 

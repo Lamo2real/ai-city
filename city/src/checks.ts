@@ -55,7 +55,7 @@ export function prRef(artifact: string): { repo?: string; num: string } | undefi
   return n ? { num: n[1] } : undefined;
 }
 
-export type Checkout = { ok: true; dir: string; head?: string } | { ok: false; error: string };
+export type Checkout = { ok: true; dir: string; head?: string; temp?: string } | { ok: false; error: string };
 
 // Resolve the checkout the gate must test, or say why it cannot. Never falls back to the caller's cwd.
 //  - PR + worktree path: use the worktree, but HEAD must equal the PR head.
@@ -82,7 +82,8 @@ export async function resolveCheckout(o: { scope?: string[]; artifact: string; r
   }
   if (!base) return { ok: false, error: `no checkout to test: PR #${pr.num} has no local repository to fetch into` };
   const dir = join(o.reviewRoot, `${o.ticketId}-${head.slice(0, 12)}`);
-  if (!exists(join(dir, ".git"))) {
+  const fresh = !exists(join(dir, ".git"));
+  if (fresh) {
     const f = await exec("git", ["fetch", "--quiet", "origin", `pull/${pr.num}/head`], base);
     if (!f.ok) return { ok: false, error: `no checkout to test: fetching PR #${pr.num} failed: ${f.output.slice(-300)}` };
     mkdirSync(o.reviewRoot, { recursive: true });
@@ -91,7 +92,13 @@ export async function resolveCheckout(o: { scope?: string[]; artifact: string; r
   }
   const h = await exec("git", ["rev-parse", "HEAD"], dir);
   if (!h.ok || h.output.trim() !== head) return { ok: false, error: `review worktree ${dir} is not at PR #${pr.num} head ${head.slice(0, 12)}` };
-  return { ok: true, dir, head };
+  return { ok: true, dir, head, temp: base };
+}
+
+// Remove a dedicated review worktree made by resolveCheckout.
+export async function dropCheckout(co: Checkout, exec: Exec = realExec): Promise<void> {
+  if (!co.ok || !co.temp) return;
+  await exec("git", ["worktree", "remove", "--force", co.dir], co.temp);
 }
 
 // Dependencies first, so a missing node_modules is never mistaken for a failing test.
