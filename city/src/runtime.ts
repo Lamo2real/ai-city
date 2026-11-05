@@ -239,6 +239,7 @@ export function createCity(opts: CityOptions) {
     if (ticket?.status === "done" && workspaceOf(ticket)) holdForMerge(id, ticket);
     if (a.lifecycle === "temporary") releaseWorker(id);
     else setWorker(id, "idle");
+    setActivity(id, restingActivity(id)); // or it keeps saying "in review" after being accepted
   }
   // A worker whose branch has not landed stays at its station in the city. Set before the release, so it never appears to leave.
   // A manager often allocates the workspace on its own ticket and sends the coding down as a sub-ticket, and

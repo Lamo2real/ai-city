@@ -238,6 +238,8 @@ export function visualState(state, id, now = Date.now()) {
   if (worker === "blocked") return "blocked";
   if (worker === "paused") return "paused";
   if (where.why === "merge") return "waiting_merge";
+  // Finished and accepted: whatever its last turn was doing is over, even if nothing said so.
+  if ((worker === "idle" || worker === "completed") && !mine.length) return "idle";
   if (activity && activity !== "idle") return gateStatus(state, now).paused ? "paused" : VISUALS[activity] ? activity : "working"; // a paused city's turns wait, nobody is typing
   if (worker === "review" || mine.some((t) => t.status === "in_review")) return "in_review";
   if (mine.length) return "working";
@@ -259,12 +261,12 @@ export const VISUALS = {
   answering: { label: "Answering", words: "Answering a question", pose: "point" },
   reporting: { label: "Reporting", words: "Reporting back", pose: "clipboard" },
   reviewing: { label: "Reviewing", words: "Reviewing someone's work", pose: "magnify" },
-  in_review: { label: "In review", words: "Waiting for its work to be reviewed", pose: "wait" },
+  in_review: { label: "In review", words: "Finished, and waiting for its work to be checked", pose: "wait" },
   summarizing: { label: "Summarizing", words: "Writing a summary", pose: "clipboard" },
   remembering: { label: "Remembering", words: "Saving something to memory", pose: "think" },
   waiting_team: { label: "Waiting for the team", words: "Waiting for its team to finish", pose: "wait" },
   waiting_owner: { label: "Needs you", words: "Waiting for your answer", pose: "alarm" },
-  waiting_merge: { label: "Waiting for a merge", words: "Done, and staying until the branch is merged", pose: "wait" },
+  waiting_merge: { label: "Waiting for a merge", words: "Finished, and staying until its work is merged", pose: "wait" },
   failed: { label: "Failed", words: "Its last task failed", pose: "slump" },
   blocked: { label: "Blocked", words: "Blocked and cannot go on", pose: "slump" },
   paused: { label: "Paused", words: "Paused", pose: "still" },
@@ -272,6 +274,20 @@ export const VISUALS = {
 };
 
 // Plain words for the panel. The detail is agent text: the caller puts it in a text node.
+// A ticket's status as a person would say it.
+const TICKET_WORDS = { open: "Not started yet", in_progress: "Working on it", in_review: "Being reviewed", waiting_on_owner: "Waiting for you", parked: "On hold", done: "Finished", failed: "Did not finish", cancelled: "Cancelled" };
+export const ticketWords = (status) => TICKET_WORDS[status] ?? String(status ?? "").replace(/_/g, " ");
+export const ticketTone = (status) => (status === "done" ? "good" : status === "failed" ? "bad" : status === "waiting_on_owner" ? "warn" : "");
+// Agents write notes to each other. This drops the bookkeeping in front and keeps the first sentences that fit; `whole` says nothing was cut.
+export function plainText(text, max = 170) {
+  const clean = String(text ?? "").replace(/^(\s*\((?:parent|for)[^)]*\)\s*|\s*\[[^\]]*\]\s*|\s*(?:parent\s+)?t-[0-9a-f]{8}\b[:.]?\s*)+/i, "").replace(/[`*]+/g, "").replace(/\s+/g, " ").trim();
+  if (clean.length <= max) return { short: clean, whole: true };
+  const cut = clean.slice(0, max);
+  const end = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
+  if (end >= 60) return { short: cut.slice(0, end + 1), whole: false };
+  return { short: `${cut.slice(0, cut.lastIndexOf(" ")).trimEnd()}…`, whole: false };
+}
+
 export function doingWords(key, detail = "") {
   const words = (VISUALS[key] ?? VISUALS.working).words;
   return detail ? `${words}: ${detail}` : `${words}.`;

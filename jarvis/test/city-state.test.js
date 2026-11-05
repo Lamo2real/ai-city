@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { RETIRED_SHOWN, agentsAtWork, walksOut, TILE, VISUALS, assignSlots, cityMessage, doingWords, homeSpot, identity, placement, residents, seatSpot, visitAllowed, visualState, walkRoute, agentRows, ageText, applyLive, checkText, courierFor, departmentNames, estUsd, gateStatus, inboxItems, integrationGroups, limits, parkedRows, relTime, ticketGroups, traceLines, workforceGroups, agentPanel, agentStatus, applySnapshot, departmentPanel, initialState, layout, propFor, reduce, topBar } from "../hud/city-state.js";
+import { plainText, ticketTone, ticketWords, RETIRED_SHOWN, agentsAtWork, walksOut, TILE, VISUALS, assignSlots, cityMessage, doingWords, homeSpot, identity, placement, residents, seatSpot, visitAllowed, visualState, walkRoute, agentRows, ageText, applyLive, checkText, courierFor, departmentNames, estUsd, gateStatus, inboxItems, integrationGroups, limits, parkedRows, relTime, ticketGroups, traceLines, workforceGroups, agentPanel, agentStatus, applySnapshot, departmentPanel, initialState, layout, propFor, reduce, topBar } from "../hud/city-state.js";
 import { cityBusy, cityEmpty, cityEvent, cityIntegrations, cityParked, citySnapshot, cityTrace, cityWorkforce } from "./fixtures/city.js";
 
 const T0 = 1_000_000;
@@ -592,4 +592,28 @@ test("the walk home plays only on a real retirement or release, once per id", ()
   assert.equal(walksOut(s, "py-dev", walked), true);
   assert.equal(walksOut(s, "py-dev", walked), false);
   assert.equal(walksOut(s, "nobody", walked), false);
+});
+
+test("the agent panel's plain words: bookkeeping goes, whole sentences stay, and nothing is called finished that is not", () => {
+  assert.equal(plainText("(Parent t-1f832247) The owner reopened it.").short, "The owner reopened it.");
+  assert.equal(plainText("t-c27f39fa: Fix the **mail** gate.").short, "Fix the mail gate.");
+  assert.deepEqual(plainText("Short."), { short: "Short.", whole: true });
+  const long = `${"Word ".repeat(16).trim()}. ${"more ".repeat(60)}`;
+  const cut = plainText(long);
+  assert.equal(cut.whole, false);
+  assert.ok(cut.short.endsWith("Word."), cut.short);
+  assert.ok(plainText("x".repeat(40) + " " + "y".repeat(300)).short.endsWith("…"));
+  assert.equal(plainText(undefined).short, "");
+  assert.equal(ticketWords("in_progress"), "Working on it");
+  assert.equal(ticketWords("failed"), "Did not finish");
+  assert.equal(ticketWords("something_new"), "something new");
+  assert.equal(ticketTone("failed"), "bad");
+});
+
+test("a worker that is finished and idle does not say it is in review, whatever its last activity was", () => {
+  const worker = { id: "w", role: "Dev", kind: "worker", department: "IT", parent: "m", model: "claude-sonnet-5-5", state: "active", worker_state: "idle", lifecycle: "persistent" };
+  let s = applySnapshot(initialState(T0), { agents: [worker], tickets: [], questions: [], activities: { w: { activity: "in_review", detail: "", ticket_id: null, at: "" } } }, T0);
+  assert.equal(visualState(s, "w"), "idle");
+  s = applySnapshot(initialState(T0), { agents: [{ ...worker, worker_state: "review" }], tickets: [], questions: [], activities: { w: { activity: "in_review", detail: "", ticket_id: null, at: "" } } }, T0);
+  assert.equal(visualState(s, "w"), "in_review");
 });

@@ -49,7 +49,7 @@ test("the City tab shows HQ and an agent's panel opens on click", { skip }, asyn
   await page.locator("#citylist button[data-agent='ios-dev']").dispatchEvent("click"); // the keyboard list sits off-screen
   await page.waitForSelector("#citypanel:not([hidden])");
   const panel = await page.textContent("#citypanel");
-  assert.ok(panel.includes("iOS Developer") && panel.includes("Sonnet") && panel.includes("App") && panel.includes("app-manager"), panel);
+  assert.ok(panel.includes("iOS Developer") && panel.includes("Sonnet") && panel.includes("App") && panel.includes("App Manager"), panel);
   assert.ok(panel.includes("Build the habit tracker screen"));
   await page.locator("#citylist button[data-building='HQ']").dispatchEvent("click");
   assert.ok((await page.textContent("#citypanel")).includes("Headquarters"));
@@ -774,7 +774,7 @@ test("cost panel: the note is visible and every dollar figure is an estimate, he
   await page.locator("#citylist button[data-agent='ios-dev']").dispatchEvent("click");
   await page.waitForSelector("#citypanel[data-kind='agent']");
   const agentText = await panelText(page);
-  assert.match(agentText, /cost so far\s*est\. \$0\.420/);
+  assert.match(agentText, /Cost so far\s*est\. \$0\.42/);
   assert.ok(agentText.includes(NOTE));
   assert.equal(bareDollars(agentText), null);
   await page.locator("#citylist button[data-building='App']").dispatchEvent("click");
@@ -820,7 +820,7 @@ test("ticket story: offered from the agent, department and parked panels, and it
   await page.route("**/api/city/trace**", (r) => { const id = new URL(r.request().url()).searchParams.get("ticket"); asked.push(id); return r.fulfill(json(id === "t-fx1" ? cityTrace() : [])); });
   await page.locator("#citylist button[data-agent='ios-dev']").dispatchEvent("click");
   await page.waitForSelector("#citypanel[data-kind='agent']");
-  await page.click("#citypanel button:text-is('Story of this ticket')");
+  await page.click("#citypanel button:text-is('See the whole story')");
   await page.waitForSelector("#citypanel .story .line");
   assert.deepEqual(asked, ["t-fx1"]);
   const story = await page.locator("#citypanel .story .line").allTextContents();
@@ -901,7 +901,7 @@ test("phone width: panels answer 403 honestly, nothing overflows, and department
   }
   await page.locator("#citylist button[data-agent='ios-dev']").dispatchEvent("click");
   await page.waitForSelector("#citypanel[data-kind='agent']");
-  await page.click("#citypanel button:text-is('Story of this ticket')");
+  await page.click("#citypanel button:text-is('See the whole story')");
   await page.waitForFunction(() => /story is not available from the phone/.test(document.querySelector("#citypanel").textContent));
   await page.click("#citypanel header button");
   // The snapshot is allowed, so parked tickets are listed; the actions say why they can't run.
@@ -957,9 +957,9 @@ test("the panels against the real backend routes, with the fake runner: real sha
   await page.waitForFunction(() => /Nothing is parked/.test(document.querySelector("#citypanel").textContent));
   // The real trace of what just happened, from the agent's panel.
   await page.locator("#citylist button[data-agent='mgr-e2e-dept']").dispatchEvent("click");
-  await page.waitForFunction(() => /Recent results|Working on \(1\)/.test(document.querySelector("#citypanel").textContent));
+  await page.waitForFunction(() => /What it did recently|What it is working on/.test(document.querySelector("#citypanel").textContent));
   assert.doesNotMatch(await panelText(page), /Live details did not load/, "the real /api/city/agent answers");
-  await page.locator("#citypanel button", { hasText: /^Story of/ }).click();
+  await page.locator("#citypanel button", { hasText: /^See the whole story/ }).click();
   await page.waitForFunction(() => /mgr-e2e-dept: parked → in_progress/.test(document.querySelector("#citypanel").textContent));
   assert.deepEqual(errors, []);
   await page.close();
@@ -983,7 +983,10 @@ test("every agent sits where the real state says, and clicking one on the map op
   await page.waitForFunction(() => /Writing code: Sources\/Habit\.swift/.test(document.querySelector("#citypanel .doing").textContent));
   await page.waitForFunction(() => /Shipped the login/.test(document.querySelector("#citypanel").textContent));
   const text = await panelText(page);
-  for (const part of ["iOS Developer", "Sonnet", "App", "openclaw", "qa-tester: open", "Dark mode too?", "Shipped the login", "Edit", "deny: Bash", "est. $0.500", NOTE]) assert.ok(text.includes(part), part);
+  for (const part of ["iOS Developer", "Sonnet", "App", "App Manager", "QA Tester", "Not started yet", "Dark mode too?", "Shipped the login", "est. $0.50", NOTE]) assert.ok(text.includes(part), part);
+  assert.ok(!(await page.locator("#citypanel .tech").getAttribute("open")), "the technical details start folded");
+  for (const part of ["openclaw", "Edit", "deny: Bash", "ios-dev"]) assert.ok((await page.textContent("#citypanel .tech")).includes(part), part);
+  await page.locator("#citypanel").screenshot({ path: join(SHOTS, "agent-panel.png") });
   assert.equal(await page.locator("#citypanel b").count(), 0, "agent text stays text");
   assert.ok(text.includes("Build the <b>habit</b> screen"));
   // The panel reads again by itself while open, and an event updates the plain words at once.
