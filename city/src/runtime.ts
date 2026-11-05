@@ -398,8 +398,8 @@ export function createCity(opts: CityOptions) {
   // today's question for that key. That override is the answered row in the ledger's questions table (id
   // q-cap-<key>-<day>), so it survives restarts and expires with the day.
   const today = () => now().slice(0, 10);
-  const capQuestionId = (key: string) => `q-cap-${key}-${today()}`;
-  const capRaised = (key: string) => /raise/i.test(ledger.getQuestion(capQuestionId(key))?.answer ?? "");
+  const capQuestionId = (key: string) => `q-cap-${key === "global" ? key : departmentKey(key)}-${today()}`;
+  const capRaised = (key: string) => (ledger.getQuestion(capQuestionId(key))?.answer ?? "").trim().toLowerCase() === RAISE_OPTION;
   function overCap(department?: string): { key: string; spent: number; cap: number } | null {
     const g = policy.caps.daily_spend_usd_global;
     if (typeof g === "number") {
@@ -749,7 +749,7 @@ export function createCity(opts: CityOptions) {
     if (ticket.kind === "direct_instruction" && OWNER_SIDE.has(ticket.from)) {
       // The owner's reply, relayed by Jarvis, is the answer to what that agent asked.
       // An approval is only ever decided by the owner's own answer in the inbox, never by a relayed message.
-      for (const q of ledger.openQuestions().filter((o) => o.question.asked_by === ticket.to && !ledger.approvalByQuestion(o.id))) {
+      for (const q of ledger.openQuestions().filter((o) => o.question.asked_by === ticket.to && !o.id.startsWith("q-cap-") && !ledger.approvalByQuestion(o.id))) {
         ledger.answerQuestion(q.id, ticket.goal, from, now()); // the real caller, not the `from` a tool call put in the draft
         emit({ type: "question.answered", id: q.id, answer: ticket.goal, answered_by: ticket.from, ticket_id: q.question.ticket_id });
         const t = ledger.getTicket(q.question.ticket_id);
@@ -1244,6 +1244,7 @@ export function createCity(opts: CityOptions) {
     const resume = session?.id ?? a.session_id;
     if (a.state === "retired" || !resume) return fromLedger(a.state === "retired" ? "This agent has been released, so this is its record." : "This agent has no session yet, so this is what the ledger shows.");
     if (gate.paused) return fromLedger("The city is paused on a usage limit, so this is what the ledger shows.");
+    if (overCap(a.department)) return fromLedger("The daily spend cap is reached, so this is what the ledger shows.");
     const current = openTicketsFor(a.id)[0];
     const stop = new AbortController();
     const timer = setTimeout(() => stop.abort(), SIDE_TIMEOUT_MS);
