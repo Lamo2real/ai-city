@@ -149,7 +149,7 @@ Evidence:
 - Test: `automation.test.ts` ("an event reaches the owning department once, as quoted data ...").
 
 Gaps:
-- Schedules are off until the owner enables them, and they need the OpenClaw Gateway. The Gateway is not running, so no schedule has ever fired here.
+- Schedules run as LaunchAgents through `jarvis/bin/city-automations`, by the owner's choice on 2026-11-05. The OpenClaw Gateway is no longer needed for them.
 - Inbound webhooks are not supported: they need public exposure, which the owner has forbidden. Stripe, lead, AWS and support routes exist but nothing sends those events except a manual local POST.
 - `POST /api/city/events` has no token of its own; it relies on the server's loopback binding and host check.
 - The `watch-github` repo list holds one repository.

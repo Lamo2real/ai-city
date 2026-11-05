@@ -45,7 +45,7 @@ flowchart TB
   end
 
   subgraph ext["Outside the city"]
-    sched["OpenClaw Gateway cron<br/>off until the owner enables"]
+    sched["launchd schedules<br/>off until the owner enables"]
     cev["jarvis/bin/city-event<br/>POST /api/city/events"]
   end
 
@@ -229,7 +229,7 @@ To undo a merged change, revert its PR. `git log` and the `improvements` table r
 
 - **Workers run free, by the owner's decision (2026-11-04).** No OS sandbox, full tools by default, and `guardFor` applies neither the policy rules nor the city-controls check to a worker, so a worker can force-push, merge, read the Keychain, pay, destroy infrastructure, and change the ledger, audit log or policy file. Calls are still audited, though a worker could change that log too. Department autonomy levels still apply, and GitHub's protection of `main` is enforced outside the Mac, so pushes and merges to `main` still need a PR with CI passing. Agents read outside content, so a planted instruction can reach all of this.
 - **No inbound webhooks.** They would need the Gateway to be publicly reachable, which the owner has forbidden. Events come from schedules and from a local `POST /api/city/events` on `127.0.0.1`.
-- **Schedules are off.** `jarvis/bin/city-automations enable <id>` installs one in OpenClaw's scheduler, and it needs the Gateway. The Gateway is not running (nothing listens on port 18789 as of this writing). Nothing runs on a schedule today.
+- **Schedules run through launchd.** `jarvis/bin/city-automations enable <id>` installs a LaunchAgent, `se.lamo.jarvis-schedule.<id>`, that runs `city-event`. A time missed while the Mac sleeps runs once on wake. They need a logged-in session, and nothing runs while the Mac is off.
 - **Anthropic models only.** No non-Anthropic provider is configured or used.
 - **Lobster is not used.** It runs tool pipelines inside one agent. These workflows span departments, so they are tickets with dependencies in the ledger instead (`city/src/workflows.ts` says the same).
 - **No third-party skills.** All 19 skills in `skills/` were written for this repo. `skills/README.md` sets the review rule for adding any.

@@ -8,5 +8,5 @@ Every token you read or write is paid for. Work lean.
 - Summarise before you report.
 - Reports are at most 15 lines.
 - Don't paste logs: give the path.
-- One tool call per need; no repeats.
+- One tool call per need; don't repeat a call that succeeded (retrying a failed one is fine).
 - Stop when done.

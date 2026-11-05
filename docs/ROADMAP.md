@@ -31,7 +31,7 @@ This work, the game-style City view and Jarvis's direct line were merged to `mai
 4. **Partly done 2026-11-04: outside MCP servers for city agents.** Jarvis has `personal-assistant`, confirmed with a live call, and the Reviewer no longer names GitHub tools it could not load. Still open: Meta Ads and Terraform for departments, which need the owner's sign-in and Docker.
 5. **Dropped 2026-11-04 by the owner's decision:** workers have no OS sandbox, the `sandbox-exec` profile for OpenClaw runs was removed, and workers get full tools by default.
 6. **Verify a real provider limit on the OpenClaw path.** A fake CLI's limit message came back only as "process exited with code 1", so a real limit may fail that worker's ticket rather than pause the city. Its manager's next turn should pause. Record what a real limit does when one next occurs. Do not provoke one.
-7. **Owner decision: Gateway and schedules.** Start the Gateway, then enable schedules one at a time with `jarvis/bin/city-automations enable <id>`. Start with `failed-tickets` and `github-failures`, which make no model call unless something happened. The daily briefing costs one Sonnet turn a day.
+7. **Done 2026-11-05: schedules run through launchd,** by the owner's choice over the Gateway and its Telegram token.
 8. **Dropped 2026-11-04 by the owner's decision:** `POST /api/city/events` and `/api/city/answer` stay open to local processes.
 9. **Done 2026-11-04: only a whole yes approves,** so "okay, deny it" is a denial, and approvals cannot be decided from the phone listener.
 10. **Make idle retirement real.** Read `idle_retire_minutes`, or remove the field. Enter or remove the `requested` and `paused` states.
@@ -68,7 +68,7 @@ Run live on 2026-11-04 on scratch data (`JARVIS_HOME` in a temp folder, `JARVIS_
 - Lobster is not used: it is single-agent tool pipelines, and workflows here span departments.
 - No third-party skills are installed.
 - By the owner's decision, self-improvement may change and auto-merge the city's own rules and scoring. Those changes are named, not stopped. Only `.github/`, `package.json` files, existing tests and the Reviewer's prompt go to the owner. A worker can also merge by itself, because workers skip the policy rules.
-- Schedules are off until the owner enables them, and they need the Gateway, which is not running.
+- Schedules run as LaunchAgents and need a logged-in session.
 - Cost figures are estimates at API list prices, not charges.
 - `ANTHROPIC_API_KEY` is refused. Everything runs on the Claude subscription.
 

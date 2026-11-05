@@ -496,7 +496,7 @@ export function createCity(opts: CityOptions) {
   // An agent only carries the jarvis tools it may call: every extra tool schema is context it pays for on every turn.
   const toolsForTurn = (a: AgentRow): JarvisTool[] => { const allowed = new Set(allowedFor(a)); return toolsFor(a.id).filter((t) => allowed.has(`mcp__jarvis__${t.name}`)); };
   const systemPromptFor = (a: AgentRow): string => promptOf(a).body + (a.kind === "core" ? "" : `\n\n${loadSkills(agentsDir)}`) + skillsIndex([...(a.skills ?? []), ...(a.department ? ledger.getDepartment(departmentKey(a.department))?.skills ?? [] : [])], skillsDir);
-  const modelFor = (a: AgentRow, ticket?: Ticket): string => (a.kind === "worker" && ticket?.complexity ? policy.models?.[ticket.complexity] ?? a.model : a.model);
+  const modelFor = (a: AgentRow, ticket?: Ticket): string => (a.kind === "worker" ? hireModelFor(a.kind, a.parent, ticket?.complexity ? policy.models?.[ticket.complexity] ?? a.model : a.model) : a.model);
 
   // Every model call in the city passes the gate: limit, usage-limit pause, retries, timeout, cancellation.
   function callRunner(a: AgentRow, ticket: Ticket | undefined, req: TurnRequest): Promise<TurnResult> {
@@ -777,7 +777,7 @@ export function createCity(opts: CityOptions) {
     checkDepartment(a.department ?? "other");
     if (overCap(a.department)) throw new Error(`cap reached: ${a.department ?? "all departments"} has spent today's budget`);
     log(`${a.id}: revived from the registry`);
-    const row = ledger.updateAgent(a.id, { state: "active", last_active_at: now(), awaiting_merge: null });
+    const row = ledger.updateAgent(a.id, { state: "active", last_active_at: now(), awaiting_merge: null, model: hireModelFor(a.kind, a.parent, a.model) });
     emit({ type: "agent.hired", agent: row, revived: true });
     setWorker(a.id, "hired");
     return row;

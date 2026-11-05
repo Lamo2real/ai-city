@@ -1,7 +1,7 @@
 // The organization's routes, the phone's limits, and the two commands schedules use.
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer as createHttp, request } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -158,27 +158,42 @@ test("city-event: checks cost nothing unless something happened; failures become
   rec.http.closeAllConnections(); rec.http.close();
 });
 
-test("city-automations: every schedule starts off, and enable and disable only touch the city's own jobs", async () => {
-  const fake = mkdtempSync(join(tmpdir(), "fake-oc-"));
-  const log = join(fake, "log"), jobs = join(fake, "jobs.json");
-  writeFileSync(jobs, JSON.stringify({ jobs: [{ id: "other", name: "owner-job" }] }));
-  writeFileSync(join(fake, "cli"), `#!/bin/sh\necho "$@" >> "${log}"\nif [ "$2" = "list" ]; then cat "${jobs}"; fi\n`);
-  chmodSync(join(fake, "cli"), 0o755);
+test("city-automations: every schedule starts off; enable and disable manage only the city's own LaunchAgents", async () => {
+  const fake = mkdtempSync(join(tmpdir(), "fake-launchd-"));
+  const log = join(fake, "log"), agents = join(fake, "agents");
+  writeFileSync(join(fake, "launchctl"), `#!/bin/sh\necho "$@" >> "${log}"\n`);
+  chmodSync(join(fake, "launchctl"), 0o755);
+  mkdirSync(agents);
+  writeFileSync(join(agents, "se.lamo.jarvis.plist"), "the owner's own");
   const cfg = join(fake, "a.json");
-  writeFileSync(cfg, JSON.stringify({ schedules: [{ id: "daily", cron: "0 7 * * *", command: ["jarvis/bin/city-event", "briefing"] }] }));
-  const env = { ...process.env, JARVIS_OPENCLAW_CLI: join(fake, "cli"), CITY_AUTOMATIONS: cfg };
+  writeFileSync(cfg, JSON.stringify({ schedules: [
+    { id: "daily", cron: "0 7 * * *", command: ["jarvis/bin/city-event", "briefing"] },
+    { id: "weekly", cron: "0 4 * * 0", command: ["jarvis/bin/city-event", "improve"] },
+    { id: "often", cron: "*/30 * * * *", command: ["jarvis/bin/city-event", "watch-github"] },
+    { id: "odd", cron: "0 7 1 * *", command: ["jarvis/bin/city-event", "briefing"] },
+  ] }));
+  const env = { ...process.env, CITY_LAUNCHCTL: join(fake, "launchctl"), CITY_LAUNCH_AGENTS: agents, CITY_AUTOMATIONS: cfg };
   const auto = (...a) => run(process.execPath, [join(BIN, "city-automations"), ...a], { env }).then((r) => r.stdout);
+  const plist = (id) => join(agents, `se.lamo.jarvis-schedule.${id}.plist`);
 
   assert.match(await auto("list"), /^off\s+daily/);
   assert.match(await auto("disable", "daily"), /already off/);
   assert.match(await auto("enable", "daily"), /daily is on/);
-  const added = readFileSync(log, "utf8").split("\n").find((l) => l.startsWith("cron add"));
-  assert.match(added, /--name city-daily --cron 0 7 \* \* \* --command-argv \[".*jarvis\/bin\/city-event","briefing"\]/);
-  writeFileSync(jobs, JSON.stringify({ jobs: [{ id: "other", name: "owner-job" }, { id: "j1", name: "city-daily" }] }));
+  const daily = readFileSync(plist("daily"), "utf8");
+  assert.match(daily, /<key>Hour<\/key><integer>7<\/integer><key>Minute<\/key><integer>0<\/integer>/);
+  assert.match(daily, /jarvis\/bin\/city-event<\/string><string>briefing<\/string>/);
+  assert.match(readFileSync(log, "utf8"), /^bootstrap gui\/\d+ .*se\.lamo\.jarvis-schedule\.daily\.plist/m);
   assert.match(await auto("list"), /^on\s+daily/);
   assert.match(await auto("enable", "daily"), /already on/);
+  await auto("enable", "weekly");
+  assert.match(readFileSync(plist("weekly"), "utf8"), /<key>Weekday<\/key><integer>0<\/integer>/);
+  await auto("enable", "often");
+  assert.equal(readFileSync(plist("often"), "utf8").match(/<key>Minute<\/key>/g).length, 2);
+  await assert.rejects(auto("enable", "odd"), /unsupported cron/);
+  assert.ok(!existsSync(plist("odd")), "a cron it cannot express changes nothing");
   assert.match(await auto("disable", "daily"), /daily is off/);
-  assert.ok(readFileSync(log, "utf8").includes("cron rm j1"));
-  assert.ok(!readFileSync(log, "utf8").includes("rm other"));
+  assert.match(readFileSync(log, "utf8"), /^bootout gui\/\d+\/se\.lamo\.jarvis-schedule\.daily$/m);
+  assert.ok(!existsSync(plist("daily")));
+  assert.equal(readFileSync(join(agents, "se.lamo.jarvis.plist"), "utf8"), "the owner's own");
   await assert.rejects(auto("enable", "nope"), /no schedule/);
 });
