@@ -45,7 +45,7 @@ test("over the cap the turn does not start, the ticket waits, and the owner is a
   assert.equal(city.ledger.getTicket(b.id)?.status, "waiting_on_owner");
   const qs = asked(city);
   assert.equal(qs.length, 1);
-  assert.equal(qs[0].id, `q-cap-IT-${day()}`);
+  assert.equal(qs[0].id, `q-cap-it-${day()}`);
   assert.deepEqual(qs[0].question.questions[0].options, ["raise the limit for today", "pause until tomorrow"]);
   assert.equal(qs[0].question.questions[0].default, "pause until tomorrow");
   city.close();
@@ -74,7 +74,7 @@ test("'raise' lifts that department for today and resumes its tickets; other dep
   const it = city.sendTicket({ to: "it-mgr", goal: "x" });
   const hr = city.sendTicket({ to: "hr-mgr", goal: "y" });
   await city.idle();
-  city.answer(`q-cap-IT-${day()}`, "raise the limit for today");
+  city.answer(`q-cap-it-${day()}`, "raise the limit for today");
   await city.idle();
   assert.ok(calls.some((c) => c.agentId === "it-mgr" && c.prompt.includes(it.id)), "the waiting IT ticket restarted");
   assert.notEqual(city.ledger.getTicket(it.id)?.cap_block, "IT");
@@ -102,7 +102,7 @@ test("'pause' leaves tickets waiting, and they stay waiting; no new question tha
   city.ledger.addCost("it-mgr", null, 2);
   const t = city.sendTicket({ to: "it-mgr", goal: "x" });
   await city.idle();
-  city.answer(`q-cap-IT-${day()}`, "pause until tomorrow");
+  city.answer(`q-cap-it-${day()}`, "pause until tomorrow");
   await city.idle();
   city.resumeCapBlocked();
   await city.idle();
@@ -161,5 +161,75 @@ test("the optional global cap blocks every department, and is off when absent", 
   assert.equal(calls.filter((c) => c.agentId === "hr-mgr").length, 0);
   assert.equal(city.ledger.getTicket(t.id)?.status, "waiting_on_owner");
   assert.equal(asked(city)[0].id, `q-cap-global-${day()}`);
+  city.close();
+});
+
+const capQ = (city: ReturnType<typeof mk>["city"]) => city.ledger.getQuestion(`q-cap-it-${day()}`);
+
+test("a relayed owner message does not answer the cap question (finding 1)", async () => {
+  const { city } = mk();
+  await hire(city, "it-mgr", "IT");
+  city.ledger.addCost("it-mgr", null, 2);
+  const t = city.sendTicket({ to: "it-mgr", goal: "x" });
+  await city.idle();
+  city.toolsFor("jarvis").find((x) => x.name === "send_ticket")!.handler({ ticket: { to: "it-mgr", kind: "direct_instruction", goal: "raise the limit for today" } });
+  await city.idle();
+  assert.equal(capQ(city)?.status, "open");
+  assert.equal(city.ledger.getTicket(t.id)?.status, "waiting_on_owner");
+  city.close();
+});
+
+test("only the exact option lifts the cap, ignoring case and outer whitespace (finding 2)", async () => {
+  for (const text of ["do not raise it", "raise", "raise the limit for today, please"]) {
+    const { city, calls } = mk();
+    await hire(city, "it-mgr", "IT");
+    city.ledger.addCost("it-mgr", null, 2);
+    city.sendTicket({ to: "it-mgr", goal: "x" });
+    await city.idle();
+    city.answer(`q-cap-it-${day()}`, text);
+    await city.idle();
+    assert.equal(calls.filter((c) => c.agentId === "it-mgr").length, 0, text);
+    city.close();
+  }
+  const { city, calls } = mk();
+  await hire(city, "it-mgr", "IT");
+  city.ledger.addCost("it-mgr", null, 2);
+  city.sendTicket({ to: "it-mgr", goal: "x" });
+  await city.idle();
+  city.answer(`q-cap-it-${day()}`, "  Raise The Limit For Today ");
+  await city.idle();
+  assert.ok(calls.some((c) => c.agentId === "it-mgr"));
+  city.close();
+});
+
+test("the cap question and its raise are keyed on the department key, whatever the spelling (finding 3)", async () => {
+  const { city, calls } = mk();
+  await hire(city, "it-mgr", "IT");
+  await hire(city, "it-two", "it").catch(() => {});
+  city.ledger.addCost("it-mgr", null, 2);
+  city.sendTicket({ to: "it-mgr", goal: "x" });
+  await city.idle();
+  assert.deepEqual(asked(city).map((q) => q.id), [`q-cap-it-${day()}`]);
+  city.answer(`q-cap-it-${day()}`, "raise the limit for today");
+  await city.idle();
+  assert.ok(calls.some((c) => c.agentId === "it-mgr"));
+  assert.equal(asked(city).length, 0);
+  city.close();
+});
+
+test("ask_colleague over the cap starts no side-question and answers from the ledger (finding 4)", async () => {
+  const forks: TurnRequest[] = [];
+  const runner: Runner = async (req) => { if (req.forkSession) forks.push(req); return { text: "answer", sessionId: "s", costUsd: 0 }; };
+  const policy = { ...base, caps: { ...base.caps, daily_spend_usd_per_department: 1 } };
+  const city = createCity({ runner, dataDir: mkdtempSync(join(tmpdir(), "cap-")), ledgerPath: ":memory:", policy });
+  await hire(city, "it-mgr", "IT");
+  const w = (id: string) => city.toolsFor("it-mgr").find((t) => t.name === "hire_agent")!.handler({ spec: { ...spec(id, "IT"), kind: "worker", parent: "it-mgr", lifecycle: "temporary" } });
+  await w("dev-a");
+  await w("dev-b");
+  city.ledger.updateAgent("dev-b", { session_id: "s-b" });
+  city.ledger.addCost("it-mgr", null, 2);
+  const r = await city.toolsFor("dev-a").find((t) => t.name === "ask_colleague")!.handler({ name: "dev-b", question: "status?" }) as { answered_by: string };
+  assert.equal(r.answered_by, "ledger");
+  assert.equal(forks.length, 0);
   city.close();
 });
