@@ -4,7 +4,7 @@
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 
 export interface Check {
   name: string;
@@ -62,9 +62,22 @@ export type Checkout = { ok: true; dir: string; head?: string; temp?: string } |
 //  - PR only: fetch the PR head into a dedicated detached worktree under `reviewRoot`.
 //  - worktree path only: use it.
 //  - neither: the ticket's own scope checkout, else an error.
-export async function resolveCheckout(o: { scope?: string[]; artifact: string; reviewRoot: string; ticketId: string; exec?: Exec; exists?: (p: string) => boolean }): Promise<Checkout> {
+// Any resolved directory must be a real work tree, or the gate refuses it.
+export async function resolveCheckout(o: { scope?: string[]; artifact: string; reviewRoot: string; ticketId: string; exec?: Exec; exists?: (p: string) => boolean; allowedRoots?: string[] }): Promise<Checkout> {
+  const co = await resolveInner(o);
+  if (!co.ok) return co;
+  const w = await (o.exec ?? realExec)("git", ["rev-parse", "--is-inside-work-tree"], co.dir);
+  if (!w.ok || w.output.trim() !== "true") return { ok: false, error: `refusing to test ${co.dir}: not inside a git work tree` };
+  return co;
+}
+
+const under = (p: string, roots: string[]) => roots.some((r) => { const a = resolve(r); return p === a || p.startsWith(a + sep); });
+
+async function resolveInner(o: { scope?: string[]; artifact: string; reviewRoot: string; ticketId: string; exec?: Exec; exists?: (p: string) => boolean; allowedRoots?: string[] }): Promise<Checkout> {
   const exec = o.exec ?? realExec, exists = o.exists ?? existsSync;
   const named = namedDirs(o.artifact, exists);
+  // Without a PR the artifact text alone picks the directory, so it must sit under the city's own roots.
+  if (!prRef(o.artifact) && named[0] && !under(resolve(named[0]), [o.reviewRoot, ...(o.allowedRoots ?? [])])) return { ok: false, error: `refusing to test ${named[0]}: outside the workspace and review roots` };
   const own = (o.scope ?? []).find((p) => isAbsolute(p) && exists(join(p, ".git")));
   const base = named[0] ?? own;
   const pr = prRef(o.artifact);
@@ -104,7 +117,7 @@ export async function dropCheckout(co: Checkout, exec: Exec = realExec): Promise
 // Dependencies first, so a missing node_modules is never mistaken for a failing test.
 export async function installDeps(cwd: string, exec: Exec): Promise<Check | null> {
   if (!existsSync(join(cwd, "package.json"))) return null;
-  const r = await exec("npm", [existsSync(join(cwd, "package-lock.json")) ? "ci" : "install", "--no-audit", "--no-fund"], cwd);
+  const r = await exec("npm", [existsSync(join(cwd, "package-lock.json")) ? "ci" : "install", "--no-audit", "--no-fund", "--ignore-scripts"], cwd);
   return { name: "install", passed: r.ok, output: r.output };
 }
 
@@ -115,9 +128,12 @@ export async function runChecks(cwd: string, exec: Exec = realExec): Promise<Che
     const r = await exec(cmd, args, cwd);
     checks.push({ name, passed: r.ok, output: r.output });
   }
+  // Nothing to run is not a pass: the automated stage must not succeed silently.
+  if (!checks.length) checks.push({ name: "checks", passed: false, output: NONE });
   return checks;
 }
 
+const NONE = "no checks defined: the repo has no test, lint, typecheck or pytest to run";
 export const checksText = (checks: Check[]) => checks.length
   ? checks.map((c) => `- ${c.name}: ${c.passed ? "PASS" : "FAIL"}${c.passed ? "" : `\n${c.output}`}`).join("\n")
   : "- none: the repo defines no test, lint, typecheck or pytest";

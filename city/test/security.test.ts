@@ -1,7 +1,7 @@
 // Findings from the backend review, each as the situation that used to go wrong.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -99,12 +99,12 @@ test("the reviewer does not need a slot of its own, so a review cannot freeze a 
     if (req.agentId === "reviewer") return { text: '{"verdict":"PASS","findings":[],"summary":"fine"}', sessionId: "r", costUsd: 0, tokens: 0 };
     if (req.prompt.includes('"goal":"check"')) {
       const t = JSON.parse(req.prompt.slice(req.prompt.indexOf('{"')));
-      const r = await req.tools.find((x) => x.name === "request_review")!.handler({ ticket_id: t.id, artifact: `diff in ${(() => { const d = mkdtempSync(join(tmpdir(), "gate-co-")); mkdirSync(join(d, ".git")); return d; })()}` }) as { verdict: string };
+      const r = await req.tools.find((x) => x.name === "request_review")!.handler({ ticket_id: t.id, artifact: `diff in ${checkout()}` }) as { verdict: string };
       verdict = r.verdict;
     }
     return { text: "", sessionId: `s-${req.agentId}`, costUsd: 0, tokens: 0 };
   };
-  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy, exec: async () => ({ stdout: "", stderr: "" }) } as never);
+  const city = createCity({ runner, dataDir: gateData, ledgerPath: ":memory:", policy, exec: gateExec } as never);
   city.sendTicket({ to: "orchestrator", goal: "check" });
   await within(city.idle(), "the review froze", 4000);
   assert.equal(verdict, "PASS");
@@ -398,3 +398,13 @@ test("the bridge knows whether a run's hook reported in", async () => {
   door.close();
   bridge.close();
 });
+
+const gateData = mkdtempSync(join(tmpdir(), "city-gate-"));
+const gateExec = async (_c: string, a: string[]) => ({ ok: true, output: a.includes("--is-inside-work-tree") ? "true" : "" });
+// A real-looking checkout for the gate to test, under the city's workspace root; the gate never falls back to a cwd.
+function checkout(): string {
+  const d = mkdtempSync(join(gateData, "co-"));
+  const w = join(gateData, "worktrees", d.slice(-8)); mkdirSync(join(w, ".git"), { recursive: true });
+  writeFileSync(join(w, "package.json"), JSON.stringify({ scripts: { test: "true" } }));
+  return w;
+}

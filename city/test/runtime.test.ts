@@ -252,12 +252,12 @@ test("a failed turn fails the ticket and the owner hears about it", async () => 
 // Phase 3: the review gate. A repo whose tests fail, fixed by its manager, passes on round 2.
 test("a deliberately buggy PR gets FAIL from the automated checks, a fix ticket to its manager, and PASS on round 2", async () => {
   let fixed = false;
-  const exec = async (_cmd: string, args: string[]) => (args[1] === "test" && !fixed ? { ok: false, output: "1 failing: hello prints nothing" } : { ok: true, output: "" });
+  const exec = async (_cmd: string, args: string[]) => (args.includes("--is-inside-work-tree") ? { ok: true, output: "true" } : args[1] === "test" && !fixed ? { ok: false, output: "1 failing: hello prints nothing" } : { ok: true, output: "" });
   const reviews: string[] = [];
   const verdicts: Record<string, any>[] = [];
-  const repo = mkdtempSync(join(tmpdir(), "buggy-"));
+  const repo = join(gateData, "worktrees", "buggy"); mkdirSync(repo, { recursive: true });
+  mkdirSync(join(repo, ".git"), { recursive: true });
   writeFileSync(join(repo, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }));
-  mkdirSync(join(repo, ".git"));
   const { runner, calls } = fakeRunner({
     orchestrator: async (req) => {
       const brace = req.prompt.indexOf("{");
@@ -281,7 +281,7 @@ test("a deliberately buggy PR gets FAIL from the automated checks, a fix ticket 
     reviewer: (req) => { reviews.push(req.prompt); return '{"verdict": "PASS", "findings": [], "summary": "clean"}'; },
     secretary: () => "**Done:** shipped.",
   });
-  const city = createCity({ runner, exec, dataDir: dir(), ledgerPath: ":memory:", policy });
+  const city = createCity({ runner, exec, dataDir: gateData, ledgerPath: ":memory:", policy });
   const events: CityEvent[] = [];
   city.on((e) => events.push(e));
   const t = city.sendTicket({ to: "orchestrator", goal: "feature" });
@@ -314,7 +314,7 @@ test("a deliberately buggy PR gets FAIL from the automated checks, a fix ticket 
 
 test("a PR that fails max_review_rounds times reaches the owner as a question, with the findings", async () => {
   const { runner } = fakeRunner({ reviewer: () => '{"verdict": "FAIL", "findings": [{"severity": "major", "where": "a.py", "problem": "p", "fix": "f", "owner_hint": "IT"}], "summary": "still broken"}' });
-  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy });
+  const city = createCity({ runner, dataDir: gateData, exec: gateExec, ledgerPath: ":memory:", policy });
   const events: CityEvent[] = [];
   city.on((e) => events.push(e));
   await city.toolsFor("orchestrator").find((x) => x.name === "hire_agent")!.handler({ spec: spec("it-manager", "manager", "orchestrator") });
@@ -346,7 +346,7 @@ test("a PR that fails max_review_rounds times reaches the owner as a question, w
 
 test("a reviewer reply without a verdict counts as FAIL", async () => {
   const { runner } = fakeRunner({ reviewer: () => "I think it is fine." });
-  const city = createCity({ runner, dataDir: dir(), ledgerPath: ":memory:", policy });
+  const city = createCity({ runner, dataDir: gateData, exec: gateExec, ledgerPath: ":memory:", policy });
   const t = city.ledger.getTicket(city.sendTicket({ to: "orchestrator", goal: "x" }).id)!;
   await city.idle();
   const r = await city.toolsFor("orchestrator").find((x) => x.name === "request_review")!.handler({ ticket_id: t.id, artifact: `diff in ${checkout()}` }) as Record<string, any>;
@@ -719,9 +719,12 @@ test("department spellings 'IT', 'it ' and ' IT' are one department in the snaps
   city.close();
 });
 
-// A real-looking checkout for the gate to test; the gate never falls back to a cwd.
+const gateData = mkdtempSync(join(tmpdir(), "city-gate-"));
+const gateExec = async (_c: string, a: string[]) => ({ ok: true, output: a.includes("--is-inside-work-tree") ? "true" : "" });
+// A real-looking checkout for the gate to test, under the city's workspace root; the gate never falls back to a cwd.
 function checkout(): string {
-  const d = mkdtempSync(join(tmpdir(), "gate-co-"));
-  mkdirSync(join(d, ".git"));
-  return d;
+  const d = mkdtempSync(join(gateData, "co-"));
+  const w = join(gateData, "worktrees", d.slice(-8)); mkdirSync(join(w, ".git"), { recursive: true });
+  writeFileSync(join(w, "package.json"), JSON.stringify({ scripts: { test: "true" } }));
+  return w;
 }
