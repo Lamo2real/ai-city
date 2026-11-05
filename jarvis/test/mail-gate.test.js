@@ -143,7 +143,7 @@ test("the CLI cannot approve: no command, --confirm is ignored, and the endpoint
   const withFlag = await m.out([...businessSend(), "--confirm", "mail-anything"]);
   assert.equal(withFlag.json.needs_owner_confirmation, true);
   assert.equal(m.sends().length, 0);
-  const body = { confirm_id: "mail-aaaaaaaaaaaaaaaaaaaaaaaa", draft_hash: "a".repeat(64), summary: {} };
+  const body = { confirm_id: "mail-aaaaaaaaaaaaaaaaaaaaaaaa", draft_hash: "a".repeat(64), summary: { to: ["a@b.se"], subject: "Quote" } };
   assert.equal((await http("POST", "/api/mail/pending", { body })).status, 401);
   assert.equal((await http("POST", "/api/mail/pending", { body, headers: { Authorization: "Bearer wrong" } })).status, 401);
   assert.equal((await http("POST", "/api/mail/redeem", { body })).status, 401);
@@ -516,4 +516,62 @@ test("what is spoken never contains the confirmation phrase; what is written kee
 test("the relay agent's instructions forbid making a confirmation for the owner", () => {
   const text = readFileSync(new URL("../openclaw/workspace/AGENTS.md", import.meta.url), "utf8");
   assert.match(text, /Never send "I confirm", "I confirm the email" or "Cancel the email" to Jarvis unless those exact words came from the owner's own message/);
+});
+
+// ---- strict input shape: malformed input is denied (fails closed) ----
+const goodReg = () => ({ confirm_id: ID, draft_hash: H, summary: { to: ["a@b.se"], cc: [], bcc: [], subject: "Quote", first_lines: ["Hi"], why: ["w"] } });
+const clone = (o) => JSON.parse(JSON.stringify(o));
+const mutate = (fn) => { const b = goodReg(); fn(b); return b; };
+const badRegisters = {
+  "missing confirm_id": mutate((b) => delete b.confirm_id),
+  "missing draft_hash": mutate((b) => delete b.draft_hash),
+  "missing summary": mutate((b) => delete b.summary),
+  "missing summary.to": mutate((b) => delete b.summary.to),
+  "empty summary.to": mutate((b) => { b.summary.to = []; }),
+  "missing subject": mutate((b) => delete b.summary.subject),
+  "extra top-level field": mutate((b) => { b.approved = true; }),
+  "extra summary field": mutate((b) => { b.summary.status = "approved"; }),
+  "numeric confirm_id": mutate((b) => { b.confirm_id = 12345678; }),
+  "array confirm_id": mutate((b) => { b.confirm_id = [ID]; }),
+  "short hash": mutate((b) => { b.draft_hash = "abc"; }),
+  "object hash": mutate((b) => { b.draft_hash = { toString: () => H }; }),
+  "string summary": mutate((b) => { b.summary = "x"; }),
+  "array summary": mutate((b) => { b.summary = []; }),
+  "null summary": mutate((b) => { b.summary = null; }),
+  "to is a string": mutate((b) => { b.summary.to = "a@b.se"; }),
+  "to has a non-string": mutate((b) => { b.summary.to = [5]; }),
+  "empty recipient": mutate((b) => { b.summary.to = [""]; }),
+  "subject is a number": mutate((b) => { b.summary.subject = 7; }),
+  "oversized subject": mutate((b) => { b.summary.subject = "x".repeat(501); }),
+  "oversized recipient": mutate((b) => { b.summary.to = ["x".repeat(321)]; }),
+  "too many recipients": mutate((b) => { b.summary.to = Array(51).fill("a@b.se"); }),
+  "too many first_lines": mutate((b) => { b.summary.first_lines = ["1", "2", "3", "4"]; }),
+  "oversized first line": mutate((b) => { b.summary.first_lines = ["x".repeat(161)]; }),
+  "why is not a list": mutate((b) => { b.summary.why = "w"; }),
+};
+test("register rejects every malformed shape and stores nothing", () => {
+  const { gate } = gateOnly();
+  for (const [name, body] of Object.entries(badRegisters)) assert.equal(gate.register(clone(body)), false, name);
+  for (const nonObject of [null, undefined, "x", 5, true, [], [goodReg()]]) assert.equal(gate.register(nonObject), false, String(nonObject));
+  assert.equal(gate.pending().length, 0);
+});
+test("register accepts a valid shape", () => {
+  const { gate } = gateOnly();
+  assert.equal(gate.register(goodReg()), true);
+  assert.equal(gate.register({ confirm_id: "mail-ccccccccccccccccccccccc1", draft_hash: H, summary: { to: ["a@b.se"], subject: "" } }), true, "optional summary fields may be absent");
+  assert.equal(gate.pending().length, 1);
+});
+test("over HTTP, malformed register/redeem/approval requests are 400 and change nothing", async () => {
+  const bearer = { Authorization: `Bearer ${TOKEN}` };
+  for (const [name, body] of Object.entries({ extra: mutate((b) => { b.x = 1; }), "wrong type": mutate((b) => { b.confirm_id = 1; }), empty: {} })) {
+    assert.equal((await http("POST", "/api/mail/pending", { body, headers: bearer })).status, 400, name);
+  }
+  for (const body of [{}, { confirm_id: ID }, { confirm_id: ID, draft_hash: H, extra: 1 }, { confirm_id: 5, draft_hash: H }, { confirm_id: ID, draft_hash: "short" }, [], null, "x"]) {
+    assert.equal((await http("POST", "/api/mail/redeem", { body, headers: bearer })).status, 400, JSON.stringify(body));
+  }
+  assert.equal((await http("GET", `/api/mail/approval/${ID}`, { headers: bearer })).status, 400, "approval without a hash");
+  assert.equal((await http("GET", `/api/mail/approval/${ID}?hash=nope`, { headers: bearer })).status, 400, "approval with a bad hash");
+  assert.equal((await http("GET", `/api/mail/approval/x?hash=${H}`, { headers: bearer })).status, 400, "approval with a bad id");
+  assert.equal((await http("POST", "/api/mail/redeem", { body: { confirm_id: ID, draft_hash: H }, headers: bearer })).status, 200, "valid redeem passes");
+  assert.equal((await http("GET", `/api/mail/approval/${ID}?hash=${H}`, { headers: bearer })).status, 200, "valid approval passes");
 });

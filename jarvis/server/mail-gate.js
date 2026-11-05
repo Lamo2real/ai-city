@@ -16,6 +16,20 @@ const HASH_RE = /^[0-9a-f]{64}$/;
 // Channels that may approve. The plain-HTTP LAN browser never can, as with merges.
 const CAN_APPROVE = new Set(["hud", "app", "telegram"]);
 
+// ---- strict input shape: fail closed. Any violation means the request is refused. ----
+const isPlain = (v) => v !== null && typeof v === "object" && !Array.isArray(v) && [Object.prototype, null].includes(Object.getPrototypeOf(v));
+const onlyKeys = (o, allowed) => Object.keys(o).every((k) => allowed.includes(k));
+const str = (v, max, { empty = false } = {}) => typeof v === "string" && v.length <= max && (empty || v.length > 0);
+const strList = (v, maxItems, maxLen, { empty = true } = {}) => Array.isArray(v) && v.length <= maxItems && (empty || v.length > 0) && v.every((x) => str(x, maxLen));
+const SUMMARY_KEYS = ["to", "cc", "bcc", "subject", "first_lines", "why"];
+export function validSummary(s) {
+  return isPlain(s) && onlyKeys(s, SUMMARY_KEYS)
+    && strList(s.to, 50, 320, { empty: false }) && str(s.subject, 500, { empty: true })
+    && ["cc", "bcc", "first_lines", "why"].every((k) => s[k] === undefined || strList(s[k], k === "first_lines" ? 3 : k === "why" ? 20 : 50, k === "first_lines" ? 160 : k === "why" ? 300 : 320));
+}
+export const validRegister = (b) => isPlain(b) && onlyKeys(b, ["confirm_id", "draft_hash", "summary"]) && typeof b.confirm_id === "string" && ID_RE.test(b.confirm_id) && typeof b.draft_hash === "string" && HASH_RE.test(b.draft_hash) && validSummary(b.summary);
+export const validRedeem = (b) => isPlain(b) && onlyKeys(b, ["confirm_id", "draft_hash"]) && typeof b.confirm_id === "string" && ID_RE.test(b.confirm_id) && typeof b.draft_hash === "string" && HASH_RE.test(b.draft_hash);
+
 const normalise = (text) => String(text ?? "").toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ").trim();
 export const isEmailConfirm = (text) => normalise(text) === "i confirm the email";
 export const isEmailCancel = (text) => normalise(text) === "cancel the email";
@@ -76,8 +90,9 @@ export function createMailGate({ dataDir, keychain, logger = () => {}, now = Dat
 
   // jarvis-mail asks. Only one email waits for an answer at a time: a newer request replaces the old one,
   // so "I confirm the email" always means the draft the owner was just shown.
-  function register({ confirm_id, draft_hash, summary }) {
-    if (!ID_RE.test(String(confirm_id)) || !HASH_RE.test(String(draft_hash)) || typeof summary !== "object" || summary === null) return false;
+  function register(body) {
+    if (!validRegister(body)) return false;
+    const { confirm_id, draft_hash, summary } = body;
     prune();
     const existing = items.get(confirm_id);
     if (existing && existing.draft_hash === draft_hash && (existing.status === "pending" || existing.status === "approved")) return true;
@@ -181,12 +196,16 @@ export function createMailGate({ dataDir, keychain, logger = () => {}, now = Dat
       }
       if (req.method === "POST" && pathname === "/api/mail/redeem") {
         if (!(await guarded())) return json(res, 401, { error: "not authorised" });
-        const { confirm_id, draft_hash } = await readJson(req);
-        return json(res, 200, redeem(confirm_id, draft_hash));
+        const body = await readJson(req);
+        if (!validRedeem(body)) return json(res, 400, { error: "bad request" });
+        return json(res, 200, redeem(body.confirm_id, body.draft_hash));
       }
       if (req.method === "GET" && pathname.startsWith("/api/mail/approval/")) {
         if (!(await guarded())) return json(res, 401, { error: "not authorised" });
-        return json(res, 200, approval(decodeURIComponent(pathname.slice("/api/mail/approval/".length)), searchParams.get("hash")));
+        const id = decodeURIComponent(pathname.slice("/api/mail/approval/".length));
+        const hash = searchParams.get("hash");
+        if (!ID_RE.test(id) || !HASH_RE.test(String(hash))) return json(res, 400, { error: "bad request" });
+        return json(res, 200, approval(id, hash));
       }
     } catch {
       return json(res, 400, { error: "bad request" });
