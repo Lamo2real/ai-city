@@ -25,7 +25,7 @@ test("a failing check carries its output; the summary names each result", async 
   const dir = repo({ "package.json": JSON.stringify({ scripts: { test: "t", typecheck: "c" } }) });
   const ran: string[] = [];
   const checks = await runChecks(dir, async (cmd, args, cwd) => { ran.push(`${cmd} ${args.join(" ")} @${cwd === dir}`); return args[1] === "test" ? { ok: false, output: "1 failing" } : { ok: true, output: "" }; });
-  assert.deepEqual(ran, ["npm run test --silent @true", "npm run typecheck --silent @true"]);
+  assert.deepEqual(ran, ["npm install --no-audit --no-fund @true", "npm run test --silent @true", "npm run typecheck --silent @true"]);
   assert.deepEqual(checks, [{ name: "test", passed: false, output: "1 failing" }, { name: "typecheck", passed: true, output: "" }]);
   assert.equal(checksText(checks), "- test: FAIL\n1 failing\n- typecheck: PASS");
   assert.match(checksText([]), /none: the repo defines no/);
@@ -38,4 +38,22 @@ test("the real exec runs a command in the repo and reports failure without throw
   const r = await realExec("sh", ["-c", "echo nope; exit 3"], dir);
   assert.equal(r.ok, false);
   assert.equal(r.output, "nope");
+});
+
+test("the gate tests the checkout under review, never a stale worktree", async () => {
+  const { reviewDir } = await import("../src/checks.ts");
+  const live = new Set(["/w/sonnet-clamp-wt/.git", "/w/spendcap-r1/.git", "/w/own/.git"]);
+  const ex = (p: string) => live.has(p);
+  assert.equal(reviewDir(["/w/spendcap-r1"], "PR #47 head 676127f, worktree /w/sonnet-clamp-wt.", ex), "/w/sonnet-clamp-wt");
+  assert.equal(reviewDir(["/w/own"], "no path here", ex), "/w/own");
+  assert.equal(reviewDir([], "no path here", ex), undefined);
+});
+
+test("npm ci runs before the checks; a failed install fails the gate without running tests", async () => {
+  const dir = repo({ "package.json": JSON.stringify({ scripts: { test: "t" } }), "package-lock.json": "{}" });
+  const ran: string[] = [];
+  await runChecks(dir, async (c, a) => { ran.push(`${c} ${a[0]}`); return { ok: true, output: "" }; });
+  assert.deepEqual(ran, ["npm ci", "npm run"]);
+  const bad = await runChecks(dir, async () => ({ ok: false, output: "boom" }));
+  assert.deepEqual(bad.map((c) => c.name), ["install"]);
 });

@@ -3,7 +3,7 @@
 // scope directory; their results go to the reviewer and into the ticket.
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 export interface Check {
   name: string;
@@ -35,8 +35,24 @@ export function detectChecks(cwd: string): Array<[string, string, string[]]> {
   return out;
 }
 
+// The checkout under review. Order: an absolute directory named in the artifact text (the PR head's
+// worktree), then the ticket's own scope. Never another ticket's scope: that is how a stale worktree got tested.
+export function reviewDir(scope: string[] | undefined, artifact: string, exists: (p: string) => boolean = existsSync): string | undefined {
+  const named = (artifact.match(/\/[\w.@~+-]+(?:\/[\w.@~+-]+)+/g) ?? []).map((p) => p.replace(/[.,;:)]+$/, ""));
+  const candidates = [...named, ...(scope ?? [])].filter((p) => isAbsolute(p) && exists(join(p, ".git")));
+  return candidates.find((p) => named.includes(p)) ?? candidates[0] ?? scope?.find((s) => isAbsolute(s) && exists(s));
+}
+
+// Dependencies first, so a missing node_modules is never mistaken for a failing test.
+export async function installDeps(cwd: string, exec: Exec): Promise<Check | null> {
+  if (!existsSync(join(cwd, "package.json"))) return null;
+  const r = await exec("npm", [existsSync(join(cwd, "package-lock.json")) ? "ci" : "install", "--no-audit", "--no-fund"], cwd);
+  return { name: "install", passed: r.ok, output: r.output };
+}
+
 export async function runChecks(cwd: string, exec: Exec = realExec): Promise<Check[]> {
   const checks: Check[] = [];
+  if (detectChecks(cwd).some(([, c]) => c === "npm")) { const i = await installDeps(cwd, exec); if (i) { if (!i.passed) return [i]; } }
   for (const [name, cmd, args] of detectChecks(cwd)) {
     const r = await exec(cmd, args, cwd);
     checks.push({ name, passed: r.ok, output: r.output });

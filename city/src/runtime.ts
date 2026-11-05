@@ -16,7 +16,7 @@ import { lessonFor } from "./measure.ts";
 import { estimateUsd } from "./openclaw.ts";
 import { checkWorkflow, fill, loadWorkflows, WORKFLOWS_DIR, type Workflow } from "./workflows.ts";
 import { branchState, allocateWorkspace, releaseWorkspace } from "./workspaces.ts";
-import { checksText, runChecks, type Check, type Exec } from "./checks.ts";
+import { checksText, reviewDir, runChecks, type Check, type Exec } from "./checks.ts";
 import { now, openLedger, type AgentRow, type Question, type QuestionRow, type Ticket } from "./ledger.ts";
 import { audit, auditPath, canonDepartment, contextWindow, decide, departmentCap, departmentKey, loadPolicy, sortedJson, type Policy } from "./policy.ts";
 import { validate } from "./schemas.ts";
@@ -1126,8 +1126,8 @@ export function createCity(opts: CityOptions) {
     const before = t.status;
     setStatus(ticketId, "in_review", { review_rounds: round });
     emit({ type: "review.started", ticket_id: ticketId, round, by });
-    // The repo under review: the ticket's own scope, else the latest sub-ticket's (the Orchestrator's ticket from Jarvis rarely names one).
-    const repo = scopeDir(t) ?? [...ledger.ticketsFrom(t.to)].reverse().map(scopeDir).find(Boolean);
+    // The repo under review: a checkout named in the artifact, else the ticket's own scope. Never another ticket's scope (stale worktrees).
+    const repo = reviewDir(t.scope, artifact);
     const checks = await runChecks(repo ?? cwdFor(t), opts.exec);
     let verdict: Verdict;
     if (checks.some((c) => !c.passed)) {

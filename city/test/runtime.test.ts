@@ -1,6 +1,6 @@
 // The city with a scripted runner in place of the Agent SDK: no network, no credentials.
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -257,6 +257,7 @@ test("a deliberately buggy PR gets FAIL from the automated checks, a fix ticket 
   const verdicts: Record<string, any>[] = [];
   const repo = mkdtempSync(join(tmpdir(), "buggy-"));
   writeFileSync(join(repo, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }));
+  mkdirSync(join(repo, ".git"));
   const { runner, calls } = fakeRunner({
     orchestrator: async (req) => {
       const brace = req.prompt.indexOf("{");
@@ -267,7 +268,7 @@ test("a deliberately buggy PR gets FAIL from the automated checks, a fix ticket 
       } else if (req.prompt.startsWith("[report from it-manager")) {
         const id = /on ticket (\S+)\]/.exec(req.prompt)![1];
         const parent = city.ledger.getTicket(id)!.parent_id!;
-        const v = await use(req, "request_review", { ticket_id: parent, artifact: `diff v${verdicts.length + 1}` }) as Record<string, any>;
+        const v = await use(req, "request_review", { ticket_id: parent, artifact: `diff v${verdicts.length + 1} in ${repo}` }) as Record<string, any>;
         verdicts.push(v);
         if (v.verdict === "PASS") await use(req, "report", { ticket_id: parent, status: "done", summary: "shipped", artifacts: ["PR #1"] });
       }
