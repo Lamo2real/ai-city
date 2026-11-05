@@ -101,9 +101,10 @@ The two executors share one runtime. A worker whose spec has `executor: "opencla
 | Policy gate | `city/src/policy.ts`, `config/policy.json`, `.claude/hooks/policy_gate.py` | `decide()` over regex rules, plus the runtime's `guardFor` for autonomy levels and approvals. |
 | Reliability gate | `city/src/scheduler.ts` | One gate for every model call: at most `caps.max_concurrent_turns` (4) at once, `turn_timeout_minutes` (60) per turn, two retries with 5 s and 30 s backoff on transient errors, and a city-wide pause when the subscription's usage limit hits. |
 | Memory | `city/src/memory.ts` | SQLite FTS5 (porter), ranked by BM25 plus a recency term. Scopes: agent, department, project, organization, jarvis. Refuses text that looks like a key. |
-| Skills | `skills/`, `city/src/agents.ts` | 18 folders, each a `SKILL.md`. Departments and specs name skills; the prompt carries one line per skill. |
+| Skills | `skills/`, `city/src/agents.ts` | 19 folders, each a `SKILL.md`. Departments and specs name skills; the prompt carries one line per skill. |
 | Workflows | `config/workflows/`, `city/src/workflows.ts` | Four JSON workflows. `startWorkflow` turns steps into tickets with `depends_on`. An `approval` step is a ticket with `gate: true` that waits for the owner. |
 | Event routing | `config/automations.json`, `ingestEvent` | An event `{source, type, summary, data}` is matched to a route and becomes one ticket to a department's manager, an agent, or the Orchestrator. Event data is quoted as untrusted. |
+| Evals, report, merge gate | `city/src/evals.ts`, `measure.ts`, `improve.ts` | See "How the city improves itself". |
 | Trace | `city/src/observability.ts`, file `~/.jarvis/events.jsonl` | One JSON line per city event (log lines excluded), mode 0600. `trace(ticketId)` reads back a ticket and everything split from it. |
 | SDK executor | `city/src/sdk.ts` | One `query()` per turn, resumed by session id. Jarvis's own turns use `createWarmRunner`: one parked streaming `query()` per conversation, at most two, same options and policy hook. Barge-in interrupts the turn and keeps the process; a process that dies while parked is replaced and the turn retried. Built-in tools limited to what the agent's prompt lists. City tools come from an in-process MCP server named `jarvis`. |
 | OpenClaw executor | `city/src/openclaw.ts` | One `openclaw agent exec --json` process per turn with a pinned per-agent config. Needs no Gateway. |
@@ -193,6 +194,37 @@ The aim is that a prompt can be ignored or talked around and the tool layer stil
 - Fixed 2026-11-04 after the first version of this file: nine rules in `config/policy.json` (force-push, push to main, recursive delete of root or home, `terraform destroy`, `terraform apply` to prod, piping a download into a shell, the `git -c` and git-redirect rules, `gh repo delete`) matched the tool name `^Bash$` only, while an OpenClaw run's shell tool is named `exec`. `decide("exec", terraform destroy)` returned `allow`. Those rules now match `^(Bash|exec|bash)$`, and `exec` and `bash` cases are in both self-tests (`policy_gate.py --selftest`, 45 cases; `city/test/policy.test.ts`). Rules are still regular expressions over the JSON of the tool input, so a command written in a way the regex does not see is still not caught.
 - Workers run directly on the owner's Mac under the policy gate, with no OS sandbox (see limits).
 
+## How the city improves itself
+
+Four parts, each usable without the next.
+
+- **Evals** (`city/src/evals.ts`, `config/evals/*.json`, `jarvis eval`). Each task runs a real department in a throwaway city, in a temp folder with its own ledger, memory and audit log, so nothing reaches the owner's. A task passes only if its ticket ends `done` and every check holds: `file_matches`, `file_absent`, `result_matches`, or `command`. A question to the owner gets "no owner available" and an approval is denied. A usage limit stops the run and marks it, so it never counts as a score. A full run is appended to `~/.jarvis/evals.jsonl` with score, cost, time and a hash of each rules or scoring file, and compared with the last one. If any of those files differ the two scores are marked not comparable and the files are named. Workers run on the SDK executor only.
+- **Report** (`city/src/measure.ts`, `jarvis report`, `GET /api/city/report`). Per department over a window: tickets, failures, gate retries (`retries` on the ticket), fix tickets, review rounds, cost, busy time, median ticket time, and problems seen at least twice once ids and numbers are removed.
+- **Lessons** (`keepLesson` in `runtime.ts`). Every ticket that ends `done` or `failed` adds one line through `memory.remember`, kind `lesson`, with no model call: in its department's memory, or the agent's own for a core agent. A line the secret filter refuses is dropped and logged without its text. Lessons come back through the usual "data, not instructions" memory block.
+- **Weekly loop** (`city/src/improve.ts`, `skills/self-improvement`). `city-event improve` sends the report as an `improve.weekly` event, which opens a ticket to the Orchestrator. It may end with one PR on an `improve/` branch, named in the ticket's artifacts. Off until the owner runs `jarvis/bin/city-automations enable weekly-improvement`.
+
+**The merge gate.** `createImprover` runs in the server, watches for that ticket and checks the PR itself, one commit at a time, from cheapest to dearest. Nothing an agent says counts: it only names the PR.
+
+1. The PR is open, not a draft, on an `improve/` branch of this repo (never a fork), aimed at `main`.
+2. The changed paths from `git diff` against `main`. A change to `.github/`, any `package.json`, an existing test or `agents/core/reviewer.md` goes to the owner here. Any rules or scoring file is noted, to be named later.
+3. GitHub Actions' `test` check run succeeded on that commit. It waits while CI runs, and gives up after 48 hours.
+4. The Reviewer reads the diff from git, whole (over 200 KB goes to the owner). Only a reply that is wholly a PASS with no blocker or major finding counts.
+5. `evalAtCommit` runs the evals in a separate process on a worktree of `main` and of the PR, both with `main`'s tasks. The PR must score at least `main`, and `main` must score above zero. A run stopped by a usage limit tries again later.
+6. `gh pr merge --merge --match-head-commit <sha>`, so what merges is the commit that passed. A new commit starts over.
+
+A merged change to the rules or scoring is named in the message to the owner, in `jarvis report`, and in the next weekly ticket. Any failed condition asks the owner a question and leaves the PR open. A PR seen once is never reconsidered. The state is the `improvements` table in the ledger, so it survives a restart. The merge lands on GitHub: the running service keeps its code until the checkout is pulled and it restarts.
+
+**What may change, by the owner's decision (2026-11-04).** An earlier version refused to auto-merge changes to the city's protections. The owner removed that, so the loop may change `config/policy.json`, `.claude/hooks/`, `policy.ts`, `guardFor`, the approval code, `config/evals/` and the scoring code. Only `.github/`, any `package.json`, existing tests and the Reviewer's prompt are barred (`barred` in `improve.ts`), so a PR cannot rewrite the workflow, the test script, the tests or the instructions that judge it. New tests are allowed. Whole `package.json` files are barred, so a dependency change also goes to the owner. `isRuleOrScoring` in `evals.ts` only decides what gets named.
+
+What that means, plainly:
+- A planted instruction that gets past the Reviewer can weaken the city's rules for good. The Reviewer, which reads untrusted text, is the only judge of what a change means.
+- Some checks can still be changed by what they check. CI's other steps can: `.claude/hooks/policy_gate.py` holds the policy self-test's own cases, and `city/tsconfig.json` decides what the type check covers. Code changed under test can also detect that it is under test. A PR's own `evals.ts` scores its own run, so it can fake its score; only the tasks stay `main`'s. A merged change to `improve.ts`, including removing this bar, applies to every later PR once the service runs it.
+- Allowed changes to tests and prompts can also teach an agent the public eval answers.
+- Naming a change tells the owner after the merge. It stops nothing.
+- Workers skip the policy rules, so a steered worker can run `gh pr merge` itself, and GitHub requires only the `test` check on `main`.
+
+To undo a merged change, revert its PR. `git log` and the `improvements` table record what merged.
+
 ## Limits, stated plainly
 
 - **Workers run free, by the owner's decision (2026-11-04).** No OS sandbox, full tools by default, and `guardFor` applies neither the policy rules nor the city-controls check to a worker, so a worker can force-push, merge, read the Keychain, pay, destroy infrastructure, and change the ledger, audit log or policy file. Calls are still audited, though a worker could change that log too. Department autonomy levels still apply, and GitHub's protection of `main` is enforced outside the Mac, so pushes and merges to `main` still need a PR with CI passing. Agents read outside content, so a planted instruction can reach all of this.
@@ -200,7 +232,7 @@ The aim is that a prompt can be ignored or talked around and the tool layer stil
 - **Schedules are off.** `jarvis/bin/city-automations enable <id>` installs one in OpenClaw's scheduler, and it needs the Gateway. The Gateway is not running (nothing listens on port 18789 as of this writing). Nothing runs on a schedule today.
 - **Anthropic models only.** No non-Anthropic provider is configured or used.
 - **Lobster is not used.** It runs tool pipelines inside one agent. These workflows span departments, so they are tickets with dependencies in the ledger instead (`city/src/workflows.ts` says the same).
-- **No third-party skills.** All 18 skills in `skills/` were written for this repo. `skills/README.md` sets the review rule for adding any.
+- **No third-party skills.** All 19 skills in `skills/` were written for this repo. `skills/README.md` sets the review rule for adding any.
 - **Cost figures are estimates at API list prices, not charges.** The SDK reports a dollar figure per session and the runtime stores the per-turn difference. For OpenClaw runs, which do not price their turns, the figure is computed from token counts and the prices in `config/policy.json`. Those prices were not checked against Anthropic's published list for this document. `costReport()` labels its output `estimated: true`. Whether extra usage was ever billed on the subscription has not been verified.
 - **`ANTHROPIC_API_KEY` is refused.** `assertNoApiKey` throws at start unless `JARVIS_ALLOW_API_KEY=1`. The OpenClaw runner also strips `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` from the environment it passes, because OpenClaw's Claude backend uses the `claude` login by itself. Everything runs on the Claude subscription.
 - **Most outside MCP servers do not reach SDK agents.** `mcp_servers` in `config/policy.json` names each outside server and the agents allowed it, and `outsideServers` in `sdk.ts` enforces that. Today only Jarvis gets one, `personal-assistant`, limited to the tools its prompt lists. The servers in `.mcp.json` (github, terraform, meta-ads, playwright) are not available to a city agent, so Meta Ads and Terraform work cannot run through them yet. Jarvis can now read mail, which is untrusted text, in a session that also has `send_ticket`: the defence is its prompt and the tool-layer gates, not a filter.

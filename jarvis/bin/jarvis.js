@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 // jarvis "<prompt>": talk to Jarvis from the terminal. Same Jarvis, same city as the HUD.
+// jarvis eval: score the city on known tasks. jarvis report: failures, retries, reviews, cost and time per department.
 // Streams the reply, then stays for questions and results while the city works; type answers on stdin.
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { existsSync } from "node:fs";
-import { OPENCLAW_BIN, assertNoApiKey, createCity, createOpenClawRunner, createRunner, loadPolicy, sdkEnv } from "city";
+import { OPENCLAW_BIN, assertNoApiKey, createCity, createOpenClawRunner, createRunner, evalCli, loadPolicy, reportCli, sdkEnv } from "city";
 import { createCityChat, withJarvisBin } from "../server/city-chat.js";
+
+const [command, ...flags] = process.argv.slice(2);
+if (command === "eval" && (!flags.length || flags[0].startsWith("--"))) process.exit(await evalCli(flags));
+if (command === "report" && (!flags.length || flags[0].startsWith("--"))) process.exit(reportCli(flags));
 
 const prompt = process.argv.slice(2).join(" ").trim();
 if (!prompt) {

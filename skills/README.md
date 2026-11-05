@@ -6,7 +6,7 @@ One folder per skill, each with a `SKILL.md`: frontmatter (`name`, `description`
 
 **Versioning.** Skills live in git and change through pull requests. Raise `version` when a change alters behaviour.
 
-**Adding one.** Copy the shape of an existing skill. Agents can propose a skill in their report, but cannot write here: a skill is an instruction every later agent trusts, so a person reviews it.
+**Adding one.** Copy the shape of an existing skill. Agents can propose a skill in their report. A skill is an instruction every later agent trusts, so a person reviews it, with one exception by the owner's decision (2026-11-04): the weekly self-improvement loop may change skills through a PR that passes its merge gate, and the Fable Reviewer stands in for the person. See `skills/self-improvement/SKILL.md`.
 
 **Third-party skills.** None are installed. Before adding one, read every file it contains, including scripts, and check what it runs, what it reaches on the network, and whether it asks for credentials or tells the agent to ignore its rules. Copy the reviewed text here at a pinned version. Do not install from a registry at runtime.
 

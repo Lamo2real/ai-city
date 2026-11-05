@@ -2,7 +2,7 @@
 // Tells the running city that something happened. Schedules call this, so checking costs no model call:
 // only an event that actually happened reaches a manager, and the same event twice is one ticket.
 //   city-event emit <source> <type> <summary> [key]
-//   city-event briefing | watch-github | watch-failures
+//   city-event briefing | watch-github | watch-failures | improve
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -28,6 +28,11 @@ const commands = {
   async briefing() {
     const [health, costs] = await Promise.all([call("/api/city/health"), call("/api/city/costs")]);
     await send({ source: "schedule", type: "briefing.daily", summary: `Daily briefing for ${today}`, data: { health, costs: { today: costs.today, estimated: true } }, idempotency_key: `briefing-${today}` });
+  },
+  // Repeated problems first: an event keeps only the first 2000 characters of its data.
+  async improve() {
+    const { repeated, rule_changes, departments } = await call("/api/city/report?days=7");
+    await send({ source: "schedule", type: "improve.weekly", summary: `Weekly self-improvement, week ending ${today}`, data: { repeated, rule_changes, departments, estimated: true }, idempotency_key: `improve-${today}` });
   },
   async "watch-github"() {
     for (const repo of config.github_repos ?? []) {

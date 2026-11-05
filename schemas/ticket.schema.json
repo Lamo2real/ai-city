@@ -94,6 +94,11 @@
       "minimum": 0,
       "default": 0
     },
+    "retries": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Turns the reliability gate ran again after a transient error"
+    },
     "result": {
       "type": "object",
       "properties": {

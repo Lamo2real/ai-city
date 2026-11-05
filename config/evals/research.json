@@ -1,0 +1,19 @@
+{
+  "department": "Research",
+  "mission": "Finds answers in sources and says where each came from.",
+  "tasks": [
+    {
+      "id": "answer-from-sources",
+      "goal": "The notes in {{workdir}}/sources are the only sources for this question: in which city is the Halden Institute's archive kept today? Write the answer to {{workdir}}/answer.md, and name the source file it came from. Use no other source.",
+      "setup": {
+        "sources/a.md": "# Halden Institute, 1990\nThe Institute was founded in Bergen, and its archive was kept there.\n",
+        "sources/b.md": "# Halden Institute, 2021\nThe archive moved from Bergen to Uppsala in 2019 and is still kept there.\n"
+      },
+      "acceptance_criteria": ["answer.md names the city and the source file"],
+      "pass": [
+        { "type": "file_matches", "path": "answer.md", "pattern": "Uppsala" },
+        { "type": "file_matches", "path": "answer.md", "pattern": "b\\.md" }
+      ]
+    }
+  ]
+}

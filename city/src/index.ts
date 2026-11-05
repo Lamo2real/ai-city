@@ -12,3 +12,6 @@ export { OPENCLAW_BIN, createOpenClawRunner } from "./openclaw.ts";
 export { createTrace, health, loadIntegrations, probeIntegrations, workforce } from "./observability.ts";
 export type { IntegrationDef, IntegrationState } from "./observability.ts";
 export type { CityInboundEvent, EventRoute } from "./runtime.ts";
+export { evalCli } from "./evals.ts";
+export { departmentReport, reportCli } from "./measure.ts";
+export { createImprover } from "./improve.ts";

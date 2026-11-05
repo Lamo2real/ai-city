@@ -1,0 +1,23 @@
+{
+  "department": "Engineering",
+  "mission": "Writes and fixes software.",
+  "tasks": [
+    {
+      "id": "fix-off-by-one",
+      "goal": "The function in {{workdir}}/range.cjs should return the numbers from 1 to n, but it is wrong. Fix it. Change only that file.",
+      "setup": { "range.cjs": "module.exports = (n) => { const out = []; for (let i = 1; i < n; i++) out.push(i); return out; };\n" },
+      "acceptance_criteria": ["range(3) returns [1, 2, 3]"],
+      "pass": [
+        { "type": "command", "argv": ["node", "-e", "const a=require('assert');const r=require('./range.cjs');a.deepStrictEqual(r(3),[1,2,3]);a.deepStrictEqual(r(0),[])"] }
+      ]
+    },
+    {
+      "id": "write-slugify",
+      "goal": "Create {{workdir}}/slug.cjs exporting a function slugify(text): lowercase, every run of characters other than a-z and 0-9 becomes one hyphen, no hyphen at either end. Export it as module.exports = slugify.",
+      "acceptance_criteria": ["slugify('  Hello, Big World! ') returns 'hello-big-world'"],
+      "pass": [
+        { "type": "command", "argv": ["node", "-e", "const a=require('assert');const s=require('./slug.cjs');a.strictEqual(s('  Hello, Big World! '),'hello-big-world');a.strictEqual(s('a__b'),'a-b')"] }
+      ]
+    }
+  ]
+}
