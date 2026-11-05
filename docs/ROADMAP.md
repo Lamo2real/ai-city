@@ -60,6 +60,20 @@ Run live on 2026-11-04 on scratch data (`JARVIS_HOME` in a temp folder, `JARVIS_
 | 11 | Failure recovery | Mostly passed | 2026-11-04 | Worker killed with SIGKILL: ticket failed cleanly and the manager was told. Server killed with SIGKILL: ledger integrity ok, tickets resumed and finished, and that run's worker ran again (execution is at least once). Provider limit: see What comes next, item 6; pause is unit-tested only. |
 | 12 | Real-time city | Passed | 2026-11-04 | Live in the HUD: workers appeared, the Workforce panel and Activity feed followed each state through release. All 34 tickets and 10 workers in the event log matched the ledger at the time of that check. Real phone listener not exercised. |
 
+## Build plan scenarios
+
+Run live on 2026-11-05 on scratch data (`JARVIS_MODEL_CAP=claude-sonnet-5-5`), with a driver answering agents' questions automatically, so the choices were not a person's.
+
+| Scenario | Result | Notes |
+|---|---|---|
+| Travel team | Passed | Temporary manager, flights worker and hotels worker hired, then all retired. It reported that no March 2027 prices are public and no option clearly fit the budget, rather than inventing one. |
+| Video | Partly | Real 30 s 1080x1920 clip and thumbnail. The source had no speech, so the captions are placeholders. Upload was skipped: no YouTube sign-in. Real speech captions and "ask before going public" are not tested. |
+| iOS app | Partly | Built a SwiftUI habit tracker on a branch through App Manager, iOS Developer and QA Tester. 9 of 9 tests pass, rerun independently on the simulator. The prompt named native Swift, so the platform question did not fire, and `@ios-dev` with the manager cc'd was not exercised here. |
+| Live evals | Passed | 5 of 5 after the hang fix (PR #48). |
+| Personal tasks | Not run | Writing to the real calendar needs the owner watching. |
+| Cloud, Meta Ads | Not run | Need Docker and the owner's sign-in. |
+| Voice | Not run on real audio | Needs the owner with a microphone and speakers. |
+
 ## Limits that do not change by building more
 
 - Docker is absent. Workers have no OS sandbox and skip the policy rules, by the owner's decision: a steered worker can do anything the owner's account can, including using credentials, spending money and changing the city's own files. See `docs/ARCHITECTURE.md`.
