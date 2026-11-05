@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { AgentRow } from "../src/ledger.ts";
 import { loadPolicy } from "../src/policy.ts";
 import { createCity, type CityEvent } from "../src/runtime.ts";
 import type { Runner, TurnRequest } from "../src/sdk.ts";
@@ -699,5 +700,20 @@ test("revive clamps a stored Opus model for a worker, and keeps it for an orches
   await city.idle();
   assert.equal(city.ledger.getAgent("wrk-r")?.model, "claude-sonnet-5-5");
   assert.equal(city.ledger.getAgent("mgr-r")?.model, "claude-opus-5-5");
+  city.close();
+});
+
+test("department spellings 'IT', 'it ' and ' IT' are one department in the snapshot and in spendToday", () => {
+  const city = createCity({ runner: fakeRunner({}).runner, dataDir: dir(), ledgerPath: ":memory:", policy });
+  const base: Omit<AgentRow, "id" | "role" | "department"> = { kind: "worker", parent: "orchestrator", model: "claude-sonnet-5-5", effort: "medium", tools: [], lifecycle: "persistent", state: "active", session_id: null, prompt_path: "", created_at: "2026-01-01T00:00:00.000Z", last_active_at: "2026-01-01T00:00:00.000Z", total_cost_usd: 0 };
+  ["IT", "it ", " IT"].forEach((department, i) => {
+    city.ledger.putAgent({ ...base, id: `dk-${i}`, role: "r", department });
+    city.ledger.addCost(`dk-${i}`, null, 1, 0);
+  });
+  const s = city.snapshot();
+  assert.deepEqual(Object.keys(s.department_agents), ["IT"]);
+  assert.equal(s.department_agents.IT.active, 3);
+  assert.equal(city.ledger.spendToday("it"), 3);
+  assert.equal(s.spend.IT, 3);
   city.close();
 });

@@ -2,9 +2,9 @@
 // page content is labelled as data, and risky actions are audited.
 import { SafariError, MESSAGES } from "./errors.js";
 import { assertPublicUrl, assertPublicPage } from "./hosts.js";
-import { pageJs, isPaymentPage, writesSensitiveField, readsCookies, guardBypass, wrapContent } from "./page.js";
+import { pageJs, isPaymentPage, writesSensitiveField, readsCookies, readsStorage, guardBypass, wrapContent } from "./page.js";
 
-const REFUSED = new Set(["PASSWORD_FIELD", "COOKIE_READ", "SPEND_NEEDS_APPROVAL", "INTERNAL_HOST"]);
+const REFUSED = new Set(["PASSWORD_FIELD", "COOKIE_READ", "STORAGE_READ", "SPEND_NEEDS_APPROVAL", "INTERNAL_HOST"]);
 const PAGE_MESSAGES = {
   ...MESSAGES,
   BAD_SELECTOR: "That isn't a valid CSS selector.",
@@ -105,6 +105,7 @@ export function createSafari({ mac, audit, spend, lookup, settle = 300, sleep = 
       audited({ action: "js", selector: null }, async () => {
         if (writesSensitiveField(code)) throw new SafariError("PASSWORD_FIELD", MESSAGES.PASSWORD_FIELD);
         if (readsCookies(code)) throw new SafariError("COOKIE_READ", MESSAGES.COOKIE_READ);
+        if (readsStorage(code)) throw new SafariError("STORAGE_READ", MESSAGES.STORAGE_READ);
         const bypass = guardBypass(code);
         if (bypass) throw new SafariError("PASSWORD_FIELD", `${MESSAGES.PASSWORD_FIELD} (I won't run code that touches ${bypass}.)`);
         const g = await gate(tab, spendTicket, "js", undefined, amount);

@@ -634,7 +634,7 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
   canvas.addEventListener("pointerleave", () => { if (hover) { hover = null; wake(); } });
   canvas.addEventListener("dblclick", (ev) => { const dept = pickBuilding(ev); const b = dept && [world.hq, ...world.buildings].find((x) => x.dept === dept); if (b) zoomToBuilding(b); });
   root.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape") { closePanel(); return; }
+    if (ev.key === "Escape") { if (open) { closePanel(); ev.preventDefault(); } /* otherwise the page takes it: back Home */ return; }
     if (ev.target.closest?.("input")) return;
     if (ev.key === "+" || ev.key === "=") zoomStep(1); else if (ev.key === "-") zoomStep(-1);
   });
@@ -1185,7 +1185,7 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
       const off = state.departments[name]?.state === "archived";
       const b = el("button", off ? "dept off" : "dept", off ? `${name} (archived)` : name);
       b.style.setProperty("--swatch", name === "HQ" ? "#3f5f92" : ROOFS[(i - 1) % ROOFS.length][0]);
-      b.dataset.building = name;
+      b.dataset.building = name; b.title = name;
       if (name !== "HQ") b.dataset.count = String(atWork(name));
       b.onclick = () => openDept(name);
       list.append(b);
