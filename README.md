@@ -119,7 +119,7 @@ npm test
 - `jarvis/server/merge.js`: merges to main. Only the owner's button or the exact words "I confirm" run one.
 - `jarvis/server/listen.js`: speech to text with local Whisper, and the "Jarvis" wake word.
 - `jarvis/server/voice.js`, `jarvis/bin/jarvis-say`: Kokoro for English and Piper for Swedish, tuned in `jarvis/voice.json`. macOS `say` is the fallback.
-- `jarvis/app/`, `jarvis/scripts/`: LaunchAgent template, `~/Applications/Jarvis.app`, install scripts.
+- `jarvis/app/`, `jarvis/scripts/`: LaunchAgent template, the native Mac app `~/Applications/Jarvis.app` (`Jarvis.swift`, built by `scripts/build-app.sh`), install scripts.
 
 Logs: `~/Library/Logs/jarvis.log`. Conversation ids: `~/Library/Application Support/Jarvis/sessions.json`.
 

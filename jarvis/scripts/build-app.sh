@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Builds ~/Applications/Jarvis.app: opens the HUD in its own window, with the Jarvis name and icon.
+# Builds ~/Applications/Jarvis.app: the native Mac app, one window on the HUD, with the Jarvis name and icon.
 set -euo pipefail
 ROOT="${0:A:h:h}"
 APP="$HOME/Applications/Jarvis.app"
@@ -18,7 +18,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/Jarvis.icns"
 cp "$ROOT/app/Info.plist" "$APP/Contents/Info.plist"
-cp "$ROOT/app/launcher.sh" "$APP/Contents/MacOS/Jarvis"
-chmod +x "$APP/Contents/MacOS/Jarvis"
+swiftc -O -swift-version 5 -parse-as-library "$ROOT/app/Jarvis.swift" -o "$APP/Contents/MacOS/Jarvis"
+codesign --force --sign - "$APP" # ad hoc: built here, run here. macOS needs a signature to remember the microphone answer.
 touch "$APP"
 echo "$APP"
