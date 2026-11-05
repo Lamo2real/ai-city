@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1c1c1e"/><stop offset="1" stop-color="#000"/></linearGradient></defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <rect x="101" y="101" width="822" height="822" rx="184" fill="none" stroke="#fff" stroke-opacity=".14" stroke-width="2"/>
+  <g transform="translate(141 297) scale(1.16) translate(-60 -170)" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Heavy upper lid, sweeping from the inner corner to the outer point -->
+  <path fill="#fff" stroke="none" d="M90 208C88 200 95 197 106 199C215 215 330 232 430 255C530 278 610 355 676 494C678 499 675 502 670 501C625 425 575 372 520 338C455 298 385 282 300 267C240 256 180 243 128 233C135 275 152 325 195 372C245 425 300 455 372 472C340 472 305 470 278 458C215 430 150 380 118 320C102 285 92 245 90 208Z"/>
+  <!-- Pupil, half hidden under the lid -->
+  <path fill="#fff" stroke="none" d="M343 283C345 330 372 362 412 360C440 358 462 342 472 318C430 298 385 288 343 283Z"/>
+  <!-- Iris rings -->
+  <path stroke-width="9" d="M307 276C305 345 345 395 395 403C440 410 478 382 494 327"/>
+  <path stroke-width="9" d="M254 262C248 310 262 368 296 406"/>
+  <path stroke-width="9" d="M312 420C360 455 430 465 488 438C520 422 538 392 546 354"/>
+  <path stroke-width="9" d="M197 253C192 310 205 365 236 402"/>
+  <path stroke-width="9" d="M148 240C146 275 150 300 162 330"/>
+  <path stroke-width="9" d="M612 386C595 425 560 455 518 474"/>
+  <!-- Fine lines at the outer corner and under the eye -->
+  <path stroke-width="6" d="M130 240C150 248 170 250 195 247M150 245C145 240 138 236 128 236M620 410L606 420"/>
+  <path stroke-width="7" d="M622 428C595 450 560 468 524 480M634 446C610 462 578 476 548 484M643 462C625 473 600 482 578 488M636 480L650 490"/>
+  <path stroke-width="8" d="M304 474C400 490 520 494 624 491"/>
+  <path stroke-width="8" d="M380 493C470 508 580 510 668 498"/>
+</g>
+</svg>
