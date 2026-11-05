@@ -1,34 +1,25 @@
-// Draws the orange Jarvis core as a PNG with no dependencies.
+// Draws the Jarvis icon as a PNG with no dependencies.
 // Usage: node scripts/make-icon.js <size> <out.png>
 import { writeFileSync } from "node:fs";
 import { deflateSync } from "node:zlib";
 
 const size = Number(process.argv[2]);
 const out = process.argv[3];
-const ORANGE = [255, 106, 26];
-const AMBER = [255, 154, 60];
-const RED = [255, 46, 26];
-const BG = [18, 6, 3];
-const WHITE = [255, 245, 232];
-
+const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
 // Distance-based coverage gives smooth edges at any size.
 const edge = (d) => Math.max(0, Math.min(1, 0.5 - d * size));
-const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
-const insideSquircle = (x, y) => Math.pow(Math.abs(x), 5) + Math.pow(Math.abs(y), 5) - Math.pow(0.46, 5);
+const SIDE = 0.40; // macOS icons leave a margin around the shape
+const squircle = (x, y) => Math.pow(Math.pow(Math.abs(x), 5) + Math.pow(Math.abs(y), 5), 1 / 5) - SIDE;
 
+// One glowing ring on near-black: the Jarvis core, reduced to what reads at Dock size.
 function pixel(x, y) {
   const r = Math.hypot(x, y);
-  const angle = Math.atan2(y, x);
-  let c = mix(BG, ORANGE, Math.max(0, 0.22 - r * 0.45));
-  const ring = (radius, width, color, on = true) => { if (on) c = mix(c, color, edge(Math.abs(r - radius) - width)); };
-  ring(0.40, 0.006, ORANGE);
-  ring(0.355, 0.016, AMBER, Math.sin(angle * 24) > -0.2);
-  ring(0.27, 0.03, RED, Math.sin(angle * 3 + 0.6) > -0.55);
-  ring(0.195, 0.006, WHITE);
-  c = mix(c, AMBER, edge(r - 0.135));
-  c = mix(c, WHITE, edge(r - 0.075));
-  const alpha = edge(insideSquircle(x, y) * 3);
-  return [...c, alpha * 255];
+  let c = mix([44, 44, 48], [8, 8, 10], Math.max(0, Math.min(1, (y + SIDE) / (2 * SIDE))));
+  c = mix(c, [255, 140, 0], 0.5 * Math.exp(-Math.pow((r - 0.2) / 0.075, 2)));
+  const warm = mix([255, 190, 90], [255, 122, 0], Math.max(0, Math.min(1, (y + 0.2) / 0.4)));
+  c = mix(c, warm, edge(Math.abs(r - 0.2) - 0.032));
+  c = mix(c, [255, 244, 225], edge(r - 0.058));
+  return [...c, edge(squircle(x, y)) * 255];
 }
 
 const raw = Buffer.alloc((size * 4 + 1) * size);

@@ -5,21 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>JARVIS · Booqy command</title>
 <link rel="icon" href="./icon-192.png"><link rel="apple-touch-icon" href="./apple-touch-icon.png"><link rel="manifest" href="./manifest.webmanifest">
-<meta name="theme-color" content="#070302"><meta name="apple-mobile-web-app-title" content="Jarvis"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<meta name="theme-color" content="#000000"><meta name="apple-mobile-web-app-title" content="Jarvis"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>
   :root{
-    --bg:#070302; --bg2:#120603;
-    --o:#ff6a1a; --o2:#ff9a3c; --r:#ff2e1a; --dim:#7a3b14; --dim2:#3a1a0a;
-    --txt:#ffd9b8; --mute:#b57a4a; --ok:#ffb347; --bad:#ff3b2e; --panel:rgba(255,106,26,.06);
-    --line:rgba(255,106,26,.35);
+    --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",system-ui,sans-serif;
+    --bg:#000; --bg2:#000;
+    --o:#ff9f0a; --o2:#ffb340; --r:#ff453a; --dim:#48484a; --dim2:#2c2c2e;
+    --txt:#f5f5f7; --mute:#a1a1a6; --ok:#30d158; --bad:#ff453a; --panel:#1c1c1e;
+    --line:rgba(255,255,255,.12); --surface:rgba(44,44,46,.72);
   }
   *{box-sizing:border-box;margin:0;padding:0}
-  html,body{height:100%;background:var(--bg);color:var(--txt);font-family:"Share Tech Mono",monospace;overflow:hidden}
-  body{background:
-    radial-gradient(1200px 700px at 32% 48%, rgba(255,90,20,.18), transparent 60%),
-    radial-gradient(900px 500px at 80% 20%, rgba(255,40,20,.10), transparent 60%),
-    linear-gradient(var(--bg2), var(--bg));}
+  html,body{height:100%;background:var(--bg);color:var(--txt);font-family:var(--font);-webkit-font-smoothing:antialiased;overflow:hidden}
+  body{background:#000}
   .scan{position:fixed;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(0,0,0,.18) 0 2px,transparent 2px 4px);mix-blend-mode:multiply;opacity:.6}
   .vignette{position:fixed;inset:0;pointer-events:none;box-shadow:inset 0 0 180px #000}
   /* Only the core by default. Chat or status open beside it, never over it. */
@@ -27,15 +24,15 @@
     grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr)}
   body.view-chat #grid,body.view-status #grid,body.view-inbox #grid{grid-template-columns:minmax(0,1fr) 420px}
   .panel{position:relative;background:var(--panel);border:1px solid var(--line);padding:10px 12px;overflow:hidden;
-    clip-path:polygon(0 10px,10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%);}
+}
   .panel:before{content:"";position:absolute;left:0;top:0;height:2px;width:46px;background:var(--o)}
-  .panel h3{font-family:Orbitron,sans-serif;font-weight:500;font-size:11px;letter-spacing:.22em;color:var(--o2);margin-bottom:8px}
+  .panel h3{font-weight:500;font-size:11px;color:var(--o2);margin-bottom:8px}
   .top{grid-area:top;display:flex;align-items:center;justify-content:space-between;padding:0 16px}
-  .top .brand{font-family:Orbitron,sans-serif;font-weight:700;font-size:22px;letter-spacing:.35em;color:var(--o);text-shadow:0 0 18px rgba(255,106,26,.7)}
+  .top .brand{font-weight:700;font-size:22px;color:var(--o);}
   .top .meta{display:flex;gap:22px;font-size:12px;color:var(--mute)}
   .top .meta b{color:var(--txt)}
   .top .meta{min-width:0;align-items:center;white-space:nowrap}.top .meta #pstep{display:inline-block;max-width:34vw;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
-  .tag{display:inline-block;padding:1px 6px;border:1px solid var(--line);font-size:10px;letter-spacing:.15em;color:var(--o2)}
+  .tag{display:inline-block;padding:1px 6px;border:1px solid var(--line);font-size:10px;color:var(--o2)}
   .tag.live{border-color:var(--ok);color:var(--ok);box-shadow:0 0 8px rgba(255,179,71,.5)}
   .tag.offline{border-color:var(--bad);color:var(--bad)}
   .offline-note{font-size:12px;color:var(--bad);border:1px solid var(--bad);padding:6px 8px;margin-bottom:8px}
@@ -44,7 +41,7 @@
   ul{list-style:none}
   .row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px dashed rgba(255,106,26,.15);font-size:12px;gap:8px}
   .row .n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.st{white-space:nowrap;flex:none}
-  .st{font-size:10px;letter-spacing:.12em;padding:1px 6px;border:1px solid;max-width:45%;overflow:hidden;text-overflow:ellipsis}
+  .st{font-size:10px;padding:1px 6px;border:1px solid;max-width:45%;overflow:hidden;text-overflow:ellipsis}
   .st.production{color:var(--ok);border-color:var(--ok)}
   .st.dev{color:var(--o2);border-color:var(--o2)}
   .st.building{color:var(--o);border-color:var(--o);animation:blink 1.6s infinite}
@@ -62,10 +59,10 @@
   .pulse{animation:pulse 2.4s ease-in-out infinite}
   @keyframes pulse{50%{opacity:.45}}
   .corelabel{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;pointer-events:none}
-  .corelabel .big{font-family:Orbitron,sans-serif;font-size:30px;line-height:1;font-weight:700;color:#fff;text-shadow:0 0 22px var(--o),0 0 40px var(--r)}
-  .corelabel .sub{position:absolute;left:50%;top:100%;transform:translate(-50%,64px);white-space:nowrap;font-size:11px;letter-spacing:.3em;color:var(--o2);text-shadow:0 0 8px #000}
+  .corelabel .big{font-size:30px;line-height:1;font-weight:700;color:#fff;}
+  .corelabel .sub{position:absolute;left:50%;top:100%;transform:translate(-50%,64px);white-space:nowrap;font-size:11px;color:var(--o2);}
   .hud-stat{position:absolute;font-size:11px;color:var(--mute);line-height:1.5}
-  .hud-stat b{display:block;font-family:Orbitron,sans-serif;font-size:18px;color:var(--txt)}
+  .hud-stat b{display:block;font-size:18px;color:var(--txt)}
   .hs1{left:18px;top:18px}.hs2{right:18px;top:18px;text-align:right}.hs3{left:18px;bottom:72px}.hs4{right:18px;bottom:72px;text-align:right}
   .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--o);box-shadow:0 0 8px var(--o);margin-right:6px}
   .dot.bad{background:var(--bad);box-shadow:0 0 8px var(--bad)}
@@ -75,28 +72,28 @@
   .gauges{display:flex;justify-content:space-around;align-items:center;height:calc(100% - 34px);min-height:96px}
   .gauge{position:relative;width:96px;height:96px}
   .gauge svg{width:96px;height:96px;transform:rotate(-90deg)}
-  .gauge .v{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:10px;color:var(--mute);letter-spacing:.1em}
-  .gauge .v b{font-family:Orbitron,sans-serif;font-size:16px;color:var(--txt)}
+  .gauge .v{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:10px;color:var(--mute);}
+  .gauge .v b{font-size:16px;color:var(--txt)}
   .cmd{display:flex;gap:8px;margin-top:6px}
   .cmd input{flex:1;background:rgba(0,0,0,.4);border:1px solid var(--line);color:var(--txt);font:inherit;padding:6px 8px;outline:none}
-  .cmd button{background:var(--o);color:#1a0800;border:0;font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:.2em;padding:0 12px;cursor:pointer}
+  .cmd button{background:var(--o);color:#1a0800;border:0;font-size:10px;padding:0 12px;cursor:pointer}
   .hint{font-size:10px;color:var(--mute);margin-top:4px}
 
   /* talk console */
   .talk{position:absolute;left:14px;right:14px;bottom:14px;max-height:56%;display:flex;flex-direction:column;
     background:rgba(10,4,2,.86);border:1px solid var(--line);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
-    clip-path:polygon(0 10px,10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%);
+
     transform:translateY(calc(100% - 46px));transition:transform .35s ease}
   .talk.open{transform:none}
   .talk header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer;border-bottom:1px solid rgba(255,106,26,.2)}
-  .talk header h3{margin:0;font-family:Orbitron,sans-serif;font-weight:500;font-size:11px;letter-spacing:.22em;color:var(--o2)}
-  .talk header .hint2{font-size:10px;color:var(--mute);letter-spacing:.15em}
+  .talk header h3{margin:0;font-weight:500;font-size:11px;color:var(--o2)}
+  .talk header .hint2{font-size:10px;color:var(--mute);}
   .log{flex:1;overflow:auto;padding:10px 12px;font-size:13px;line-height:1.45;min-height:120px}
   .msg{margin:6px 0;max-width:88%}
   .msg.me{margin-left:auto;text-align:right;color:var(--txt)}
   .msg.me span{display:inline-block;border:1px solid var(--line);padding:6px 9px;background:rgba(255,106,26,.08)}
-  .msg.j{color:#ffb36b;font-style:italic;text-shadow:0 0 8px rgba(255,106,26,.6)}
-  .msg.j b{font-style:normal;text-shadow:none;font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:.2em;color:var(--o);display:block;margin-bottom:2px}
+  .msg.j{color:#ffb36b;}
+  .msg.j b{font-style:normal;font-size:10px;color:var(--o);display:block;margin-bottom:2px}
   .msg.sys{color:var(--mute);font-size:11px;text-align:center;max-width:100%}
   .bar2{display:flex;gap:8px;padding:10px 12px;border-top:1px solid rgba(255,106,26,.2)}
   .bar2 input{flex:1;background:rgba(0,0,0,.45);border:1px solid var(--line);color:var(--txt);font:inherit;font-size:14px;padding:9px 10px;outline:none}
@@ -114,7 +111,7 @@
   .core.speaking>svg circle[r="44"]{fill:#ffd9b8}
   .core.thinking .spin1{animation-duration:5s}.core.thinking .spin2{animation-duration:3s}.core.thinking .spin3{animation-duration:1.4s}
   #wave{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
-  .vstate{position:absolute;left:50%;top:18px;transform:translateX(-50%);font-size:10px;letter-spacing:.22em;white-space:nowrap;color:var(--mute);padding:2px 8px;border:1px solid transparent;pointer-events:none}
+  .vstate{position:absolute;left:50%;top:18px;transform:translateX(-50%);font-size:10px;white-space:nowrap;color:var(--mute);padding:2px 8px;border:1px solid transparent;pointer-events:none}
   .core.standby .vstate{color:var(--o2)}
   .core.listening .vstate{color:#fff;border-color:var(--r);box-shadow:0 0 14px var(--r)}
   .core.thinking .vstate{color:var(--o2);border-color:var(--o2)}
@@ -123,11 +120,11 @@
   @keyframes wakering{to{width:90%;opacity:0;border-color:var(--r)}}
   /* Needs you: the inbox side panel and its dock badge */
   .dock .ibtn{position:relative}
-  .dock .cnt{position:absolute;top:-4px;right:-4px;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:var(--r);color:#fff;font:700 11px/20px Orbitron,sans-serif;text-align:center}
+  .dock .cnt{position:absolute;top:-4px;right:-4px;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:var(--r);color:#fff;font:700 11px/20px var(--font);text-align:center}
   #inbox{display:none;flex-direction:column;gap:10px;overflow-y:auto;min-height:0;overscroll-behavior:contain;outline:none}
   body.view-inbox #inbox{display:flex}
   #inbox header{display:flex;align-items:center;justify-content:space-between}
-  #inbox header h3{font-family:Orbitron,sans-serif;font-weight:500;font-size:12px;letter-spacing:.22em;color:var(--o2)}
+  #inbox header h3{font-weight:500;font-size:12px;color:var(--o2)}
   #inbox .x{width:40px;height:40px;border:1px solid var(--line);background:rgba(0,0,0,.4);color:var(--txt);font:inherit;font-size:18px;cursor:pointer}
   #inbox .mute,#inbox .note{color:var(--mute);font-size:12px}
   #inbox .err{color:#fff;background:var(--bad);padding:6px 10px;font-size:12px}
@@ -144,11 +141,11 @@
   #inbox button:focus-visible,#inbox input:focus-visible,.dock .ibtn:focus-visible,#cityinbox button:focus-visible{outline:2px solid var(--o2);outline-offset:2px}
   .ibtn.armed{border-color:var(--o);box-shadow:inset 0 0 8px rgba(255,106,26,.6)}
   .confirm{margin:8px 0;padding:10px;border:1px solid var(--r);background:rgba(255,46,26,.1);font-size:12px}
-  .confirm b{display:block;font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:.18em;color:var(--bad);margin-bottom:4px}
+  .confirm b{display:block;font-size:10px;color:var(--bad);margin-bottom:4px}
   .confirm .facts{color:var(--mute);margin:4px 0 8px}
   .confirm .bad{color:var(--bad)}
   .confirm .btns{display:flex;gap:8px;flex-wrap:wrap}
-  .confirm button{min-height:40px;padding:0 14px;border:1px solid var(--line);background:rgba(0,0,0,.4);color:var(--txt);font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:.15em;cursor:pointer}
+  .confirm button{min-height:40px;padding:0 14px;border:1px solid var(--line);background:rgba(0,0,0,.4);color:var(--txt);font-size:10px;cursor:pointer}
   .confirm button.go{background:var(--r);border-color:var(--r);color:#fff}
   .confirm button:disabled{opacity:.5;cursor:default}
   @media (display-mode:standalone){html,body{overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}input{-webkit-user-select:text;user-select:text}}
@@ -315,7 +312,7 @@
   .dock #mic{width:58px;height:58px;border-radius:50%}
   .dock #mic svg{width:24px;height:24px}
   .ibtn.active{border-color:var(--o);color:#fff}
-  .vhint{position:absolute;left:50%;top:44px;transform:translateX(-50%);width:max-content;max-width:90%;text-align:center;font-size:11px;color:var(--txt);text-shadow:0 0 6px #000;opacity:0;transition:opacity .3s;pointer-events:none}
+  .vhint{position:absolute;left:50%;top:44px;transform:translateX(-50%);width:max-content;max-width:90%;text-align:center;font-size:11px;color:var(--txt);opacity:0;transition:opacity .3s;pointer-events:none}
   .vhint.show{opacity:1}
   .talk{position:relative;left:auto;right:auto;bottom:auto;max-height:none;min-height:0;transform:none;transition:none;display:none}
   body.view-chat .talk{display:flex}
@@ -325,28 +322,28 @@
   /* Status: AI City board by default, the Booqy dashboard behind a second tab */
   #status [hidden]{display:none!important}
   #status .tabs{display:flex;gap:8px;flex:none}
-  #status .tabs button{min-height:40px;padding:0 16px;border:1px solid var(--line);background:rgba(0,0,0,.4);color:var(--txt);font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:.18em;cursor:pointer}
+  #status .tabs button{min-height:40px;padding:0 16px;border:1px solid var(--line);background:rgba(0,0,0,.4);color:var(--txt);font-size:10px;cursor:pointer}
   #status .tabs button[aria-selected=true]{border-color:var(--o);color:#fff;box-shadow:inset 0 0 8px rgba(255,106,26,.6)}
   #status .tabs button:focus-visible{outline:2px solid var(--o2);outline-offset:2px}
   #booqytab,#aicity{display:flex;flex-direction:column;gap:12px;flex:none}
-  #aicity h3{font-family:Orbitron,sans-serif;font-weight:500;font-size:10px;letter-spacing:.22em;color:var(--o2);margin-bottom:8px}
+  #aicity h3{font-weight:500;font-size:10px;color:var(--o2);margin-bottom:8px}
   #aicity .err{color:#fff;background:var(--bad);padding:6px 10px;font-size:12px}
   #aicity .mute{color:var(--mute);font-size:12px}
   #ailimits .strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:10px}
   #ailimits .lim{border:1px solid var(--line);padding:6px 8px;display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--mute)}
-  #ailimits .lim b{font-family:Orbitron,sans-serif;font-size:14px;color:var(--txt)}
+  #ailimits .lim b{font-size:14px;color:var(--txt)}
   #ailimits .lim.over,#ailimits .dept.over{border-color:var(--bad)}
   #ailimits .lim.over b,#ailimits .dept.over .amt{color:var(--bad)}
   #ailimits .dept,#ailimits .agdept{font-size:12px;padding:4px 0}
   #ailimits .dept .top2,#ailimits .agdept .top2{display:flex;justify-content:space-between;gap:8px}
   #ailimits .agdept.full .amt{color:var(--bad)}
   #ailimits .dept .bar i.over{background:var(--bad);box-shadow:0 0 8px var(--bad)}
-  #ailimits .overtag{color:#fff;background:var(--bad);font-size:10px;letter-spacing:.12em;padding:0 5px;margin-left:6px}
-  #aicity .grp{margin-bottom:8px}#aicity .grp h4{font-size:10px;letter-spacing:.2em;color:var(--o2);margin:6px 0 2px}
+  #ailimits .overtag{color:#fff;background:var(--bad);font-size:10px;padding:0 5px;margin-left:6px}
+  #aicity .grp{margin-bottom:8px}#aicity .grp h4{font-size:10px;color:var(--o2);margin:6px 0 2px}
   #aicity .item{padding:5px 0;border-bottom:1px dashed rgba(255,106,26,.15);font-size:12px;display:flex;flex-wrap:wrap;gap:2px 10px}
   #aicity .item .goal{flex-basis:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--txt)}
   #aicity .item .meta{color:var(--mute)}
-  #aicity .tag{font-size:10px;letter-spacing:.12em;padding:0 6px;border:1px solid var(--dim);color:var(--mute)}
+  #aicity .tag{font-size:10px;padding:0 6px;border:1px solid var(--dim);color:var(--mute)}
   #aicity .tag.stale{border-color:var(--bad);color:var(--bad)}
   #aicity .core h4{color:var(--mute)}
   #status .top{flex-wrap:wrap;gap:6px 16px;padding:10px 16px}
@@ -362,6 +359,76 @@
     body.view-chat .core>svg,body.view-status .core>svg,body.view-inbox .core>svg,body.view-chat #wave,body.view-status #wave,body.view-inbox #wave{top:28px;height:calc(100% - 88px)}
     body.view-chat .vstate,body.view-status .vstate,body.view-inbox .vstate{top:4px}
     body.view-chat .wakering,body.view-status .wakering,body.view-inbox .wakering{top:calc(28px + (100% - 88px)/2)}
+  }
+
+  /* Quiet, Apple-like surfaces for everything except the pixel City, which keeps its own world. */
+  .scan,.vignette{display:none}
+  .panel{border:0;border-radius:16px;padding:14px 16px}
+  .panel:before{display:none}
+  .panel h3,#inbox header h3,.talk header h3{font-size:15px;font-weight:600;color:var(--txt)}
+  .top .brand{font-size:20px;font-weight:600;color:var(--txt)}
+  .row{border-bottom:1px solid rgba(255,255,255,.08);font-size:13px;padding:8px 0}
+  .tag,.st{border:0;border-radius:99px;padding:2px 9px;font-size:11px;font-weight:500;background:rgba(255,255,255,.1)}
+  .tag.live{box-shadow:none}
+  .offline-note,.confirm{border:0;border-radius:12px;padding:12px}
+  .bar{height:4px;border-radius:2px;overflow:hidden}.bar i{background:var(--o);box-shadow:none;border-radius:2px}
+  .dot{box-shadow:none}.dot.bad{box-shadow:none}
+  a{color:var(--o2)}
+  /* The orb: one calm shape that shows what Jarvis is doing. */
+  .orb{transform-origin:300px 300px;animation:breathe 5s ease-in-out infinite}
+  @keyframes breathe{50%{transform:scale(1.035)}}
+  .core.off .orb{opacity:.82}
+    .core.listening>svg{filter:brightness(calc(1.08 + var(--lvl)*.5))}
+  .vstate{top:22px;font-size:13px;font-weight:500;padding:0;border:0;color:var(--mute)}
+  .core.standby .vstate,.core.thinking .vstate{color:var(--mute);border:0}
+  .core.listening .vstate,.core.speaking .vstate{color:var(--txt);background:none;border:0;box-shadow:none}
+  .vhint{font-size:13px;color:var(--mute)}
+  .wakering{border:1px solid rgba(255,255,255,.7)}
+  @keyframes wakering{to{width:70%;opacity:0}}
+  /* The dock: frosted, round, and out of the way. The City keeps its own pixel buttons. */
+  body:not(.view-city) .dock{gap:4px;padding:6px;border-radius:32px;background:var(--surface);-webkit-backdrop-filter:blur(30px) saturate(1.6);backdrop-filter:blur(30px) saturate(1.6)}
+  body:not(.view-city) .ibtn{border:0;border-radius:50%;background:transparent;color:var(--txt);transition:background .15s}
+  body:not(.view-city) .ibtn:hover{background:rgba(255,255,255,.1)}
+  body:not(.view-city) .ibtn.active{background:rgba(255,255,255,.18);color:#fff}
+  body:not(.view-city) .ibtn.on{background:var(--o);color:#000;box-shadow:none}
+  body:not(.view-city) .ibtn.rec{background:var(--r);box-shadow:none;animation:none}
+  body:not(.view-city) .ibtn.armed{box-shadow:inset 0 0 0 2px var(--o)}
+  body:not(.view-city) .ibtn svg{stroke-width:1.6}
+  body:not(.view-city) .dock #mic{background:rgba(255,255,255,.1)}
+  body:not(.view-city) .dock #mic.rec{background:var(--r)}
+  body:not(.view-city) .dock .cnt{top:0;right:0;font:600 11px/20px var(--font);background:var(--r)}
+  /* Chat, status and inbox sheets */
+  #status .tabs{gap:2px;padding:2px;border-radius:10px;background:#2c2c2e;align-self:flex-start}
+  #status .tabs button{min-height:30px;padding:0 16px;border:0;border-radius:8px;background:none;font:500 13px var(--font)}
+  #status .tabs button[aria-selected=true]{background:#636366;box-shadow:none}
+  #aicity h3,#aicity .grp h4{font-size:15px;font-weight:600;color:var(--txt);text-transform:none}
+  #aicity .grp h4{font-size:12px;color:var(--mute)}
+  #ailimits .lim{border:0;border-radius:12px;background:#2c2c2e;padding:10px 12px;font-size:12px}
+  #ailimits .lim b{font-size:16px;font-weight:600}
+  #ailimits .lim.over{box-shadow:inset 0 0 0 1px var(--bad)}
+  #aicity .item{border-bottom:1px solid rgba(255,255,255,.08);padding:8px 0;font-size:13px}
+  #aicity .tag{border:0;font-size:11px;padding:1px 8px}
+  .talk,#status,#inbox{border-radius:18px;background:var(--panel);border:0}
+  #status,#inbox{padding:16px}
+  .talk header,.bar2{border-color:rgba(255,255,255,.08)}
+  .log{font-size:14px;line-height:1.4;padding:14px}
+  .msg{margin:8px 0}
+  .msg.me span{border:0;border-radius:18px;padding:8px 13px;background:var(--o);color:#000}
+  .msg.j{color:var(--txt)}
+  .msg.j b{display:none}
+  .bar2 input,.cmd input,#inbox .free input{border:0;border-radius:10px;background:#2c2c2e;font-size:14px;padding:10px 12px}
+  .bar2 input:focus,.cmd input:focus{box-shadow:0 0 0 3px rgba(255,159,10,.35)}
+  .cmd button,#inbox .free button{border-radius:10px;font:600 13px var(--font);padding:0 14px}
+  #inbox .q{border:0;border-radius:14px;background:#2c2c2e;padding:14px;font-size:13px}
+  #inbox .opts button,#inbox .x,.confirm button{border:0;border-radius:10px;background:rgba(255,255,255,.1);font:500 13px var(--font)}
+  #inbox .x{border-radius:50%;font-size:16px}
+  #inbox .opts button.dflt{background:var(--o);color:#000}
+  .confirm button.go{background:var(--r)}
+  #inbox button:focus-visible,#inbox input:focus-visible,.dock .ibtn:focus-visible{outline:2px solid var(--o);outline-offset:2px}
+  /* Phones: inputs at 16px so iOS doesn't zoom, and every control a 40px target. */
+  @media (max-width:800px){
+    .bar2 input,.cmd input,#inbox .free input{font-size:16px}
+    #status .tabs button{min-height:40px}
   }
 </style>
 </head>
@@ -381,57 +448,25 @@
 
   <div class="panel left">
     <div class="offline-note" id="offline" role="alert" hidden></div>
-    <h3>FEATURE LEDGER</h3>
+    <h3>Features</h3>
     <ul id="features"></ul>
     <div style="margin-top:10px;font-size:11px;color:var(--mute)">PROGRAMME <span id="progpct" style="color:var(--txt)">0%</span></div>
     <div class="bar"><i id="progbar" style="width:0%"></i></div>
   </div>
 
   <div class="panel core">
-    <svg viewBox="0 0 600 600" preserveAspectRatio="xMidYMid meet">
+    <svg viewBox="0 0 600 600" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
       <defs>
-        <filter id="glow"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-        <linearGradient id="g1" x1="0" x2="1"><stop offset="0" stop-color="#ff2e1a"/><stop offset="1" stop-color="#ff9a3c"/></linearGradient>
-      </defs>
-      <!-- circuit traces -->
-      <g stroke="#ff6a1a" stroke-opacity=".35" fill="none" stroke-width="1.2">
-        <path d="M300 300 L300 60 L420 60 L420 20"/><path d="M300 300 L540 300 L540 120 L590 120"/>
-        <path d="M300 300 L300 540 L180 540 L180 590"/><path d="M300 300 L60 300 L60 480 L10 480"/>
-        <path d="M300 300 L470 130 L560 130"/><path d="M300 300 L130 470 L40 470"/>
-        <path d="M300 300 L470 470 L470 560"/><path d="M300 300 L130 130 L130 40"/>
-      </g>
-      <g fill="#ff9a3c" class="pulse" filter="url(#glow)">
-        <circle cx="420" cy="20" r="3"/><circle cx="590" cy="120" r="3"/><circle cx="180" cy="590" r="3"/><circle cx="10" cy="480" r="3"/>
-        <circle cx="560" cy="130" r="3"/><circle cx="40" cy="470" r="3"/><circle cx="470" cy="560" r="3"/><circle cx="130" cy="40" r="3"/>
-      </g>
-      <!-- outer ring: ticks -->
-      <g class="ring spin1" stroke="#ff6a1a" stroke-opacity=".7" fill="none">
-        <circle cx="300" cy="300" r="250" stroke-width="1"/>
-        <circle cx="300" cy="300" r="238" stroke-width="10" stroke-dasharray="3 9" stroke-opacity=".35"/>
-      </g>
-      <g class="ring spin2" fill="none" stroke="url(#g1)">
-        <circle cx="300" cy="300" r="205" stroke-width="2" stroke-dasharray="120 40 20 40 300 40"/>
-        <circle cx="300" cy="300" r="190" stroke-width="14" stroke-opacity=".25" stroke-dasharray="40 14"/>
-      </g>
-      <g class="ring spin3" fill="none" stroke="#ff9a3c" filter="url(#glow)">
-        <circle cx="300" cy="300" r="150" stroke-width="3" stroke-dasharray="60 30 10 30"/>
-        <circle cx="300" cy="300" r="132" stroke-width="1" stroke-dasharray="6 6" stroke-opacity=".7"/>
-      </g>
-      <g class="ring spin1" fill="none" stroke="#ff2e1a" stroke-width="18" stroke-opacity=".5">
-        <circle cx="300" cy="300" r="105" stroke-dasharray="20 10 60 10"/>
-      </g>
-      <circle cx="300" cy="300" r="82" fill="none" stroke="#ffd9b8" stroke-width="1" stroke-opacity=".8"/>
-      <circle cx="300" cy="300" r="70" fill="#ff6a1a" fill-opacity=".12" class="pulse"/>
-      <circle cx="300" cy="300" r="44" fill="#ff9a3c" fill-opacity=".9" filter="url(#glow)"/>
-      <circle cx="300" cy="300" r="26" fill="#fff5e8"/>
-      <!-- crosshair -->
-      <g stroke="#ffd9b8" stroke-opacity=".5" stroke-width="1">
-        <line x1="300" y1="30" x2="300" y2="90"/><line x1="300" y1="510" x2="300" y2="570"/>
-        <line x1="30" y1="300" x2="90" y2="300"/><line x1="510" y1="300" x2="570" y2="300"/>
+        <radialGradient id="orbfill" cx="50%" cy="42%" r="62%"><stop offset="0" stop-color="#fff6e6"/><stop offset=".42" stop-color="#ffc266"/><stop offset=".8" stop-color="#ff8a00"/><stop offset="1" stop-color="#e65c00"/></radialGradient>
+        <radialGradient id="orbhalo"><stop offset=".3" stop-color="#ff9f0a" stop-opacity=".42"/><stop offset=".6" stop-color="#ff8a00" stop-opacity=".12"/><stop offset="1" stop-color="#ff8a00" stop-opacity="0"/></radialGradient>
+              </defs>
+      <g class="orb">
+        <circle cx="300" cy="300" r="170" fill="url(#orbhalo)"/>
+        <circle cx="300" cy="300" r="58" fill="url(#orbfill)"/>
       </g>
     </svg>
     <canvas id="wave" aria-hidden="true"></canvas>
-    <div class="vstate" id="vstate" role="status">MIC OFF</div>
+    <div class="vstate" id="vstate" role="status">Microphone off</div>
     <div class="vhint" id="vhint" role="status"></div>
     <div class="dock" id="dock">
       <button class="ibtn" id="chatbtn" title="Chat" aria-label="Chat" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v11H9l-5 4z"/></svg></button>
@@ -465,19 +500,19 @@
     </section>
     <div id="aicity" role="tabpanel" aria-label="AI City status">
       <div class="err" id="aierr" role="alert" hidden></div>
-      <section class="panel"><h3>LIMITS</h3><div id="ailimits"></div></section>
-      <section class="panel"><h3>TICKETS</h3><div id="aitickets"></div></section>
-      <section class="panel"><h3>AGENTS</h3><div id="aiagents"></div></section>
+      <section class="panel"><h3>Limits</h3><div id="ailimits"></div></section>
+      <section class="panel"><h3>Tickets</h3><div id="aitickets"></div></section>
+      <section class="panel"><h3>Agents</h3><div id="aiagents"></div></section>
     </div>
     <aside class="panel" id="inbox" tabindex="-1" aria-label="Needs you">
-      <header><h3>NEEDS YOU</h3><button type="button" class="x" id="inboxclose" aria-label="Close Needs you">×</button></header>
+      <header><h3>Needs you</h3><button type="button" class="x" id="inboxclose" aria-label="Close Needs you">×</button></header>
       <div class="err" id="inboxerr" role="alert" hidden></div>
       <div class="note" id="inboxnote" role="status"></div>
       <div id="inboxlist" aria-live="polite"><div id="inboxmerge"></div><div id="inboxqs"></div></div>
       <div class="mute" id="inboxempty">Nothing is waiting for you.</div>
     </aside>
     <div class="talk" id="talk">
-      <header id="talkhead"><h3>TALK TO JARVIS</h3><span class="hint2">CLOSE</span></header>
+      <header id="talkhead"><h3>Talk to Jarvis</h3><span class="hint2">Close</span></header>
       <div class="log" id="log"></div>
       <div class="bar2">
         <button class="ibtn" id="mic" title="Microphone" aria-label="Microphone">
@@ -497,7 +532,7 @@
   </div>
 
   <div class="panel bl">
-    <h3>HUMAN ACTIONS</h3>
+    <h3>For you to do</h3>
     <ul id="actions"></ul>
   </div>
 
@@ -511,8 +546,8 @@
   </div>
 
   <div class="panel br">
-    <h3>COMMAND</h3>
-    <div class="cmd"><input id="cmdin" placeholder="e.g. pause production merges"><button id="cmdbtn">SEND</button></div>
+    <h3>Command</h3>
+    <div class="cmd"><input id="cmdin" placeholder="e.g. pause production merges"><button id="cmdbtn">Send</button></div>
     <div class="hint" id="cmdhint">Copies a ready-to-paste "/jarvis …" line. Send it in the booqy project chat.</div>
     <div style="margin-top:8px;font-size:11px;color:var(--mute)">LAST UPDATE <b id="updated" style="color:var(--txt)">-</b></div>
   </div>
@@ -573,7 +608,7 @@ const grid=$("grid"), statusSide=document.createElement("aside"); statusSide.id=
 const booqyTab=document.createElement("div"); booqyTab.id="booqytab"; booqyTab.setAttribute("role","tabpanel"); booqyTab.hidden=true;
 for(const c of [".top",".left",".right",".bl",".bc",".br"]) booqyTab.append(document.querySelector(".panel"+c));
 const tabs=document.createElement("div"); tabs.className="tabs"; tabs.setAttribute("role","tablist"); tabs.setAttribute("aria-label","Status");
-for(const [key,label] of [["aicity","AI CITY"],["booqy","BOOQY"]]){ const b=document.createElement("button"); b.type="button"; b.id="tab-"+key; b.setAttribute("role","tab"); b.textContent=label; b.onclick=()=>statusTab(key); tabs.append(b); }
+for(const [key,label] of [["aicity","AI City"],["booqy","Booqy"]]){ const b=document.createElement("button"); b.type="button"; b.id="tab-"+key; b.setAttribute("role","tab"); b.textContent=label; b.onclick=()=>statusTab(key); tabs.append(b); }
 function statusTab(key){ $("aicity").hidden=key!=="aicity"; booqyTab.hidden=key!=="booqy"; for(const b of tabs.children) b.setAttribute("aria-selected",String(b.id==="tab-"+key)); }
 statusSide.append(tabs,$("aicity"),booqyTab); statusTab("aicity");
 grid.append($("city"),talk,$("inbox"));
@@ -599,7 +634,7 @@ let hintTimer=null;
 function showHint(text){ $("vhint").textContent=text; $("vhint").classList.add("show"); clearTimeout(hintTimer); hintTimer=setTimeout(()=>$("vhint").classList.remove("show"),6000); }
 
 /* one visible state: off | standby | listening | thinking | speaking */
-const STATE_TEXT={off:"MIC OFF",standby:"SAY JARVIS",listening:"LISTENING",thinking:"THINKING",speaking:"SPEAKING"};
+const STATE_TEXT={off:"Microphone off",standby:"Say Jarvis",listening:"Listening",thinking:"Thinking",speaking:"Speaking"};
 let vstate="off";
 function setState(s){ vstate=s; for(const k of Object.keys(STATE_TEXT)) core.classList.toggle(k,k===s); $("vstate").textContent=STATE_TEXT[s];
   $("mic").classList.toggle("rec",s==="listening"); $("mic").classList.toggle("armed",!!mic.stream&&s!=="listening"); $("mic").title=s==="off"?"Turn the microphone on":s==="listening"?"Turn the microphone off":"Talk now"; startWave(); }
@@ -919,8 +954,8 @@ function drawWave(now){
   if(src){ src.an.getByteFrequencyData(src.data); bins=src.data; let s=0; const n=Math.floor(bins.length*.6); for(let i=0;i<n;i++) s+=bins[i]; lvl=Math.min(1,s/n/110); }
   smooth+=(lvl-smooth)*.3; core.style.setProperty("--lvl",(vstate==="standby"?smooth*.25:smooth).toFixed(3));
   const cx=W/2, cy=H/2, R=Math.min(W,H)*.235, N=72;
-  const color=vstate==="speaking"?"#ffe7c8":vstate==="listening"?"#ff4a2a":"#ff9a3c";
-  if(vstate==="thinking"&&!still.matches){ wctx.strokeStyle="#ffb347"; wctx.lineWidth=3; wctx.lineCap="round"; wctx.shadowColor="#ff6a1a"; wctx.shadowBlur=14;
+  const color=vstate==="speaking"?"#ffe7c8":vstate==="listening"?"#ffffff":"#ffb340";
+  if(vstate==="thinking"&&!still.matches){ wctx.strokeStyle="#ffd9a0"; wctx.lineWidth=2; wctx.lineCap="round";
     for(let k=0;k<3;k++){ const a=now/420+k*2.094; wctx.beginPath(); wctx.arc(cx,cy,R,a,a+.7); wctx.stroke(); } }
   else if(bins&&vstate!=="off"){ const gain=vstate==="standby"?.18:1, reach=Math.min(W,H)*.2; wctx.strokeStyle=color; wctx.lineWidth=Math.max(2,R*.022); wctx.lineCap="round"; wctx.shadowColor=color; wctx.shadowBlur=vstate==="standby"?0:12;
     wctx.globalAlpha=vstate==="standby"?.45:.95; const usable=Math.floor(bins.length*.55);
