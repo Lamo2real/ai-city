@@ -1,6 +1,6 @@
 // The City View's event stream: everything that moves is one typed event, and a snapshot describes the rest.
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -27,7 +27,7 @@ test("a hire, a ticket, a question, a review and a report each show up as typed 
     } else if (req.agentId === "it-manager" && req.prompt.startsWith("[direct instruction from owner")) {
       const t = JSON.parse(req.prompt.slice(req.prompt.indexOf("{")));
       // The Orchestrator owns the gate; the runtime tool is called here so one agent script covers the whole flow.
-      const v = await city.toolsFor("orchestrator").find((x) => x.name === "request_review")!.handler({ ticket_id: t.parent_id, artifact: "diff" }) as { verdict: string };
+      const v = await city.toolsFor("orchestrator").find((x) => x.name === "request_review")!.handler({ ticket_id: t.parent_id, artifact: `diff in ${checkout()}` }) as { verdict: string };
       await use(req, "report", { ticket_id: t.parent_id, status: v.verdict === "PASS" ? "done" : "failed", summary: "built", artifacts: ["PR #1"] });
     } else if (req.agentId === "orchestrator" && req.prompt.startsWith("[report from it-manager")) {
       const id = /on ticket (\S+)\]/.exec(req.prompt)![1];
@@ -88,3 +88,10 @@ test("audit lines carry the agent that acted", () => {
   assert.equal(lines[0].agent, "py-dev");
   assert.equal(lines[1].agent, undefined);
 });
+
+// A real-looking checkout for the gate to test; the gate never falls back to a cwd.
+function checkout(): string {
+  const d = mkdtempSync(join(tmpdir(), "gate-co-"));
+  mkdirSync(join(d, ".git"));
+  return d;
+}
