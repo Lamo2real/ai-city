@@ -1,6 +1,6 @@
 // The City View: a small game world of the agents, drawn pixel by pixel on a canvas from city-state.js.
 // All of the art is drawn here in code. Every person on screen is a real agent; only the scenery moves on its own.
-import { BUILDING_H, COST_NOTE, CORE, INTEGRATION_MEANS, MODEL_NAME, TILE, VISUALS, ageText, agentPanel, agentStatus, applyLive, applySnapshot, assignSlots, checkText, cityMessage, courierFor, departmentNames, departmentPanel, deptColor, deptOf, doingWords, estUsd, gateStatus, hashOf, homeSpot, identity, initialState, integrationGroups, layout, parkedRows, placement, walksOut, propFor, reduce, relTime, residents, seatRows, seatSpot, stockholmTime, topBar, traceLines, usdRows, visitAllowed, visualState, walkRoute, workforceGroups } from "./city-state.js";
+import { BUILDING_H, COST_NOTE, CORE, INTEGRATION_MEANS, MODEL_NAME, TILE, VISUALS, ageText, agentPanel, agentStatus, applyLive, applySnapshot, assignSlots, checkText, cityMessage, courierFor, departmentNames, departmentPanel, deptColor, deptOf, doingWords, estUsd, plainText, ticketTone, ticketWords, gateStatus, hashOf, homeSpot, identity, initialState, integrationGroups, layout, parkedRows, placement, walksOut, propFor, reduce, relTime, residents, seatRows, seatSpot, stockholmTime, topBar, traceLines, usdRows, visitAllowed, visualState, walkRoute, workforceGroups } from "./city-state.js";
 
 const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 const INK = "#1d1c36";
@@ -818,7 +818,7 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
   const button = (cls, text, onclick) => { const b = el("button", cls, text); b.type = "button"; b.onclick = onclick; return b; };
   // Where a panel's Back goes.
   const reopen = (o) => { if (o?.agent) openAgent(o.agent); else if (o?.dept) openDept(o.dept); else if (o?.parked) openParked(); else if (o?.data) openData(o.data); };
-  const storyButton = (id) => { const from = open; return button("act", "Story", () => openData(storyView(id, from))); };
+  const storyButton = (id, label = "Story", cls = "act") => { const from = open; return button(cls, label, () => openData(storyView(id, from))); };
 
   // ---------- One agent: what it is doing right now, in plain words, kept fresh while the panel is open ----------
   function portrait(a) {
@@ -855,31 +855,46 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
     box.replaceChildren();
     if (res.error) box.append(el("p", "hint", `Live details did not load (${res.error}). This is what the city last heard.`));
     const wait = d?.awaiting_merge ?? a.awaiting_merge;
-    if (wait) box.append(el("p", "merge", `Done, and staying until ${wait.branch}${wait.repo ? ` in ${wait.repo}` : ""} is merged. Waiting ${ageText(Date.now() - Date.parse(wait.since))}.`));
-    const status = row(a.kind === "worker" ? "worker state" : "status", agentStatus(state, id).replace(/_/g, " ")); status.dataset.status = "";
-    box.append(row("id", id), row("department", d?.department ?? p.department), row("reports to", p.parent ?? "—"), row("model", MODEL_NAME[d?.model] ?? p.modelName));
-    box.append(row("runs on", d?.executor ?? p.executor ?? "sdk"), status);
-    box.append(row("cost so far", estUsd(d?.cost_usd_estimate ?? p.costUsd, 3)), row("tokens today", p.tokensToday === null ? "—" : String(p.tokensToday)), costNote());
-    const storyId = ticketsNow[0]?.id ?? d?.recent?.[0]?.id ?? p.lastTicket;
-    if (storyId) box.append(button("act", ticketsNow[0] ? "Story of this ticket" : `Story of ${storyId}`, () => openData(storyView(storyId, open))));
-    const list = (title, items, draw) => {
-      box.append(heading("h4", `${title} (${items.length})`));
+    if (wait) box.append(el("p", "merge", `Finished. It stays at its desk until its work (${wait.branch}) is merged. Waiting ${ageText(Date.now() - Date.parse(wait.since))} so far.`));
+    const nameOf = (who) => (who === "owner" ? "You" : state.agents[who]?.role ?? who);
+    box.append(row("Team", d?.department ?? p.department ?? "Headquarters"), row("Reports to", p.parent ? nameOf(p.parent) : "—"), row("Cost so far", estUsd(d?.cost_usd_estimate ?? p.costUsd)), costNote());
+    const section = (title, items, draw) => {
+      box.append(heading("h4", title));
       const ul = el("ul", "tickets");
       for (const it of items) ul.append(draw(it));
       box.append(ul);
     };
-    list("Working on", ticketsNow, (t) => { const li = el("li"); li.append(el("span", null, `${t.status.replace(/_/g, " ")}: ${t.goal}`)); return li; });
-    const waiting = d?.waiting_for ?? Object.values(state.tickets).filter((t) => t.from === id);
-    if (waiting.length) list("Waiting for", waiting, (t) => el("li", null, `${t.to}: ${t.status.replace(/_/g, " ")}`));
+    // One piece of work: how it stands, what it is in a sentence or two, and the rest on request.
+    const workItem = (status, text, storyId) => {
+      const li = el("li", "work"), { short, whole } = plainText(text);
+      li.append(el("span", `tag ${ticketTone(status)}`, ticketWords(status)), el("p", null, short || "No description."));
+      const more = el("div", "more");
+      if (!whole) { const reveal = button("link", "Read more", () => { li.querySelector("p").textContent = plainText(text, Infinity).short; reveal.remove(); }); more.append(reveal); }
+      if (storyId) more.append(storyButton(storyId, "See the whole story", "link"));
+      if (more.children.length) li.append(more);
+      return li;
+    };
     const questions = d?.questions ?? Object.values(state.questions).filter((q) => q.question?.asked_by === id).map((q) => ({ id: q.id, text: q.question.questions?.[0]?.text ?? "" }));
-    if (questions.length) list("Asking you", questions, (q) => el("li", "ask", q.text));
-    if (d?.recent?.length) list("Recent results", d.recent, (t) => { const li = el("li", "withact"); li.append(el("span", null, `${t.status}: ${t.result ?? t.goal}`), storyButton(t.id)); return li; });
+    if (questions.length) section("It needs an answer from you", questions, (q) => el("li", "ask", q.text));
+    if (ticketsNow.length) section("What it is working on", ticketsNow, (t) => workItem(t.status, t.goal, t.id));
+    const waiting = d?.waiting_for ?? Object.values(state.tickets).filter((t) => t.from === id);
+    if (waiting.length) section("Who it is waiting for", waiting, (t) => { const li = el("li", "waits"); li.append(el("span", null, nameOf(t.to)), el("span", `tag ${ticketTone(t.status)}`, ticketWords(t.status))); return li; });
+    if (d?.recent?.length) section("What it did recently", d.recent.slice(0, 3), (t) => workItem(t.status, t.result ?? t.goal, t.id));
+    // The machinery, for when something looks wrong. Stays open across refreshes if the reader opened it.
+    const tech = el("details", "tech"); tech.open = !!open?.tech;
+    tech.ontoggle = () => { if (open?.agent === id) open.tech = tech.open; };
+    tech.append(el("summary", null, "Technical details"));
+    const status = row(a.kind === "worker" ? "Worker state" : "Status", agentStatus(state, id).replace(/_/g, " ")); status.dataset.status = "";
+    tech.append(row("Id", id), row("Model", d?.model ?? p.model ?? "—"), row("Runs on", d?.executor ?? p.executor ?? "sdk"), status, row("Tokens today", p.tokensToday === null ? "—" : String(p.tokensToday)));
+    const lastTicket = ticketsNow[0]?.id ?? d?.recent?.[0]?.id ?? p.lastTicket;
+    if (lastTicket) tech.append(row("Last ticket", lastTicket));
     const tools = d?.recent_tools ?? [];
-    box.append(heading("h4", "Last tools"));
+    tech.append(heading("h4", "Last tools"));
     const ul = el("ul", "actions");
     if (!tools.length) ul.append(el("li", "mute", "None recorded."));
     for (const t of tools) ul.append(el("li", null, `${t.decision === "allow" ? "" : `${t.decision}: `}${t.tool}`));
-    box.append(ul);
+    tech.append(ul);
+    box.append(tech);
   }
   let agentTimer = null;
   const agentSoon = () => { clearTimeout(agentTimer); agentTimer = setTimeout(() => refreshAgent(), 300); };
@@ -919,7 +934,7 @@ export function mountCity(root, { fetchImpl = fetch, events = document, snapshot
     box.append(holder);
     fillAgent(holder, id, {}); // what the city already knows, at once; the live read follows
     const form = el("form", "instruct");
-    const input = el("input"); input.placeholder = `@${id} …`; input.setAttribute("aria-label", `Direct instruction to ${id}`);
+    const input = el("input"); input.placeholder = "Tell it something…"; input.setAttribute("aria-label", `Direct instruction to ${id}`);
     const send = el("button", null, "Send"); send.type = "submit";
     const note = el("div", "mute");
     form.append(input, send, note);
