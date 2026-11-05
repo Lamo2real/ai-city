@@ -21,6 +21,8 @@ A Pipecat client of the shared Jarvis conversation. Spoken turns go to the same 
 cd jarvis/voice && uv run pytest
 ```
 
+CI runs these with the `pipeline` extra on macOS, with no audio devices, and skips one test: `test_main_reaches_a_running_pipeline` downloads Whisper, Kokoro and Piper, so it only runs locally.
+
 `tests/smoke_graph.py` runs the whole graph with no microphone or speaker: macOS `say` speaks into a fake mic, real Silero, smart-turn, Whisper, Kokoro and Piper run, and playback is captured to a WAV. It loads models and takes about three minutes, so pytest does not collect it.
 
 ```bash
