@@ -95,8 +95,13 @@ def test_played_audio_comes_out_of_the_engine():
     try:
         tone = (0.5 * np.sin(2 * np.pi * 440 * np.arange(2400) / 24000) * 32767).astype(np.int16)
         assert io.play(tone.tobytes())
-        out = io.render(2400)
-        assert abs(np.sqrt(np.mean(out**2)) - 0.5 / np.sqrt(2)) < 0.01
+        # The player node picks up a scheduled buffer on its own thread, so an offline render that
+        # lands first gets silence and the tone arrives one render late. Render until the whole
+        # tone has come out, then measure the tone itself.
+        out = np.concatenate([io.render(2400) for _ in range(4)])
+        voiced = out[np.flatnonzero(out)[0]:][:2400]
+        assert len(voiced) == 2400
+        assert abs(np.sqrt(np.mean(voiced**2)) - 0.5 / np.sqrt(2)) < 0.01
     finally:
         io.stop()
 
