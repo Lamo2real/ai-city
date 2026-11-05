@@ -451,6 +451,141 @@ test("old server: a snapshot without caps shows plain values and 'cap: unknown u
   await page.close();
 });
 
+// ---- Navigation and mobile ----
+const SIZES = { desktop: { width: 1440, height: 900 }, mobile: { width: 390, height: 844 } };
+const VIEWS = { home: "", chat: "#chatbtn", status: "#statusbtn", inbox: "#inboxbtn", city: "#citybtn" };
+async function openView(page, name) {
+  if (VIEWS[name]) await page.click(VIEWS[name]);
+  if (name === "city") await page.waitForSelector("#city[data-city-ready='1']", { timeout: 15000 });
+  if (name === "status") await page.waitForSelector("body.view-status #status");
+  if (name === "inbox") await page.waitForSelector("#inbox form.q");
+  await page.waitForTimeout(250);
+}
+const viewName = (page) => page.evaluate(() => [...document.body.classList].find((c) => c.startsWith("view-"))?.slice(5) ?? "home");
+
+test("walk: screenshots of every view at both sizes (before/after the nav work: NAV_SHOT=before)", { skip }, async () => {
+  const prefix = process.env.NAV_SHOT ?? "after";
+  for (const [size, viewport] of Object.entries(SIZES)) {
+    for (const name of Object.keys(VIEWS)) {
+      const page = await browser.newPage({ viewport });
+      await jsonRoute(page);
+      await page.goto(`http://localhost:${port}/`);
+      await openView(page, name);
+      await page.screenshot({ path: join(SHOTS, `nav-${prefix}-${size}-${name}.png`) });
+      await page.close();
+    }
+  }
+});
+
+const overflow = (page) => page.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth, wide: [...document.querySelectorAll("body *")].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && e.checkVisibility?.() && (r.right > innerWidth + 1 || r.left < -1) && !e.closest("#citytop,#citydepts,.srlist,canvas,.scan,.vignette,svg,#wave"); }).map((e) => `${e.tagName}#${e.id}.${e.className}`).slice(0, 5) }));
+
+test("phone: no sideways scroll in any view, and the dock is visible and reachable in every one", { skip }, async () => {
+  for (const name of Object.keys(VIEWS)) {
+    const page = await browser.newPage({ viewport: SIZES.mobile });
+    await jsonRoute(page);
+    await page.goto(`http://localhost:${port}/`);
+    await openView(page, name);
+    const o = await overflow(page);
+    assert.ok(o.scroll <= 390, `${name}: scrollWidth ${o.scroll}`);
+    assert.deepEqual(o.wide, [], `${name}: nothing sticks out of the screen`);
+    for (const id of ["chatbtn", "citybtn", "inboxbtn", "statusbtn", "mic"]) {
+      const box = await page.locator(`#dock #${id}`).boundingBox();
+      assert.ok(box && box.x >= 0 && box.x + box.width <= 390 && box.y + box.height <= 844, `${name}: ${id} is on screen`);
+      assert.ok(box.width >= 40 && box.height >= 40, `${name}: ${id} is a 40px target`);
+    }
+    const dock = await page.locator("#dock").boundingBox();
+    for (const sel of ["#cityinbox", "#cityfeed"]) {
+      if (name !== "city" || !(await page.isVisible(sel))) continue;
+      const b = await page.locator(sel).boundingBox();
+      assert.ok(b.y + b.height <= dock.y + 1, `${name}: ${sel} does not sit on the dock`);
+    }
+    await page.close();
+  }
+});
+
+test("desktop: the dock is visible in every view", { skip }, async () => {
+  for (const name of Object.keys(VIEWS)) {
+    const page = await browser.newPage({ viewport: SIZES.desktop });
+    await jsonRoute(page);
+    await page.goto(`http://localhost:${port}/`);
+    await openView(page, name);
+    assert.ok(await page.isVisible("#dock"), name);
+    for (const id of ["chatbtn", "citybtn", "inboxbtn", "statusbtn"]) assert.ok(await page.isVisible(`#dock #${id}`), `${name}: ${id}`);
+    await page.close();
+  }
+});
+
+test("phone Chat and Status: inputs are at least 16px and every control is a 40px target", { skip }, async () => {
+  for (const name of ["chat", "status", "inbox"]) {
+    const page = await browser.newPage({ viewport: SIZES.mobile });
+    await jsonRoute(page);
+    await page.goto(`http://localhost:${port}/`);
+    await openView(page, name);
+    const bad = await page.evaluate((view) => {
+      const root = document.querySelector({ chat: "#talk", status: "#status", inbox: "#inbox" }[view]);
+      const out = [];
+      for (const e of root.querySelectorAll("button,input,a[href]")) {
+        if (!e.checkVisibility?.()) continue;
+        const r = e.getBoundingClientRect();
+        if (e.tagName === "A") continue; // inline links sit in text
+        if (r.height < 39.5 || r.width < 39.5) out.push(`${e.tagName}#${e.id}.${e.className} ${Math.round(r.width)}x${Math.round(r.height)}`);
+        if (e.tagName === "INPUT" && parseFloat(getComputedStyle(e).fontSize) < 16) out.push(`${e.id} font ${getComputedStyle(e).fontSize}`);
+      }
+      return out;
+    }, name);
+    assert.deepEqual(bad, [], name);
+    await page.close();
+  }
+});
+
+test("Esc closes what is open on top, then goes Home", { skip }, async () => {
+  const page = await browser.newPage({ viewport: SIZES.mobile });
+  await jsonRoute(page);
+  await page.goto(`http://localhost:${port}/`);
+  for (const name of ["chat", "status", "inbox"]) {
+    await openView(page, name);
+    assert.equal(await viewName(page), name);
+    await page.keyboard.press("Escape");
+    assert.equal(await viewName(page), "home", `${name}: Esc goes Home`);
+    await page.keyboard.press("Escape");
+    assert.equal(await viewName(page), "home");
+  }
+  // City: detail panel first, then Home.
+  await openView(page, "city");
+  await page.click("#citydepts .dept[data-building='HQ']");
+  await page.waitForSelector("#citypanel:not([hidden])");
+  await page.keyboard.press("Escape");
+  await page.waitForSelector("#citypanel[hidden]", { state: "attached" });
+  assert.equal(await viewName(page), "city", "first Esc closes the panel only");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  assert.equal(await viewName(page), "home", "second Esc is Home");
+  await page.close();
+});
+
+test("long labels are cut with a title, never overflowing", { skip }, async () => {
+  const page = await browser.newPage({ viewport: SIZES.mobile });
+  const snap = citySnapshot(); snap.agents.push({ ...snap.agents.find((a) => a.id === "ios-dev"), id: "x-department-agent", department: "A-very-long-department-name-that-goes-on-and-on-and-on-forever", state: "active" });
+  await jsonRoute(page, snap);
+  await page.route("**/state.json", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ generatedAt: new Date().toISOString(), features: [{ id: "F-LONG", name: "A feature with a name so long it cannot possibly fit on one line of a phone", status: "production, with a very long note about its state" }], prs: [], ci: [], actions: [], log: [] }) }));
+  await page.goto(`http://localhost:${port}/`);
+  await openView(page, "status");
+  if (await page.$("#tab-booqy")) await page.click("#tab-booqy");
+  await page.waitForFunction(() => document.querySelector("#features").textContent.includes("F-LONG"));
+  const label = page.locator("#features .n").first();
+  assert.match(await label.getAttribute("title"), /F-LONG/);
+  assert.ok((await label.boundingBox()).x + (await label.boundingBox()).width <= 390);
+  const o = await overflow(page);
+  assert.ok(o.scroll <= 390, `scrollWidth ${o.scroll}`);
+  await page.close();
+  const city = await browser.newPage({ viewport: SIZES.mobile });
+  await jsonRoute(city, snap);
+  await city.goto(`http://localhost:${port}/?view=city`);
+  await city.waitForSelector("#city[data-city-ready='1']", { timeout: 15000 });
+  assert.equal(await city.getAttribute("#citydepts .dept[data-building='HQ']", "title"), "HQ");
+  await city.close();
+});
+
 // ---- What the backend now reports, in the City view ----
 const json = (body, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(body) });
 const NOTE = "Estimated value at API list prices. On the Claude subscription this is not a charge.";

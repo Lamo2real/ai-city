@@ -1436,11 +1436,14 @@ export function createCity(opts: CityOptions) {
     // Everything the City View needs to draw the current state before events arrive.
     snapshot: () => {
       const agents = ledger.agents();
-      const departments = [...new Set(agents.map((a) => a.department).filter((d): d is string => !!d))];
+      // Choice: the snapshot is keyed by the first-seen spelling per departmentKey ("IT", "it ", " IT" are one entry); spend sums all spellings.
+      const first = new Map<string, string>();
+      for (const a of agents) if (a.department && !first.has(departmentKey(a.department))) first.set(departmentKey(a.department), a.department);
+      const departments = [...first.values()];
       return { agents, activities: Object.fromEntries(activities), departments: ledger.departments().filter((d) => d.state !== "deleted"), parked: ledger.ticketsByStatus("parked"), city: { paused_until: gate.paused ? new Date(gate.paused).toISOString() : null, turns_running: gate.active, turns_waiting: gate.waiting }, tickets: ledger.ticketsByStatus("open", "in_progress", "in_review", "waiting_on_owner"), questions: ledger.openQuestions(), usage: ledger.usageToday(), spend: Object.fromEntries(departments.map((d) => [d, ledger.spendToday(d)])),
         // The limits the city enforces, read from the loaded policy each time so the HUD never hardcodes them.
         // department_agents: active (non-core) agents against the cap, per department; the HUD draws "active / cap".
-        department_agents: Object.fromEntries(departments.map((d) => [d, { active: agents.filter((a) => a.kind !== "core" && a.state === "active" && a.department === d).length, cap: departmentCap(policy, d) }])),
+        department_agents: Object.fromEntries(departments.map((d) => [d, { active: agents.filter((a) => a.kind !== "core" && a.state === "active" && !!a.department && departmentKey(a.department) === departmentKey(d)).length, cap: departmentCap(policy, d) }])),
         caps: { max_active_agents_per_department: policy.caps.max_active_agents_per_department, department_caps: policy.caps.department_caps ?? {}, max_workers_per_manager: policy.caps.max_workers_per_manager, daily_spend_usd_per_department: policy.caps.daily_spend_usd_per_department, max_review_rounds: policy.caps.max_review_rounds } };
     },
     // The last n things an agent did, from the policy gate's audit log.
